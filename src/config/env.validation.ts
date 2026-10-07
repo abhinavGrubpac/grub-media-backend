@@ -46,8 +46,15 @@ export class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  APP_NAME?: string;
+
+  @IsOptional()
+  @IsString()
   LOG_LEVEL?: string;
 
+  // THROTTLE_* are intentionally optional: they have safe operational defaults
+  // defined canonically in src/config/throttle.config.ts. Validation here only
+  // ensures that IF provided they are integers. (Reviewed: T2 finding F1.)
   @IsOptional()
   @IsInt()
   THROTTLE_TTL?: number;

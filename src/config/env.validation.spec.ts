@@ -37,7 +37,12 @@ describe('validate', () => {
     expect(() => validate({ ...base, NODE_ENV: 'staging' })).toThrow();
   });
 
-  it('allows optional REDIS_PASSWORD and LOG_LEVEL to be absent', () => {
-    expect(() => validate(base)).not.toThrow();
+  it('throws when JWT_REFRESH_SECRET too short', () => {
+    expect(() => validate({ ...base, JWT_REFRESH_SECRET: 'short' })).toThrow();
+  });
+
+  it('accepts env when optional REDIS_PASSWORD/LOG_LEVEL are explicitly empty/undefined', () => {
+    const result = validate({ ...base, REDIS_PASSWORD: '', LOG_LEVEL: undefined });
+    expect(result.REDIS_HOST).toBe('localhost');
   });
 });
