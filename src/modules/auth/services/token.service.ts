@@ -22,8 +22,17 @@ const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Issues access tokens and manages DB-persisted, argon2-hashed, rotating refresh
- * tokens. Rotation revokes the old session and, on reuse of an already-rotated
- * token, revokes the entire session family (likely token theft).
+ * tokens.
+ *
+ * Refresh token format: `${sessionId}.${secret}`. Only the argon2 hash of the
+ * secret is stored; the sessionId is the (non-sensitive) primary-key selector,
+ * giving an O(1) lookup + a single argon2 verify per refresh (no global scan).
+ *
+ * Rotation is atomic: the presented session is revoked with a conditional
+ * `updateMany(... revokedAt: null)` BEFORE a new pair is issued. If that update
+ * affects zero rows the token was already rotated — treated as reuse/theft, and
+ * the entire session family is revoked (and tokenVersion bumped) so outstanding
+ * access tokens die immediately.
  */
 @Injectable()
 export class TokenService {
@@ -44,10 +53,17 @@ export class TokenService {
     );
   }
 
+  private assertActive(user: Pick<User, 'deletedAt' | 'status'>): void {
+    if (user.deletedAt || user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Account is not active');
+    }
+  }
+
   async issuePair(user: SessionUser, ctx: SessionCtx): Promise<TokenPair> {
-    const refreshToken = randomBytes(32).toString('base64url');
-    const hashedToken = await argon2.hash(refreshToken, { type: argon2.argon2id });
-    await this.prisma.client.session.create({
+    this.assertActive(user); // defense-in-depth: never mint tokens for a disabled user
+    const secret = randomBytes(32).toString('base64url');
+    const hashedToken = await argon2.hash(secret, { type: argon2.argon2id });
+    const session = await this.prisma.client.session.create({
       data: {
         userId: user.id,
         hashedToken,
@@ -57,49 +73,64 @@ export class TokenService {
       },
     });
     const accessToken = await this.signAccess(user);
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken: `${session.id}.${secret}` };
   }
 
   async rotate(presentedToken: string, ctx: SessionCtx): Promise<TokenPair & { userId: string }> {
-    const candidates = await this.prisma.client.session.findMany({
-      where: { expiresAt: { gt: new Date() } },
-      include: { user: true },
-    });
-
-    let match: (typeof candidates)[number] | undefined;
-    for (const session of candidates) {
-      if (await argon2.verify(session.hashedToken, presentedToken)) {
-        match = session;
-        break;
-      }
+    const sep = presentedToken.indexOf('.');
+    if (sep < 1) {
+      throw new UnauthorizedException('Invalid refresh token');
     }
-    if (!match) {
+    const sessionId = presentedToken.slice(0, sep);
+    const secret = presentedToken.slice(sep + 1);
+    if (!secret) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    // Reuse of an already-rotated/revoked token => likely theft: nuke the family.
-    if (match.revokedAt) {
-      await this.revokeAllForUser(match.userId);
+    const session = await this.prisma.client.session.findFirst({
+      where: { id: sessionId },
+      include: { user: true },
+    });
+    if (!session || !(await argon2.verify(session.hashedToken, secret))) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Atomic single-use revoke. Zero rows affected => already rotated => reuse.
+    // This runs regardless of expiry, so a stolen-and-expired token is still
+    // caught as reuse rather than silently failing.
+    const revoked = await this.prisma.client.session.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count === 0) {
+      await this.revokeAllForUser(session.userId);
       throw new UnauthorizedException('Refresh token reuse detected');
     }
 
-    const user = match.user;
-    if (user.deletedAt || user.status !== UserStatus.ACTIVE) {
-      throw new UnauthorizedException('Account is not active');
+    if (session.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('Refresh token expired');
     }
+    this.assertActive(session.user); // R4: no rotation for soft-deleted/inactive users
 
-    const pair = await this.issuePair(user, ctx);
-    await this.prisma.client.session.update({
-      where: { id: match.id },
-      data: { revokedAt: new Date() },
-    });
-    return { ...pair, userId: match.userId };
+    const pair = await this.issuePair(session.user, ctx);
+    return { ...pair, userId: session.userId };
   }
 
+  /**
+   * Revoke every live session for a user AND bump tokenVersion in one
+   * transaction, so outstanding access tokens immediately fail JwtStrategy.
+   * Used by logout and by reuse/theft response.
+   */
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.client.session.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.prisma.client.$transaction([
+      this.prisma.client.user.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+      this.prisma.client.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
   }
 }
