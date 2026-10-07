@@ -16,8 +16,14 @@ export function applyNotDeleted(where: Prisma.UserWhereInput | undefined): Prism
  * operations. ALWAYS use `prisma.client.*` (not `prisma.*`) for data access so
  * the soft-delete guard applies.
  *
- * Note: `findUnique` is intentionally NOT guarded (its `where` only accepts
- * unique fields). Application code reads soft-deletable users via `findFirst`.
+ * Guarded (soft-delete filter applied): `findMany`, `findFirst`,
+ * `findFirstOrThrow`, `count`.
+ *
+ * NOT guarded: `findUnique` and `findUniqueOrThrow` — their `where` accepts
+ * only unique fields, so `deletedAt` cannot be injected. To read a user that
+ * may be soft-deletable, use `findFirst`/`findFirstOrThrow` (never the
+ * unique-by-id variants); those bypass the guard by design and will return
+ * soft-deleted rows.
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -31,6 +37,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
           return query(args);
         },
         findFirst({ args, query }) {
+          args.where = applyNotDeleted(args.where);
+          return query(args);
+        },
+        findFirstOrThrow({ args, query }) {
           args.where = applyNotDeleted(args.where);
           return query(args);
         },
