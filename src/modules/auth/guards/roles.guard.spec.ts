@@ -52,4 +52,24 @@ describe('RolesGuard', () => {
     const guard = new RolesGuard(reflectorFor({ [PERMISSIONS_KEY]: ['users.delete'] }));
     expect(guard.canActivate(ctx({ role: UserRole.ADMIN }))).toBe(true);
   });
+
+  it('with BOTH role and permission required, denies when the role passes but permission is missing', () => {
+    // EMPLOYEE satisfies no role list here; use a role match but missing permission:
+    const guard = new RolesGuard(
+      reflectorFor({ [ROLES_KEY]: [UserRole.EMPLOYEE], [PERMISSIONS_KEY]: ['users.delete'] }),
+    );
+    expect(guard.canActivate(ctx({ role: UserRole.EMPLOYEE }))).toBe(false);
+  });
+
+  it('with BOTH role and permission required, allows only when both pass', () => {
+    const guard = new RolesGuard(
+      reflectorFor({ [ROLES_KEY]: [UserRole.ADMIN], [PERMISSIONS_KEY]: ['users.delete'] }),
+    );
+    expect(guard.canActivate(ctx({ role: UserRole.ADMIN }))).toBe(true);
+  });
+
+  it('denies a role not present in the ROLE_PERMISSIONS map (unknown role → empty grants)', () => {
+    const guard = new RolesGuard(reflectorFor({ [PERMISSIONS_KEY]: ['users.read'] }));
+    expect(guard.canActivate(ctx({ role: 'GUEST' as UserRole }))).toBe(false);
+  });
 });
