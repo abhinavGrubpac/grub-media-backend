@@ -84,6 +84,32 @@ describe('UsersService', () => {
     );
   });
 
+  it('update maps only known fields and never forwards a smuggled password', async () => {
+    const update = jest.fn().mockResolvedValue(userRow);
+    const svc = new UsersService(
+      prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
+    );
+    await svc.update(
+      'u1',
+      { firstName: 'New', password: 'x', passwordHash: 'y' } as never,
+      'admin',
+    );
+    const data = update.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('password');
+    expect(data).not.toHaveProperty('passwordHash');
+    expect(data.firstName).toBe('New');
+    expect(data.updatedBy).toBe('admin');
+  });
+
+  it('setStatus sends only the status field', async () => {
+    const update = jest.fn().mockResolvedValue(userRow);
+    const svc = new UsersService(
+      prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
+    );
+    await svc.setStatus('u1', 'SUSPENDED' as never);
+    expect(update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { status: 'SUSPENDED' } });
+  });
+
   it('findByEmailWithHash returns the raw row (includes hash) for auth use', async () => {
     const svc = new UsersService(prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow) }));
     const row = await svc.findByEmailWithHash('a@b.c');

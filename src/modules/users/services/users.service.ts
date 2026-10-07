@@ -11,7 +11,7 @@ import {
 } from '../../../common/exceptions/domain.exceptions';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
-import { UserQueryDto } from '../dto/user-query.dto';
+import { UserQueryDto, USER_SORTABLE_FIELDS, UserSortField } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 
 @Injectable()
@@ -53,7 +53,12 @@ export class UsersService {
   async list(query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
     const where = { role: query.role, status: query.status };
     const { skip, take } = toSkipTake(query);
-    const orderBy = { [query.sortBy ?? 'createdAt']: query.sortOrder };
+    // Authoritatively allowlist the sort column — never pass an arbitrary
+    // client string to Prisma orderBy (would 500 / leak schema internals).
+    const sortField: UserSortField = USER_SORTABLE_FIELDS.includes(query.sortBy as UserSortField)
+      ? (query.sortBy as UserSortField)
+      : 'createdAt';
+    const orderBy = { [sortField]: query.sortOrder };
     const [rows, total] = await Promise.all([
       this.prisma.client.user.findMany({ where, skip, take, orderBy }),
       this.prisma.client.user.count({ where }),
@@ -66,9 +71,18 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto, actorId: string): Promise<UserResponseDto> {
     await this.getOrThrow(id);
+    // Map known fields explicitly — never spread the DTO straight into Prisma,
+    // so an unexpected key (e.g. a smuggled `password`/`role` escalation) can
+    // never reach the database even if upstream validation is misconfigured.
     const user = await this.prisma.client.user.update({
       where: { id },
-      data: { ...dto, updatedBy: actorId },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: dto.role,
+        status: dto.status,
+        updatedBy: actorId,
+      },
     });
     return this.toDto(user);
   }
