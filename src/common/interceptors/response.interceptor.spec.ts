@@ -34,6 +34,15 @@ describe('ResponseInterceptor', () => {
     expect(result).toEqual({ success: true, message: 'Success', data: [1, 2], meta: { page: 1 } });
   });
 
+  it('does NOT treat a plain {data,meta} object as paginated unless data is an array', async () => {
+    const reflector = { getAllAndOverride: () => undefined } as never;
+    const interceptor = new ResponseInterceptor(reflector);
+    const payload = { data: { id: 'u1' }, meta: { note: 'not pagination' } };
+    const next = { handle: () => of(payload) };
+    const result = await lastValueFrom(interceptor.intercept(ctx(), next as never));
+    expect(result).toEqual({ success: true, message: 'Success', data: payload });
+  });
+
   it('wraps null payloads as data:null', async () => {
     const reflector = { getAllAndOverride: () => 'done' } as never;
     const interceptor = new ResponseInterceptor(reflector);

@@ -10,8 +10,16 @@ export interface ApiSuccessResponse<T> {
   meta?: unknown;
 }
 
-function isPaginated(payload: unknown): payload is { data: unknown; meta: unknown } {
-  return typeof payload === 'object' && payload !== null && 'data' in payload && 'meta' in payload;
+function isPaginated(payload: unknown): payload is { data: unknown[]; meta: unknown } {
+  // Require `data` to be an array so a non-paginated object that merely happens
+  // to carry `data`/`meta` keys is NOT mistaken for a paginated result.
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'meta' in payload &&
+    'data' in payload &&
+    Array.isArray((payload as { data: unknown }).data)
+  );
 }
 
 /**

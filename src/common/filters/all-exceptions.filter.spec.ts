@@ -1,5 +1,7 @@
+import { HttpException } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
 import { AllExceptionsFilter } from './all-exceptions.filter';
+import { EmailAlreadyExistsException } from '../exceptions/domain.exceptions';
 
 function host(holder: { code?: number; body?: Record<string, unknown> }) {
   const res = {
@@ -67,6 +69,33 @@ describe('AllExceptionsFilter', () => {
     new AllExceptionsFilter().catch(err, host(holder));
     expect(holder.code).toBe(404);
     expect(holder.body?.errorCode).toBe('NOT_FOUND');
+  });
+
+  it('maps a 429 HttpException (no errorCode in body) to TOO_MANY_REQUESTS', () => {
+    const holder: { code?: number; body?: Record<string, unknown> } = {};
+    new AllExceptionsFilter().catch(new HttpException('rate limited', 429), host(holder));
+    expect(holder.code).toBe(429);
+    expect(holder.body?.errorCode).toBe('TOO_MANY_REQUESTS');
+  });
+
+  it('preserves a domain exception errorCode end to end (EmailAlreadyExists → CONFLICT)', () => {
+    const holder: { code?: number; body?: Record<string, unknown> } = {};
+    new AllExceptionsFilter().catch(new EmailAlreadyExistsException(), host(holder));
+    expect(holder.code).toBe(409);
+    expect(holder.body?.errorCode).toBe('CONFLICT');
+    expect(holder.body?.message).toBe('Email already in use');
+  });
+
+  it('falls back to a generic 500 for an unrecognised Prisma error code', () => {
+    const holder: { code?: number; body?: Record<string, unknown> } = {};
+    const err = Object.assign(new Error('fk violation'), {
+      code: 'P2003',
+      clientVersion: '6',
+      name: 'PrismaClientKnownRequestError',
+    });
+    new AllExceptionsFilter().catch(err, host(holder));
+    expect(holder.code).toBe(500);
+    expect(holder.body?.errorCode).toBe('INTERNAL_ERROR');
   });
 
   it('hides unexpected errors as a generic 500 (no internal detail leaked)', () => {

@@ -123,6 +123,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   private statusToCode(status: number): string {
-    return STATUS_TO_CODE[status] ?? ERROR_CODES.INTERNAL_ERROR;
+    if (STATUS_TO_CODE[status]) {
+      return STATUS_TO_CODE[status];
+    }
+    // Unmapped client errors are still client errors, not internal failures.
+    return status >= 400 && status < 500 ? ERROR_CODES.BAD_REQUEST : ERROR_CODES.INTERNAL_ERROR;
   }
 }
