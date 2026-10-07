@@ -66,6 +66,42 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsInt()
   THROTTLE_LOGIN_LOCK_MAX?: number;
+
+  // KAFKA (Redpanda-compatible broker). All optional: safe local defaults live
+  // canonically in src/config/kafka.config.ts; SASL enables TLS when present.
+  @IsOptional()
+  @IsString()
+  REDPANDA_BROKERS?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_USERNAME?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_PASSWORD?: string;
+
+  // STORAGE (S3 media bucket). All optional: absent credentials switch the
+  // storage layer to local mock mode (see src/config/storage.config.ts).
+  @IsOptional()
+  @IsString()
+  AWS_S3_BUCKET?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_ACCESS_KEY_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_SECRET_ACCESS_KEY?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {
