@@ -41,6 +41,35 @@ describe('RedisService', () => {
     expect(fake.set).toHaveBeenLastCalledWith('k2', 'v2');
   });
 
+  it('increment throws when the INCR command errored (never reads as 0)', async () => {
+    const commandError = new Error('WRONGTYPE');
+    const fake = {
+      multi: jest.fn().mockReturnThis(),
+      incr: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([
+        [commandError, null],
+        [null, 1],
+      ]),
+    };
+    const service = new RedisService(fake as never);
+    await expect(service.increment('k', 60)).rejects.toBe(commandError);
+  });
+
+  it('get delegates to the client', async () => {
+    const fake = { get: jest.fn().mockResolvedValue('v') };
+    const service = new RedisService(fake as never);
+    await expect(service.get('k')).resolves.toBe('v');
+    expect(fake.get).toHaveBeenCalledWith('k');
+  });
+
+  it('del delegates to the client', async () => {
+    const fake = { del: jest.fn().mockResolvedValue(1) };
+    const service = new RedisService(fake as never);
+    await service.del('k');
+    expect(fake.del).toHaveBeenCalledWith('k');
+  });
+
   it('ping delegates to the client', async () => {
     const fake = { ping: jest.fn().mockResolvedValue('PONG') };
     const service = new RedisService(fake as never);
