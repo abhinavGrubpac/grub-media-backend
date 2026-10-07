@@ -38,10 +38,19 @@ describe('RequestIdMiddleware', () => {
     );
   });
 
-  it('generates a uuid when no header is present', () => {
+  it('generates a uuid when no header is present and echoes it', () => {
     const req = { headers: {} } as never;
     const setHeader = jest.fn();
     new RequestIdMiddleware().use(req, { setHeader } as never, jest.fn());
-    expect((req as { id: string }).id).toHaveLength(36);
+    const id = (req as { id: string }).id;
+    expect(id).toHaveLength(36);
+    expect(setHeader).toHaveBeenCalledWith('X-Request-ID', id);
+  });
+
+  it('uses the first value when the header is delivered as an array', () => {
+    const req = { headers: { 'x-request-id': ['valid_id_abc', 'other'] } } as never;
+    const setHeader = jest.fn();
+    new RequestIdMiddleware().use(req, { setHeader } as never, jest.fn());
+    expect((req as { id: string }).id).toBe('valid_id_abc');
   });
 });
