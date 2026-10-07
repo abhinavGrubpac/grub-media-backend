@@ -24,4 +24,17 @@ describe('buildMeta', () => {
   it('returns totalPages 0 when there are no rows', () => {
     expect(buildMeta(0, 1, 20)).toEqual({ page: 1, limit: 20, total: 0, totalPages: 0 });
   });
+
+  it('guards against a zero limit (no divide-by-zero)', () => {
+    expect(buildMeta(50, 1, 0)).toEqual({ page: 1, limit: 0, total: 50, totalPages: 0 });
+  });
+});
+
+describe('PaginationQueryDto defaults', () => {
+  it('defaults page=1, limit=20, sortOrder=desc', () => {
+    const d = new PaginationQueryDto();
+    expect(d.page).toBe(1);
+    expect(d.limit).toBe(20);
+    expect(d.sortOrder).toBe('desc');
+  });
 });
