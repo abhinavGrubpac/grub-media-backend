@@ -58,7 +58,7 @@ Validated on boot (`src/config/env.validation.ts`); the app refuses to start if 
 | `DATABASE_URL` | Postgres connection string |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | ≥32 chars |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | e.g. `15m` / `7d` |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | optional — app runs degraded without Redis (no shared throttle/lockout) |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | host/port configured (defaults localhost:6379); an UNREACHABLE Redis is tolerated — the app degrades gracefully (brute-force lockout + shared throttle become best-effort), it does not crash |
 | `CORS_ORIGINS` | comma-separated allowlist |
 | `LOG_LEVEL` | pino level |
 | `THROTTLE_TTL` / `THROTTLE_LIMIT` / `THROTTLE_LOGIN_LOCK_MAX` | rate-limit window (ms) / limit / failed-login lockout |
@@ -102,9 +102,10 @@ See `docs/api-guidelines.md`.
 ```bash
 docker compose up -d --build
 docker compose exec app npx prisma migrate deploy
-docker compose exec app npm run prisma:seed
+# seed uses the COMPILED seed in the runtime image (ts-node is not shipped):
+docker compose exec -e SEED_SUPER_ADMIN_EMAIL=admin@grubpac.com -e SEED_SUPER_ADMIN_PASSWORD='Str0ngPass1' app npm run prisma:seed:prod
 ```
-Multi-stage build, runs as non-root, `HEALTHCHECK` on `/api/health`.
+Multi-stage build, runs as non-root, `HEALTHCHECK` on `/api/health`. (`npm run prisma:seed` uses ts-node for local dev; the container uses the compiled `prisma:seed:prod`.)
 
 ## Postman
 Import `postman/collection.json` + `postman/environment.json`. Login auto-captures `{{accessToken}}`/`{{refreshToken}}`; the collection sends the bearer token automatically.

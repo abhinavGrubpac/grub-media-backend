@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && tsc -p tsconfig.seed.json",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
@@ -23,6 +23,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:prod": "node dist/prisma/seed.js",
     "prisma:studio": "prisma studio",
     "prepare": "husky"
   },
