@@ -1,0 +1,9 @@
+{
+  "name": "grub-media-backend (local)",
+  "values": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "enabled": true },
+    { "key": "accessToken", "value": "", "enabled": true },
+    { "key": "refreshToken", "value": "", "enabled": true }
+  ],
+  "_postman_variable_scope": "environment"
+}
