@@ -86,4 +86,44 @@ describe('AuthService.login', () => {
       InvalidCredentialsException,
     );
   });
+
+  it('rejects an INACTIVE (suspended) user', async () => {
+    const { svc } = build({ user: { ...userRow, status: 'SUSPENDED' } });
+    await expect(svc.login({ email: 'a@b.c', password: 'x' }, {})).rejects.toBeInstanceOf(
+      InvalidCredentialsException,
+    );
+  });
+});
+
+describe('AuthService.refresh / logout / me', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('refresh delegates to TokenService.rotate and returns the new pair', async () => {
+    const { svc, tokens } = build({});
+    (tokens as never as { rotate: jest.Mock }).rotate.mockResolvedValue({
+      accessToken: 'a2',
+      refreshToken: 'r2',
+      userId: 'u1',
+    });
+    const res = await svc.refresh('sid.secret', { ip: '1.1.1.1' });
+    expect(res).toEqual({ accessToken: 'a2', refreshToken: 'r2' });
+    expect((tokens as never as { rotate: jest.Mock }).rotate).toHaveBeenCalledWith('sid.secret', {
+      ip: '1.1.1.1',
+    });
+  });
+
+  it('logout revokes all sessions for the user', async () => {
+    const { svc, tokens } = build({});
+    await svc.logout('u1');
+    expect(
+      (tokens as never as { revokeAllForUser: jest.Mock }).revokeAllForUser,
+    ).toHaveBeenCalledWith('u1');
+  });
+
+  it('me returns the current user DTO by id', async () => {
+    const { svc, users } = build({});
+    const res = await svc.me('u1');
+    expect(res).toEqual({ id: 'u1' });
+    expect((users as never as { findById: jest.Mock }).findById).toHaveBeenCalledWith('u1');
+  });
 });
