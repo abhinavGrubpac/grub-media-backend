@@ -8,6 +8,7 @@ import {
 } from '@nestjs/terminus';
 import { PrismaService } from '../../database/prisma.service';
 import { Public } from '../auth/decorators/public.decorator';
+import { SkipResponseWrap } from '../../common/decorators/skip-response-wrap.decorator';
 import { RedisHealthIndicator } from './redis.health';
 
 /**
@@ -25,6 +26,7 @@ export class HealthController {
   ) {}
 
   @Public()
+  @SkipResponseWrap()
   @Get(['health', 'v1/health'])
   @HealthCheck()
   @ApiOperation({ summary: 'Liveness/readiness check (database + redis)' })

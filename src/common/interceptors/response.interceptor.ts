@@ -2,6 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import { Reflector } from '@nestjs/core';
 import { map, Observable } from 'rxjs';
 import { RESPONSE_MESSAGE } from '../decorators/response-message.decorator';
+import { SKIP_RESPONSE_WRAP } from '../decorators/skip-response-wrap.decorator';
 
 export interface ApiSuccessResponse<T> {
   success: true;
@@ -28,13 +29,21 @@ function isPaginated(payload: unknown): payload is { data: unknown[]; meta: unkn
  * lifted; everything else becomes `data`. The message comes from @ResponseMessage.
  */
 @Injectable()
-export class ResponseInterceptor<T> implements NestInterceptor<T, ApiSuccessResponse<unknown>> {
+export class ResponseInterceptor<T> implements NestInterceptor<T, ApiSuccessResponse<unknown> | T> {
   constructor(private readonly reflector: Reflector) {}
 
   intercept(
     context: ExecutionContext,
     next: CallHandler<T>,
-  ): Observable<ApiSuccessResponse<unknown>> {
+  ): Observable<ApiSuccessResponse<unknown> | T> {
+    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_RESPONSE_WRAP, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (skip) {
+      return next.handle();
+    }
+
     const message =
       this.reflector.getAllAndOverride<string>(RESPONSE_MESSAGE, [
         context.getHandler(),

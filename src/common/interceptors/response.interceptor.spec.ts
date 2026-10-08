@@ -11,7 +11,9 @@ function ctx() {
 
 describe('ResponseInterceptor', () => {
   it('wraps plain data with the @ResponseMessage value', async () => {
-    const reflector = { getAllAndOverride: () => 'OK msg' } as never;
+    const reflector = {
+      getAllAndOverride: (key: string) => (key === 'response_message' ? 'OK msg' : undefined),
+    } as never;
     const interceptor = new ResponseInterceptor(reflector);
     const next = { handle: () => of({ id: '1' }) };
     const result = await lastValueFrom(interceptor.intercept(ctx(), next as never));
@@ -43,8 +45,21 @@ describe('ResponseInterceptor', () => {
     expect(result).toEqual({ success: true, message: 'Success', data: payload });
   });
 
+  it('returns the payload verbatim when @SkipResponseWrap is set', async () => {
+    const reflector = {
+      getAllAndOverride: (key: string) => key === 'skip_response_wrap',
+    } as never;
+    const interceptor = new ResponseInterceptor(reflector);
+    const terminusShape = { status: 'ok', info: {}, details: {} };
+    const next = { handle: () => of(terminusShape) };
+    const result = await lastValueFrom(interceptor.intercept(ctx(), next as never));
+    expect(result).toBe(terminusShape);
+  });
+
   it('wraps null payloads as data:null', async () => {
-    const reflector = { getAllAndOverride: () => 'done' } as never;
+    const reflector = {
+      getAllAndOverride: (key: string) => (key === 'response_message' ? 'done' : undefined),
+    } as never;
     const interceptor = new ResponseInterceptor(reflector);
     const next = { handle: () => of(null) };
     const result = await lastValueFrom(interceptor.intercept(ctx(), next as never));
