@@ -30,6 +30,13 @@ describe('UsersController (thin delegation)', () => {
     expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith('u1');
   });
 
+  it('findOne delegates to findById', async () => {
+    const service = { findById: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
+    const ctrl = new UsersController(service);
+    await ctrl.findOne('u1');
+    expect((service as { findById: jest.Mock }).findById).toHaveBeenCalledWith('u1');
+  });
+
   it('update forwards id, dto and actor id', async () => {
     const service = { update: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
     const ctrl = new UsersController(service);
