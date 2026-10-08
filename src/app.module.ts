@@ -35,8 +35,6 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
       useFactory: (config: ConfigService) => ({
         pinoHttp: {
           level: config.get<string>('LOG_LEVEL') ?? 'info',
-          // Reuse the correlation id set by RequestIdMiddleware (falls back to a
-          // fresh uuid if pino runs first). See request-id middleware for format.
           genReqId: (req: IncomingMessage): string => {
             const existing = (req as unknown as { id?: unknown }).id;
             if (typeof existing === 'string') {
@@ -63,15 +61,20 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService, REDIS_CLIENT],
-      useFactory: (config: ConfigService, redis: Redis) => ({
-        throttlers: [
-          {
-            ttl: config.get<number>('throttle.ttl', 60000),
-            limit: config.get<number>('throttle.limit', 100),
-          },
-        ],
-        storage: new ThrottlerStorageRedisService(redis),
-      }),
+      useFactory: (config: ConfigService, redis: Redis | null) => {
+        // Use Redis storage if available, otherwise use in-memory fallback
+        const storage = redis ? new ThrottlerStorageRedisService(redis) : undefined;
+
+        return {
+          throttlers: [
+            {
+              ttl: config.get<number>('throttle.ttl', 60000),
+              limit: config.get<number>('throttle.limit', 100),
+            },
+          ],
+          storage,
+        };
+      },
     }),
     PrismaModule,
     RedisModule,

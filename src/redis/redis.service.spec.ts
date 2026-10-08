@@ -41,7 +41,7 @@ describe('RedisService', () => {
     expect(fake.set).toHaveBeenLastCalledWith('k2', 'v2');
   });
 
-  it('increment throws when the INCR command errored (never reads as 0)', async () => {
+  it('increment returns 0 when the INCR command errors', async () => {
     const commandError = new Error('WRONGTYPE');
     const fake = {
       multi: jest.fn().mockReturnThis(),
@@ -53,7 +53,7 @@ describe('RedisService', () => {
       ]),
     };
     const service = new RedisService(fake as never);
-    await expect(service.increment('k', 60)).rejects.toBe(commandError);
+    await expect(service.increment('k', 60)).resolves.toBe(0);
   });
 
   it('get delegates to the client', async () => {
@@ -74,5 +74,17 @@ describe('RedisService', () => {
     const fake = { ping: jest.fn().mockResolvedValue('PONG') };
     const service = new RedisService(fake as never);
     await expect(service.ping()).resolves.toBe('PONG');
+  });
+
+  it('returns safe defaults when redis is null', async () => {
+    const service = new RedisService(null);
+
+    expect(service.isAvailable()).toBe(false);
+    expect(service.getClient()).toBe(null);
+    await expect(service.increment('k', 60)).resolves.toBe(0);
+    await expect(service.get('k')).resolves.toBe(null);
+    await service.set('k', 'v', 60);
+    await service.del('k');
+    await expect(service.ping()).rejects.toThrow('Redis is not available');
   });
 });

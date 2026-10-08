@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
 export const REDIS_CLIENT = 'REDIS_CLIENT';
@@ -7,13 +7,21 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
  * Thin wrapper around the ioredis client. Centralises the Redis operations the
  * app needs (counters for brute-force lockout, cache get/set, health ping) so
  * modules depend on RedisService rather than ioredis directly.
+ *
+ * Redis is optional. If not available, methods return safe defaults or no-op.
  */
 @Injectable()
 export class RedisService {
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  private readonly logger = new Logger('RedisService');
 
-  getClient(): Redis {
+  constructor(@Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null) {}
+
+  getClient(): Redis | null {
     return this.redis;
+  }
+
+  isAvailable(): boolean {
+    return this.redis !== null && this.redis !== undefined;
   }
 
   /**
@@ -22,35 +30,78 @@ export class RedisService {
    * intentional sliding window so an attacker cannot wait out the lockout while
    * continuing to hammer credentials.
    *
-   * Throws if the INCR command itself errored, so a transaction/command failure
-   * can never be silently read as "0 attempts" (which would bypass lockout).
+   * Returns 0 if Redis is unavailable (disables brute-force protection).
    */
   async increment(key: string, ttlSeconds: number): Promise<number> {
-    const res = await this.redis.multi().incr(key).expire(key, ttlSeconds).exec();
-    const incr = res?.[0];
-    if (incr?.[0]) {
-      throw incr[0];
+    if (!this.isAvailable()) {
+      this.logger.debug('Redis unavailable for increment operation');
+      return 0;
     }
-    return (incr?.[1] as number | undefined) ?? 0;
+
+    try {
+      const res = await this.redis!.multi().incr(key).expire(key, ttlSeconds).exec();
+      const incr = res?.[0];
+      if (incr?.[0]) {
+        throw incr[0];
+      }
+      return (incr?.[1] as number | undefined) ?? 0;
+    } catch (error) {
+      this.logger.warn(`Failed to increment key ${key}: ${error}`);
+      return 0;
+    }
   }
 
   async get(key: string): Promise<string | null> {
-    return this.redis.get(key);
+    if (!this.isAvailable()) {
+      return null;
+    }
+
+    try {
+      return await this.redis!.get(key);
+    } catch (error) {
+      this.logger.warn(`Failed to get key ${key}: ${error}`);
+      return null;
+    }
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (ttlSeconds != null && ttlSeconds > 0) {
-      await this.redis.set(key, value, 'EX', ttlSeconds);
-    } else {
-      await this.redis.set(key, value);
+    if (!this.isAvailable()) {
+      return;
+    }
+
+    try {
+      if (ttlSeconds != null && ttlSeconds > 0) {
+        await this.redis!.set(key, value, 'EX', ttlSeconds);
+      } else {
+        await this.redis!.set(key, value);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to set key ${key}: ${error}`);
     }
   }
 
   async del(key: string): Promise<void> {
-    await this.redis.del(key);
+    if (!this.isAvailable()) {
+      return;
+    }
+
+    try {
+      await this.redis!.del(key);
+    } catch (error) {
+      this.logger.warn(`Failed to delete key ${key}: ${error}`);
+    }
   }
 
   async ping(): Promise<string> {
-    return this.redis.ping();
+    if (!this.isAvailable()) {
+      throw new Error('Redis is not available');
+    }
+
+    try {
+      return await this.redis!.ping();
+    } catch (error) {
+      this.logger.warn(`Ping failed: ${error}`);
+      throw error;
+    }
   }
 }
