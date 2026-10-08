@@ -20,7 +20,10 @@ export class RequestIdMiddleware implements NestMiddleware {
   use(req: Request & { id?: string }, res: Response, next: NextFunction): void {
     const incoming = req.headers[REQUEST_ID_HEADER];
     const candidate = Array.isArray(incoming) ? incoming[0] : incoming;
-    req.id = isValidRequestId(candidate) ? candidate : randomUUID();
+    // Prefer a valid client id; otherwise keep an id already assigned upstream
+    // (e.g. by pino-http's genReqId, which runs first) so logs and the response
+    // header always carry the same value; generate only as a last resort.
+    req.id = isValidRequestId(candidate) ? candidate : (req.id ?? randomUUID());
     res.setHeader(REQUEST_ID_RESPONSE_HEADER, req.id);
     next();
   }
