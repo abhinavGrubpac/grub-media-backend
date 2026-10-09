@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from '../services/auth.service';
 import { LoginDto } from '../dto/login.dto';
+import { OtpRequestDto } from '../dto/otp-request.dto';
+import { OtpVerifyDto } from '../dto/otp-verify.dto';
 import { RefreshDto } from '../dto/refresh.dto';
 import { AuthResponseDto, TokenResponseDto } from '../dto/auth-response.dto';
 import { Public } from '../decorators/public.decorator';
@@ -35,6 +37,25 @@ export class AuthController {
   @ResponseMessage('Token refreshed')
   refresh(@Body() dto: RefreshDto, @Req() req: Request): Promise<TokenResponseDto> {
     return this.auth.refresh(dto.refreshToken, ctxOf(req));
+  }
+
+  @Public()
+  @Post('login/otp-request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a 4-digit OTP login code via email' })
+  @ResponseMessage('OTP sent if account exists')
+  async requestOtpLogin(@Body() dto: OtpRequestDto): Promise<null> {
+    await this.auth.requestOtpLogin(dto);
+    return null;
+  }
+
+  @Public()
+  @Post('login/otp-verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify OTP code and receive access + refresh tokens' })
+  @ResponseMessage('Logged in successfully')
+  verifyOtpLogin(@Body() dto: OtpVerifyDto, @Req() req: Request): Promise<AuthResponseDto> {
+    return this.auth.verifyOtpLogin(dto, ctxOf(req));
   }
 
   @ApiBearerAuth()

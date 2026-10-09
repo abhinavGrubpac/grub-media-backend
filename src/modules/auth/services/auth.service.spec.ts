@@ -24,6 +24,8 @@ function build(opts: {
   user?: Record<string, unknown> | null;
   attempts?: number;
   verify?: boolean;
+  prismaUser?: Record<string, unknown> | null;
+  claimCount?: number;
 }) {
   const users = {
     findByEmailWithHash: jest.fn().mockResolvedValue(opts.user === undefined ? userRow : opts.user),
@@ -40,7 +42,33 @@ function build(opts: {
   } as never;
   const config = { get: jest.fn().mockReturnValue(5) } as never;
   argon2.verify.mockResolvedValue(opts.verify ?? true);
-  return { svc: new AuthService(users, tokens, redis, config), users, tokens, redis };
+
+  const prismaUserResult =
+    opts.prismaUser !== undefined ? opts.prismaUser : opts.user !== undefined ? opts.user : userRow;
+  const prisma = {
+    client: {
+      user: {
+        findFirst: jest.fn().mockResolvedValue(prismaUserResult),
+      },
+    },
+    otpCode: {
+      create: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
+    },
+  } as never;
+  const mailer = {
+    sendOtp: jest.fn().mockResolvedValue(undefined),
+    sendPasswordResetLink: jest.fn().mockResolvedValue(undefined),
+  } as never;
+
+  return {
+    svc: new AuthService(users, tokens, redis, config, prisma, mailer),
+    users,
+    tokens,
+    redis,
+    prisma,
+    mailer,
+  };
 }
 
 describe('AuthService.login', () => {
@@ -125,5 +153,59 @@ describe('AuthService.refresh / logout / me', () => {
     const res = await svc.me('u1');
     expect(res).toEqual({ id: 'u1' });
     expect((users as never as { findById: jest.Mock }).findById).toHaveBeenCalledWith('u1');
+  });
+});
+
+describe('AuthService.requestOtpLogin', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('creates an OTP record and sends email for a valid active user', async () => {
+    const { svc, prisma, mailer } = build({});
+    await svc.requestOtpLogin({ email: 'a@b.c' });
+    expect(
+      (prisma as never as { otpCode: { create: jest.Mock } }).otpCode.create,
+    ).toHaveBeenCalled();
+    expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).toHaveBeenCalledWith(
+      'a@b.c',
+      expect.stringMatching(/^\d{4}$/),
+    );
+  });
+
+  it('does nothing (no-op) when the email is not found — no user enumeration', async () => {
+    const { svc, prisma, mailer } = build({ prismaUser: null });
+    await svc.requestOtpLogin({ email: 'ghost@b.c' });
+    expect(
+      (prisma as never as { otpCode: { create: jest.Mock } }).otpCode.create,
+    ).not.toHaveBeenCalled();
+    expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.verifyOtpLogin', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('returns tokens when OTP claim succeeds', async () => {
+    const { svc, redis } = build({ claimCount: 1 });
+    const res = await svc.verifyOtpLogin({ email: 'a@b.c', code: '1234' }, { ip: '1.1.1.1' });
+    expect(res.accessToken).toBe('a');
+    expect(res.refreshToken).toBe('r');
+    expect((redis as never as { del: jest.Mock }).del).toHaveBeenCalled();
+  });
+
+  it('throws InvalidCredentials when OTP claim returns count 0 (wrong/expired code)', async () => {
+    const { svc } = build({ claimCount: 0 });
+    await expect(svc.verifyOtpLogin({ email: 'a@b.c', code: '0000' }, {})).rejects.toBeInstanceOf(
+      InvalidCredentialsException,
+    );
+  });
+
+  it('throws Forbidden and does NOT hit DB when attempt limit is exceeded', async () => {
+    const { svc, prisma } = build({ attempts: 6 });
+    await expect(
+      svc.verifyOtpLogin({ email: 'a@b.c', code: '1234' }, { ip: '1.1.1.1' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(
+      (prisma as never as { client: { user: { findFirst: jest.Mock } } }).client.user.findFirst,
+    ).not.toHaveBeenCalled();
   });
 });
