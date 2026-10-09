@@ -94,4 +94,39 @@ describe('Auth (e2e)', () => {
       .send({ refreshToken })
       .expect(401);
   });
+
+  // OTP login stubs — require a real SMTP server to exercise send path;
+  // these verify the HTTP contract (request/response shape + status codes).
+  it('POST /api/v1/auth/login/otp-request always returns 200 (no user enumeration)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/login/otp-request')
+      .send({ email: 'does-not-exist@grubpac.com' })
+      .expect(200);
+    expect(res.body).toMatchObject({ success: true });
+  });
+
+  it('POST /api/v1/auth/login/otp-verify returns 401 for an invalid code', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/login/otp-verify')
+      .send({ email: creds.email, code: '0000' })
+      .expect(401);
+    expect(res.body).toMatchObject({ success: false, errorCode: 'UNAUTHORIZED' });
+  });
+
+  // Forgot/reset password stubs.
+  it('POST /api/v1/auth/forgot-password always returns 200 (no user enumeration)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/forgot-password')
+      .send({ email: 'ghost@grubpac.com' })
+      .expect(200);
+    expect(res.body).toMatchObject({ success: true });
+  });
+
+  it('POST /api/v1/auth/reset-password returns 400 for a malformed token', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/reset-password')
+      .send({ token: 'notadottoken', password: 'NewStr0ngPass1' })
+      .expect(400);
+    expect(res.body).toMatchObject({ success: false, errorCode: 'BAD_REQUEST' });
+  });
 });

@@ -65,6 +65,64 @@
           ]
         },
         {
+          "name": "OTP Login — Request",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-request"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" }
+          }
+        },
+        {
+          "name": "OTP Login — Verify",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-verify"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\",\n  \"code\": \"1234\"\n}" },
+            "description": "Submit the 4-digit OTP code received by email. Returns the same token pair as the password login."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json().data;",
+                  "if (data) {",
+                  "  pm.environment.set('accessToken', data.accessToken);",
+                  "  pm.environment.set('refreshToken', data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "forgot-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" },
+            "description": "Always returns 200 regardless of whether the email exists (no user enumeration)."
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "reset-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<token-from-email-link>\",\n  \"password\": \"NewStr0ngPass1\"\n}" },
+            "description": "Token is the `?token=` query param value from the reset link. Invalidates all existing sessions."
+          }
+        },
+        {
           "name": "Me",
           "request": {
             "method": "GET",

@@ -62,6 +62,10 @@ Validated on boot (`src/config/env.validation.ts`); the app refuses to start if 
 | `CORS_ORIGINS` | comma-separated allowlist |
 | `LOG_LEVEL` | pino level |
 | `THROTTLE_TTL` / `THROTTLE_LIMIT` / `THROTTLE_LOGIN_LOCK_MAX` | rate-limit window (ms) / limit / failed-login lockout |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | SMTP server (defaults localhost:587, non-TLS); all optional — app starts without them but email sends will fail |
+| `SMTP_USER` / `SMTP_PASS` | SMTP credentials (optional, omit for unauthenticated relay) |
+| `MAIL_FROM` | From address for transactional emails (default `noreply@grubpac.com`) |
+| `FRONTEND_URL` | Base URL for password reset links (default `http://localhost:3000`) |
 | `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD` | seed only |
 
 ## Database & migrations
@@ -83,7 +87,14 @@ docker compose -f docker-compose.test.yml down
 ```
 
 ## Authentication & RBAC
-JWT access token (short-lived) + DB-persisted, argon2-hashed, rotating refresh token with reuse detection. Roles: `SUPER_ADMIN`, `ADMIN`, `EMPLOYEE`. Authorization via `@Roles(...)` and `@RequirePermissions('users.read')` + `RolesGuard`. See `docs/authentication.md`.
+JWT access token (short-lived) + DB-persisted, argon2-hashed, rotating refresh token with reuse detection. Roles: `SUPER_ADMIN`, `ADMIN`, `EMPLOYEE`. Authorization via `@Roles(...)` and `@RequirePermissions('users.read')` + `RolesGuard`.
+
+Three login paths:
+- **Password** — `POST /auth/login` (email + password)
+- **OTP** — `POST /auth/login/otp-request` (email → 4-digit code via email) then `POST /auth/login/otp-verify`
+- **Password reset** — `POST /auth/forgot-password` (always 200, no enumeration) → `POST /auth/reset-password` (token from email link)
+
+See `docs/authentication.md`.
 
 ## Logging
 nestjs-pino — structured JSON (pretty in dev), per-request correlation id (`X-Request-ID`), secret redaction (authorization/cookie/password/tokens). Never logs credentials.
