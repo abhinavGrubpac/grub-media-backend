@@ -20,7 +20,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { isValidRequestId, RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { REQUEST_ID_HEADER } from './common/constants/request.constants';
 
 @Module({
@@ -41,8 +41,10 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
             if (typeof existing === 'string') {
               return existing;
             }
+            // Validate a client-supplied id here too (pino-http runs before the
+            // Nest middleware), so an unvalidated header can't become the log id.
             const header = req.headers[REQUEST_ID_HEADER];
-            return typeof header === 'string' ? header : randomUUID();
+            return isValidRequestId(header) ? header : randomUUID();
           },
           redact: [
             'req.headers.authorization',
