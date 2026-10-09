@@ -2,10 +2,12 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from '../services/auth.service';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { LoginDto } from '../dto/login.dto';
 import { OtpRequestDto } from '../dto/otp-request.dto';
 import { OtpVerifyDto } from '../dto/otp-verify.dto';
 import { RefreshDto } from '../dto/refresh.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { AuthResponseDto, TokenResponseDto } from '../dto/auth-response.dto';
 import { Public } from '../decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../decorators/current-user.decorator';
@@ -56,6 +58,26 @@ export class AuthController {
   @ResponseMessage('Logged in successfully')
   verifyOtpLogin(@Body() dto: OtpVerifyDto, @Req() req: Request): Promise<AuthResponseDto> {
     return this.auth.verifyOtpLogin(dto, ctxOf(req));
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a password reset link via email' })
+  @ResponseMessage('Reset link sent if account exists')
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<null> {
+    await this.auth.forgotPassword(dto);
+    return null;
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using the token from the reset link' })
+  @ResponseMessage('Password reset successfully')
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<null> {
+    await this.auth.resetPassword(dto);
+    return null;
   }
 
   @ApiBearerAuth()

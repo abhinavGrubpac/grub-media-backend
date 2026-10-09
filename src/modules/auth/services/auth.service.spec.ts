@@ -26,6 +26,7 @@ function build(opts: {
   verify?: boolean;
   prismaUser?: Record<string, unknown> | null;
   claimCount?: number;
+  resetRow?: Record<string, unknown> | null;
 }) {
   const users = {
     findByEmailWithHash: jest.fn().mockResolvedValue(opts.user === undefined ? userRow : opts.user),
@@ -45,6 +46,14 @@ function build(opts: {
 
   const prismaUserResult =
     opts.prismaUser !== undefined ? opts.prismaUser : opts.user !== undefined ? opts.user : userRow;
+  const defaultResetRow = {
+    id: 'rt1',
+    userId: 'u1',
+    hashedToken: 'HASH',
+    expiresAt: new Date(Date.now() + 3600000),
+    usedAt: null,
+    user: userRow,
+  };
   const prisma = {
     client: {
       user: {
@@ -54,6 +63,16 @@ function build(opts: {
     otpCode: {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
+    },
+    passwordResetToken: {
+      create: jest.fn().mockResolvedValue({ id: 'rt1' }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(opts.resetRow !== undefined ? opts.resetRow : defaultResetRow),
+      updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
+    },
+    user: {
+      update: jest.fn().mockResolvedValue({}),
     },
   } as never;
   const mailer = {
@@ -207,5 +226,51 @@ describe('AuthService.verifyOtpLogin', () => {
     expect(
       (prisma as never as { client: { user: { findFirst: jest.Mock } } }).client.user.findFirst,
     ).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.forgotPassword', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('creates a reset token and sends email for an active user', async () => {
+    const { svc, prisma, mailer } = build({});
+    await svc.forgotPassword({ email: 'a@b.c' });
+    expect(
+      (
+        prisma as never as {
+          passwordResetToken: { create: jest.Mock };
+        }
+      ).passwordResetToken.create,
+    ).toHaveBeenCalled();
+    expect(
+      (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
+    ).toHaveBeenCalledWith('a@b.c', expect.stringContaining('.'));
+  });
+
+  it('does nothing (no-op) when email is not found — no user enumeration', async () => {
+    const { svc, prisma, mailer } = build({ prismaUser: null });
+    await svc.forgotPassword({ email: 'ghost@b.c' });
+    expect(
+      (
+        prisma as never as {
+          passwordResetToken: { create: jest.Mock };
+        }
+      ).passwordResetToken.create,
+    ).not.toHaveBeenCalled();
+    expect(
+      (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.resetPassword', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('throws BadRequestException for a token missing a dot separator', async () => {
+    const { svc } = build({});
+    const { BadRequestException: BadReq } = await import('@nestjs/common');
+    await expect(
+      svc.resetPassword({ token: 'notadottoken', password: 'newpassword1' }),
+    ).rejects.toBeInstanceOf(BadReq);
   });
 });
