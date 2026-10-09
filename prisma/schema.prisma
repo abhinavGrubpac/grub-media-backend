@@ -23,21 +23,28 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum OtpPurpose {
+  LOGIN
+  PASSWORD_RESET
+}
+
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  role         UserRole   @default(EMPLOYEE)
-  status       UserStatus @default(ACTIVE)
-  tokenVersion Int        @default(0)
-  createdBy    String?
-  updatedBy    String?
-  deletedAt    DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  sessions     Session[]
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  passwordHash        String
+  firstName           String
+  lastName            String
+  role                UserRole             @default(EMPLOYEE)
+  status              UserStatus           @default(ACTIVE)
+  tokenVersion        Int                  @default(0)
+  createdBy           String?
+  updatedBy           String?
+  deletedAt           DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  sessions            Session[]
+  otpCodes            OtpCode[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([deletedAt])
 }
@@ -70,4 +77,29 @@ model AuditLog {
 
   @@index([resource, resourceId])
   @@index([createdAt])
+}
+
+model OtpCode {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([userId, purpose, usedAt])
+}
+
+model PasswordResetToken {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hashedToken String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
 }
