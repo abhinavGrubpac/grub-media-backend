@@ -13,6 +13,7 @@ import { PrismaModule } from './database/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { REDIS_CLIENT } from './redis/redis.service';
 import { AuthModule } from './modules/auth/auth.module';
+import { MailerModule } from './modules/mailer/mailer.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -80,6 +81,7 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     }),
     PrismaModule,
     RedisModule,
+    MailerModule,
     AuthModule,
     UsersModule,
     HealthModule,
