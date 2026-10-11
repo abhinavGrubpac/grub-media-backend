@@ -57,6 +57,37 @@ model Session {
   @@index([userId])
 }
 
+model HelpCategory {
+  id           Int        @id @default(autoincrement())
+  name         String
+  description  String?
+  /// S3 object key/path (e.g. help/categories/attendance.png) — never the binary.
+  icon         String?
+  displayOrder Int?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  faqs         HelpFaq[]
+
+  @@index([isActive, displayOrder])
+  @@map("help_categories")
+}
+
+model HelpFaq {
+  id           Int          @id @default(autoincrement())
+  categoryId   Int
+  category     HelpCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  question     String
+  answer       String
+  isActive     Boolean      @default(true)
+  displayOrder Int?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([categoryId, isActive])
+  @@map("help_faqs")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   actorId    String?

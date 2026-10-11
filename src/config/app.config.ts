@@ -8,4 +8,5 @@ export default registerAs('app', () => ({
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0),
+  supportEmail: process.env.SUPPORT_EMAIL ?? 'support@grubpac.com',
 }));
