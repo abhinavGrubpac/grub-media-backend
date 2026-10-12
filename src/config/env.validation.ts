@@ -52,6 +52,11 @@ export class EnvironmentVariables {
   @IsString()
   LOG_LEVEL?: string;
 
+  // Optional: contact endpoint returns a mailto: link to this address.
+  @IsOptional()
+  @IsString()
+  SUPPORT_EMAIL?: string;
+
   // THROTTLE_* are intentionally optional: they have safe operational defaults
   // defined canonically in src/config/throttle.config.ts. Validation here only
   // ensures that IF provided they are integers. (Reviewed: T2 finding F1.)
