@@ -15,6 +15,8 @@ import { REDIS_CLIENT } from './redis/redis.service';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
+import { EventsModule } from './modules/events/events.module';
+import { ReviewModule } from './modules/review/review.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -81,6 +83,8 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     AuthModule,
     UsersModule,
     HealthModule,
+    EventsModule,
+    ReviewModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.

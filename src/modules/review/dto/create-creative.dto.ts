@@ -1,5 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, Length } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsOptional, IsString, Length, ValidateNested } from 'class-validator';
+
+export class InitialVersionDto {
+  @ApiProperty({ description: 'Media file URL (bucket key)', maxLength: 2000 })
+  @IsString()
+  @Length(1, 2000)
+  media_url!: string;
+
+  @ApiProperty({ description: 'Media type, e.g. Image | Video | PDF', maxLength: 50 })
+  @IsString()
+  @Length(1, 50)
+  media_type!: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional reviewer notes attached to the upload',
+    maxLength: 2000,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 2000)
+  notes?: string;
+}
 
 export class CreateCreativeDto {
   @ApiProperty({ description: 'Brand the creative belongs to' })
@@ -19,4 +41,13 @@ export class CreateCreativeDto {
   @IsString()
   @Length(1, 100)
   external_ref_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional first version. Merges create + upload-version into one atomic call.',
+    type: InitialVersionDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InitialVersionDto)
+  initial_version?: InitialVersionDto;
 }

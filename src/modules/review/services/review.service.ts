@@ -21,8 +21,12 @@ import { CreateCreativeDto } from '../dto/create-creative.dto';
 import { UploadVersionDto } from '../dto/upload-version.dto';
 import {
   actionTypeFor,
+  assertActionableStatus,
   assertValidTakeAction,
+  assertValidTransition,
   assertWithdrawable,
+  isVersionDerivedSort,
+  normalizeCreativeStatusFilter,
   statusForAction,
 } from '../transitions';
 
@@ -30,6 +34,94 @@ export interface TakeActionInput {
   action: string;
   comments?: string;
   expectedVersion?: number;
+}
+
+export interface CreativeListFilters {
+  status?: string;
+  brand_id?: string;
+  search?: string;
+  industry?: string;
+  startDate?: string;
+  endDate?: string;
+  actor_id?: string;
+  ids?: string[];
+}
+
+function dayStart(value: string): Date {
+  const d = new Date(value);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+function dayEnd(value: string): Date {
+  const d = new Date(value);
+  d.setUTCHours(23, 59, 59, 999);
+  return d;
+}
+
+/**
+ * Shared list/export predicate. All version-level conditions (status, upload
+ * window, actor) merge into a single `versions.some` so one version must
+ * satisfy them together.
+ */
+export function buildCreativeWhere(filters: CreativeListFilters): Prisma.CreativeWhereInput {
+  const status = normalizeCreativeStatusFilter(filters.status);
+
+  let createdAt: { gte?: Date; lte?: Date } | undefined;
+  if (filters.startDate || filters.endDate) {
+    const gte = filters.startDate ? dayStart(filters.startDate) : undefined;
+    const lte = filters.endDate ? dayEnd(filters.endDate) : undefined;
+    if ((gte && Number.isNaN(gte.getTime())) || (lte && Number.isNaN(lte.getTime()))) {
+      throw new BadRequestException('Invalid startDate or endDate');
+    }
+    createdAt = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
+  }
+
+  const versionMatch: Record<string, unknown> = {
+    ...(status ? { status } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(filters.actor_id ? { actions: { some: { actorId: filters.actor_id } } } : {}),
+  };
+
+  return {
+    ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
+    ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
+    ...(filters.search ? { creativeName: { contains: filters.search, mode: 'insensitive' } } : {}),
+    ...(filters.industry
+      ? { brand: { is: { industryCategory: { equals: filters.industry, mode: 'insensitive' } } } }
+      : {}),
+    ...(Object.keys(versionMatch).length ? { versions: { some: versionMatch } } : {}),
+  } as Prisma.CreativeWhereInput;
+}
+
+type ListedCreative = CreativeResponseDto & { versions?: CreativeVersionResponseDto[] };
+
+function sortListed(
+  items: ListedCreative[],
+  sortBy: string,
+  order: 'asc' | 'desc',
+): ListedCreative[] {
+  const dir = order === 'asc' ? 1 : -1;
+  const valueOf = (row: ListedCreative): string | number => {
+    if (sortBy === 'brand_name') return row.brand?.brand_name ?? '';
+    const raw =
+      sortBy === 'uploaded_on'
+        ? row.latest_version?.created_at
+        : sortBy === 'last_action_at'
+          ? row.last_action_at
+          : row.created_at;
+    if (!raw) return 0;
+    const time = new Date(raw).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  };
+  return [...items].sort((a, b) => {
+    const va = valueOf(a);
+    const vb = valueOf(b);
+    if (typeof va === 'string' || typeof vb === 'string') {
+      return String(va).localeCompare(String(vb)) * dir;
+    }
+    return (va - vb) * dir;
+  });
 }
 
 export interface CreativeUpstreamInput {
@@ -75,33 +167,81 @@ export class CreativeService {
     private readonly outbox: EventOutboxService,
   ) {}
 
-  async findAll(query: CreativeQueryDto): Promise<Paginated<CreativeResponseDto>> {
+  async findAll(
+    query: CreativeQueryDto,
+  ): Promise<Paginated<CreativeResponseDto & { versions?: CreativeVersionResponseDto[] }>> {
     const { skip, take } = toSkipTake(query);
-    const where: Prisma.CreativeWhereInput = {
-      ...(query.brand_id ? { brandId: query.brand_id } : {}),
-      ...(query.search ? { creativeName: { contains: query.search, mode: 'insensitive' } } : {}),
-      ...(query.status ? { versions: { some: { status: query.status } } } : {}),
+    const order = query.sortOrder ?? 'desc';
+    const where = buildCreativeWhere({
+      status: query.status,
+      brand_id: query.brand_id,
+      search: query.search,
+      industry: query.industry,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      actor_id: query.actor_id,
+      ids: query.ids,
+    });
+    // Version-derived sorts (uploaded_on/last_action_at) cannot be pushed to
+    // Prisma (to-many ordering), so filter in the DB, enrich, then sort and
+    // slice in memory. created_at/brand_name sort in the database.
+    const versionSort = !!query.sortBy && isVersionDerivedSort(query.sortBy);
+    const orderBy = versionSort
+      ? { createdAt: 'desc' as const }
+      : query.sortBy === 'brand_name'
+        ? { brand: { brandName: order } }
+        : { createdAt: order };
+    const versionsInclude = {
+      orderBy: { versionNumber: 'desc' as const },
+      take: 1,
+      include: { actions: { orderBy: { createdAt: 'desc' as const }, take: 1 } },
     };
-    const [creatives, total] = await Promise.all([
-      this.prisma.client.creative.findMany({
+    let creatives: Prisma.CreativeGetPayload<{
+      include: { brand: true; versions: { include: { actions: true } } };
+    }>[];
+    let total: number;
+    if (versionSort) {
+      creatives = await this.prisma.client.creative.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take,
-        include: {
-          brand: true,
-          versions: {
-            orderBy: { versionNumber: 'desc' },
-            take: 1,
-            include: { actions: { orderBy: { createdAt: 'desc' }, take: 1 } },
-          },
-        },
-      }),
-      this.prisma.client.creative.count({ where }),
-    ]);
+        orderBy,
+        include: { brand: true, versions: versionsInclude },
+      });
+      total = creatives.length;
+    } else {
+      [creatives, total] = await Promise.all([
+        this.prisma.client.creative.findMany({
+          where,
+          orderBy,
+          skip,
+          take,
+          include: { brand: true, versions: versionsInclude },
+        }),
+        this.prisma.client.creative.count({ where }),
+      ]);
+    }
+
+    // ?include=history merges list + per-row history calls into one request:
+    // one batched versions query instead of N round-trips from the UI.
+    const threadVersions =
+      query.include === 'history' && creatives.length > 0
+        ? await this.prisma.client.creativeVersion.findMany({
+            where: { creativeId: { in: creatives.map((creative) => creative.id) } },
+            orderBy: [{ creativeId: 'asc' }, { versionNumber: 'desc' }],
+            include: { actions: { orderBy: { createdAt: 'asc' } } },
+          })
+        : [];
+    const threadsByCreative = new Map<string, typeof threadVersions>();
+    for (const version of threadVersions) {
+      const list = threadsByCreative.get(version.creativeId) ?? [];
+      list.push(version);
+      threadsByCreative.set(version.creativeId, list);
+    }
 
     const actorNames = await this.resolveActorNames(
-      this.collectActorIds(creatives.flatMap((creative) => creative.versions)),
+      this.collectActorIds([
+        ...creatives.flatMap((creative) => creative.versions),
+        ...threadVersions,
+      ]),
     );
     const data = creatives.map((creative) => {
       const response = this.toCreativeResponse(creative, actorNames);
@@ -110,8 +250,20 @@ export class CreativeService {
         ...response,
         last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
         last_action_at: latestAction ? latestAction.createdAt : null,
+        ...(query.include === 'history'
+          ? {
+              versions: (threadsByCreative.get(creative.id) ?? []).map((version) =>
+                this.toVersionResponse(version, actorNames),
+              ),
+            }
+          : {}),
       };
     });
+    if (versionSort && query.sortBy) {
+      const sorted = sortListed(data, query.sortBy, order);
+      const page = sorted.slice(skip, skip + take);
+      return { data: page, meta: buildMeta(total, query.page, query.limit) };
+    }
     return { data, meta: buildMeta(total, query.page, query.limit) };
   }
 
@@ -119,7 +271,12 @@ export class CreativeService {
     const brand = await this.prisma.client.brand.findUnique({ where: { id: dto.brand_id } });
     if (!brand) throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
 
-    const creative = await this.prisma.$transaction(async (tx) => {
+    // Optional initial_version merges create + upload-version into one atomic
+    // call (same auto-approve + idempotency rules as uploadVersion).
+    const autoApprove = brand.autoApprove === true;
+    const initialStatus = autoApprove ? ReviewStatus.APPROVED : ReviewStatus.PENDING;
+
+    const { creative, version } = await this.prisma.$transaction(async (tx) => {
       const created = await tx.creative.create({
         data: {
           brandId: dto.brand_id,
@@ -139,9 +296,59 @@ export class CreativeService {
           creative_name: created.creativeName,
         },
       });
-      return created;
+
+      if (!dto.initial_version) return { creative: created, version: null };
+
+      const createdVersion = await tx.creativeVersion.create({
+        data: {
+          creativeId: created.id,
+          versionNumber: 1,
+          mediaUrl: dto.initial_version.media_url,
+          mediaType: dto.initial_version.media_type,
+          status: initialStatus,
+          createdBy: actorId,
+        },
+      });
+      await tx.creative.update({
+        where: { id: created.id },
+        data: { currentVersionId: createdVersion.id },
+      });
+      await this.outbox.emitInTx(tx, {
+        eventType: EventTypes.versionUploaded,
+        entityType: 'CreativeVersion',
+        entityId: createdVersion.id,
+        actorId,
+        key: created.id,
+        payload: {
+          creative_id: created.id,
+          version_id: createdVersion.id,
+          version_number: 1,
+          media_url: createdVersion.mediaUrl,
+          media_type: createdVersion.mediaType,
+          auto_approved: autoApprove,
+          notes: dto.initial_version.notes ?? null,
+        },
+      });
+      if (autoApprove) {
+        await this.outbox.emitInTx(tx, {
+          eventType: EventTypes.reviewAutoApproved,
+          entityType: 'CreativeVersion',
+          entityId: createdVersion.id,
+          actorId,
+          key: created.id,
+          payload: {
+            version_id: createdVersion.id,
+            creative_id: created.id,
+            reason: 'brand.auto_approve',
+          },
+        });
+      }
+      return { creative: created, version: createdVersion };
     });
-    return this.toCreativeResponse({ ...creative, brand, versions: [] }, new Map());
+    return this.toCreativeResponse(
+      { ...creative, brand, versions: version ? [{ ...version, actions: [] }] : [] },
+      new Map(),
+    );
   }
 
   /**
@@ -255,9 +462,14 @@ export class CreativeService {
     if (input.expectedVersion !== undefined && input.expectedVersion !== version.versionNumber) {
       throw new ConflictException('This asset has been updated by another user; refresh and retry');
     }
+    // WORKFLOWS.md §1.3 one-way gate: only PENDING / ON_HOLD accept a decision.
+    // Decided statuses are terminal for this version; further review needs a new version.
+    assertActionableStatus(version.status);
     assertValidTakeAction(input);
     const action = input.action as keyof typeof REVIEW_EVENT_BY_ACTION;
     const newStatus = statusForAction(action);
+    // Strict rule: ON_HOLD -> PENDING is never possible via takeAction.
+    assertValidTransition(version.status, newStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const saved = await tx.creativeVersion.update({

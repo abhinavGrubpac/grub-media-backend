@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, ReviewStatus } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
+import { buildCreativeWhere } from './review.service';
 
 export interface CreativeExportRow {
   id: string;
@@ -17,13 +17,15 @@ export class ExportService {
   constructor(private readonly prisma: PrismaService) {}
 
   async exportCreatives(filters: {
-    status?: ReviewStatus;
+    status?: string;
     brand_id?: string;
+    industry?: string;
+    startDate?: string;
+    endDate?: string;
+    actor_id?: string;
+    ids?: string[];
   }): Promise<CreativeExportRow[]> {
-    const where: Prisma.CreativeWhereInput = {
-      ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
-      ...(filters.status ? { versions: { some: { status: filters.status } } } : {}),
-    };
+    const where = buildCreativeWhere(filters);
     const creatives = await this.prisma.client.creative.findMany({
       where,
       orderBy: { createdAt: 'desc' },

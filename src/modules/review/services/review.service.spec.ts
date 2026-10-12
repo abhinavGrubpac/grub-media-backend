@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { ReviewStatus } from '@prisma/client';
 import { CreativeService } from './review.service';
+import { normalizeCreativeStatusFilter, CREATIVE_STATUS_FILTERS } from '../transitions';
 
 const brandRow = {
   id: 'brand1',
@@ -51,6 +53,7 @@ function makeDeps() {
   const creativeVersion = {
     findUnique: jest.fn().mockResolvedValue(null),
     findFirst: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
     update: jest.fn(),
   };
@@ -85,6 +88,168 @@ function makeDeps() {
     outbox,
   };
 }
+
+describe('normalizeCreativeStatusFilter', () => {
+  it('maps UI aliases to DB statuses and ALL to no filter', () => {
+    expect(normalizeCreativeStatusFilter('PENDING')).toBe(ReviewStatus.PENDING);
+    expect(normalizeCreativeStatusFilter('APPROVED')).toBe(ReviewStatus.APPROVED);
+    expect(normalizeCreativeStatusFilter('AUTO_APPROVED')).toBe(ReviewStatus.APPROVED);
+    expect(normalizeCreativeStatusFilter('NEED_CHANGES')).toBe(ReviewStatus.NEEDS_CHANGES);
+    expect(normalizeCreativeStatusFilter('NEEDS_CHANGES')).toBe(ReviewStatus.NEEDS_CHANGES);
+    expect(normalizeCreativeStatusFilter('REJECT')).toBe(ReviewStatus.REJECTED);
+    expect(normalizeCreativeStatusFilter('REJECTED')).toBe(ReviewStatus.REJECTED);
+    expect(normalizeCreativeStatusFilter('ON_HOLD')).toBe(ReviewStatus.ON_HOLD);
+    expect(normalizeCreativeStatusFilter('WITHDRAWN')).toBe(ReviewStatus.WITHDRAWN);
+    expect(normalizeCreativeStatusFilter('ALL')).toBeUndefined();
+    expect(normalizeCreativeStatusFilter(undefined)).toBeUndefined();
+    expect(CREATIVE_STATUS_FILTERS).toContain('ALL');
+  });
+
+  it('rejects unknown statuses', () => {
+    expect(() => normalizeCreativeStatusFilter('BOGUS')).toThrow(BadRequestException);
+  });
+});
+
+describe('CreativeService.findAll', () => {
+  const pageQuery = { page: 1, limit: 20 } as { page: number; limit: number };
+
+  it('filters by normalized status', async () => {
+    const { service, creative } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+    await service.findAll({ ...pageQuery, status: 'REJECT' } as never);
+    expect(creative.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          versions: { some: { status: 'REJECTED' } },
+        }),
+      }),
+    );
+  });
+
+  it('omits the status clause for ALL', async () => {
+    const { service, creative } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+    await service.findAll({ ...pageQuery, status: 'ALL' } as never);
+    expect(creative.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+  });
+
+  it('embeds approval threads with include=history in one batched query', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: brandRow,
+        versions: [{ ...versionRow, actions: [] }],
+      },
+    ]);
+    creativeVersion.findMany.mockResolvedValue([{ ...versionRow, actions: [] }]);
+    const result = await service.findAll({ ...pageQuery, include: 'history' } as never);
+    expect(creativeVersion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { creativeId: { in: ['c1'] } } }),
+    );
+    expect(result.data[0].versions).toHaveLength(1);
+  });
+
+  it('skips the thread query without include=history', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+    await service.findAll(pageQuery as never);
+    expect(creativeVersion.findMany).not.toHaveBeenCalled();
+    expect(creativeVersion.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('filters by industry, upload window, actor, and ids', async () => {
+    const { service, creative } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+    await service.findAll({
+      ...pageQuery,
+      industry: 'Beverages',
+      startDate: '2026-09-01',
+      endDate: '2026-09-30',
+      actor_id: 'user9',
+      ids: ['c1', 'c2'],
+    } as never);
+    const where = creative.findMany.mock.calls[0][0].where;
+    expect(where.brand).toEqual({
+      is: { industryCategory: { equals: 'Beverages', mode: 'insensitive' } },
+    });
+    expect(where.versions.some.createdAt.gte).toBeInstanceOf(Date);
+    expect(where.versions.some.createdAt.lte).toBeInstanceOf(Date);
+    expect(where.versions.some.actions).toEqual({ some: { actorId: 'user9' } });
+    expect(where.id).toEqual({ in: ['c1', 'c2'] });
+  });
+
+  it('sorts by brand in the database and by upload recency in memory', async () => {
+    const { service, creative } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+    await service.findAll({ ...pageQuery, sortBy: 'brand_name', sortOrder: 'asc' } as never);
+    expect(creative.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { brand: { brandName: 'asc' } } }),
+    );
+
+    creative.findMany.mockResolvedValue([
+      { ...creativeRow, brand: brandRow, createdAt: new Date('2026-01-01'), versions: [] },
+      {
+        ...creativeRow,
+        id: 'c2',
+        brand: brandRow,
+        createdAt: new Date('2026-01-02'),
+        versions: [{ ...versionRow, createdAt: new Date('2026-06-01'), actions: [] }],
+      },
+    ]);
+    const result = await service.findAll({
+      ...pageQuery,
+      sortBy: 'uploaded_on',
+      sortOrder: 'desc',
+    } as never);
+    expect(result.data.map((row) => row.id)).toEqual(['c2', 'c1']);
+    expect(result.meta.total).toBe(2);
+  });
+});
+
+describe('CreativeService.createCreative', () => {
+  it('rejects unknown brands', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(null);
+    await expect(
+      service.createCreative({ brand_id: 'missing', creative_name: 'X' }, 'u1'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('creates the thread alone without initial_version', async () => {
+    const { service, brand, creative, creativeVersion } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockResolvedValue({ ...creativeRow });
+    const result = await service.createCreative(
+      { brand_id: 'brand1', creative_name: 'Festive Ad' },
+      'u1',
+    );
+    expect(creativeVersion.create).not.toHaveBeenCalled();
+    expect(result.latest_version).toBeNull();
+  });
+
+  it('creates thread + v1 atomically with initial_version', async () => {
+    const { service, brand, creative, creativeVersion } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockResolvedValue({ ...creativeRow });
+    creativeVersion.create.mockResolvedValue({ ...versionRow, versionNumber: 1 });
+    creative.update.mockResolvedValue(creativeRow);
+    const result = await service.createCreative(
+      {
+        brand_id: 'brand1',
+        creative_name: 'Festive Ad',
+        initial_version: { media_url: 's3://b/a.png', media_type: 'Image' },
+      },
+      'u1',
+    );
+    expect(creativeVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ versionNumber: 1, status: 'PENDING', createdBy: 'u1' }),
+      }),
+    );
+    expect(result.latest_version?.version_number).toBe(1);
+  });
+});
 
 describe('CreativeService.uploadVersion', () => {
   const dto = { media_url: 's3://bucket/agency/ag1/b.png', media_type: 'Image' };
@@ -228,6 +393,28 @@ describe('CreativeService.takeAction', () => {
 
     expect(advert.findMany).not.toHaveBeenCalled();
     expect(advert.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('conflicts when the version is already decided (one-way gate)', async () => {
+    const { service, creativeVersion } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+
+    await expect(
+      service.takeAction('v1', { action: 'REJECT', comments: 'late' }, 'reviewer1'),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows ON_HOLD versions to move to a decision', async () => {
+    const { service, creativeVersion } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'ON_HOLD' });
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+
+    await service.takeAction('v1', { action: 'APPROVE' }, 'reviewer1');
+
+    expect(creativeVersion.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: { status: 'APPROVED' },
+    });
   });
 });
 

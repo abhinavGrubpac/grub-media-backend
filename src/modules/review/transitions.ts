@@ -4,9 +4,11 @@ import { ActionType, ReviewStatus } from '@prisma/client';
 /**
  * Creative review state machine (WORKFLOWS.md §1).
  *
- * Pure functions only: rules stay unit-testable without a database. Every
- * review action is legal from any non-terminal status; REJECTED versions are
- * immutable — the only way forward is a version increment (WORKFLOWS.md §1.3).
+ * Pure functions only: rules stay unit-testable without a database. Only
+ * PENDING and ON_HOLD versions accept a decision; APPROVED / REJECTED /
+ * NEEDS_CHANGES / WITHDRAWN are terminal for that version — the only way
+ * forward is a version increment (WORKFLOWS.md §1.3). ON_HOLD can move to a
+ * decision but never back to PENDING.
  */
 export const REVIEW_ACTIONS = ['APPROVE', 'REJECT', 'HOLD', 'REQUEST_CHANGES'] as const;
 export type ReviewActionType = (typeof REVIEW_ACTIONS)[number];
@@ -85,4 +87,108 @@ export function assertWithdrawable(status: ReviewStatus): void {
   throw failure.conflict
     ? new ConflictException(failure.message)
     : new BadRequestException(failure.message);
+}
+
+/**
+ * One-way review gate (WORKFLOWS.md §1.3): only a PENDING or ON_HOLD version
+ * accepts a decision. PENDING may move to APPROVED / REJECTED / NEEDS_CHANGES
+ * / ON_HOLD; ON_HOLD may move to a decision but never back to PENDING. Every
+ * decided status is terminal for that version. Further review happens on a
+ * new version, which always starts at PENDING.
+ */
+export function validateActionableStatus(status: ReviewStatus | string): string | null {
+  if (
+    status === ReviewStatus.PENDING ||
+    status === ('PENDING' as string) ||
+    status === ReviewStatus.ON_HOLD ||
+    status === ('ON_HOLD' as string)
+  )
+    return null;
+  return (
+    `version is already ${status}; decisions are final — ` +
+    'upload a new version for further review'
+  );
+}
+
+export function assertActionableStatus(status: ReviewStatus | string): void {
+  const message = validateActionableStatus(status);
+  if (message) throw new ConflictException(message);
+}
+
+/**
+ * Additional guard for specific transition prohibitions.
+ * ON_HOLD -> PENDING is strictly forbidden.
+ */
+export function assertValidTransition(
+  from: ReviewStatus | string,
+  to: ReviewStatus | string,
+): void {
+  if (
+    (from === ReviewStatus.ON_HOLD || from === ('ON_HOLD' as string)) &&
+    (to === ReviewStatus.PENDING || to === ('PENDING' as string))
+  ) {
+    throw new ConflictException('Cannot move a version from ON_HOLD back to PENDING');
+  }
+}
+
+/**
+ * UI status filter values accepted by GET /creatives (WORKFLOWS.md §1).
+ * The review tabs speak a slightly different language than the DB enum:
+ * NEED_CHANGES (no S), REJECT (not REJECTED), AUTO_APPROVED (auto-approved
+ * versions are stored as APPROVED — there is no separate DB status), and ALL
+ * (no filter). WITHDRAWN passes through for audit views.
+ */
+export const CREATIVE_STATUS_FILTERS = [
+  'PENDING',
+  'APPROVED',
+  'AUTO_APPROVED',
+  'NEEDS_CHANGES',
+  'NEED_CHANGES',
+  'REJECTED',
+  'REJECT',
+  'ON_HOLD',
+  'WITHDRAWN',
+  'ALL',
+] as const;
+export type CreativeStatusFilter = (typeof CREATIVE_STATUS_FILTERS)[number];
+
+export function normalizeCreativeStatusFilter(
+  value: string | undefined | null,
+): ReviewStatus | undefined {
+  if (!value || value === 'ALL') return undefined;
+  switch (value) {
+    case 'PENDING':
+      return ReviewStatus.PENDING;
+    case 'APPROVED':
+      return ReviewStatus.APPROVED;
+    case 'AUTO_APPROVED':
+      return ReviewStatus.APPROVED;
+    case 'NEEDS_CHANGES':
+    case 'NEED_CHANGES':
+      return ReviewStatus.NEEDS_CHANGES;
+    case 'REJECTED':
+    case 'REJECT':
+      return ReviewStatus.REJECTED;
+    case 'ON_HOLD':
+      return ReviewStatus.ON_HOLD;
+    case 'WITHDRAWN':
+      return ReviewStatus.WITHDRAWN;
+    default:
+      throw new BadRequestException(`status must be one of: ${CREATIVE_STATUS_FILTERS.join(', ')}`);
+  }
+}
+
+/** DB-sortable keys are pushed to Prisma; version-derived keys sort in memory. */
+export const CREATIVE_SORT_KEYS = [
+  'created_at',
+  'brand_name',
+  'uploaded_on',
+  'last_action_at',
+] as const;
+export type CreativeSortKey = (typeof CREATIVE_SORT_KEYS)[number];
+
+export const CREATIVE_SORT_ORDERS = ['asc', 'desc'] as const;
+
+export function isVersionDerivedSort(key: string): boolean {
+  return key === 'uploaded_on' || key === 'last_action_at';
 }

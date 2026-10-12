@@ -3,9 +3,11 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Paginated } from '../../../common/dto/paginated';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
+import { SkipResponseWrap } from '../../../common/decorators/skip-response-wrap.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../../auth/decorators/current-user.decorator';
-import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 import { CreativeExportQueryDto } from '../dto/creative-export-query.dto';
 import { CreativeQueryDto } from '../dto/creative-query.dto';
 import { CreativeResponseDto, CreativeVersionResponseDto } from '../dto/creative-response.dto';
@@ -24,13 +26,17 @@ export class ReviewController {
     private readonly exportService: ExportService,
   ) {}
 
-  @RequirePermissions('creative:view')
+  // Aligned to senior auth catalog (users.* only): use @Roles here.
+  // Future permission mapping once catalog grows:
+  // view/history/export -> 'creative:view', upload -> 'creative:upload', action -> 'creative:review'.
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Get()
   findAll(@Query() query: CreativeQueryDto): Promise<Paginated<CreativeResponseDto>> {
     return this.creativeService.findAll(query);
   }
 
-  @RequirePermissions('creative:view')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @SkipResponseWrap()
   @Get('export')
   async export(@Res() res: Response, @Query() query: CreativeExportQueryDto): Promise<void> {
     const rows = await this.exportService.exportCreatives(query);
@@ -49,7 +55,7 @@ export class ReviewController {
       .send(['id,name,brand,status,version,uploaded_on', ...lines].join('\n'));
   }
 
-  @RequirePermissions('creative:view')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Get(':id/history')
   async getHistory(
     @Param('id') id: string,
@@ -57,7 +63,7 @@ export class ReviewController {
     return this.creativeService.getHistory(id);
   }
 
-  @RequirePermissions('creative:upload')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Post()
   @ResponseMessage('Creative created')
   createCreative(
@@ -67,7 +73,7 @@ export class ReviewController {
     return this.creativeService.createCreative(dto, user.id);
   }
 
-  @RequirePermissions('creative:upload')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Post(':id/version')
   @ResponseMessage('Creative version uploaded')
   uploadVersion(
@@ -82,7 +88,7 @@ export class ReviewController {
    * Records a review decision on a version. Comments are mandatory for
    * REJECT / REQUEST_CHANGES; decisions cascade advert revocations.
    */
-  @RequirePermissions('creative:review')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @Post(':versionId/action')
   @ResponseMessage('Review decision recorded')
   takeAction(
