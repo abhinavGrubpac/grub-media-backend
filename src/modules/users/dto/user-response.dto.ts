@@ -24,6 +24,26 @@ export class UserResponseDto {
   @Expose()
   lastName!: string;
 
+  @ApiProperty({ required: false })
+  @Expose()
+  phoneNumber?: string;
+
+  @ApiProperty({ required: false })
+  @Expose()
+  logoUrl?: string;
+
+  @ApiProperty()
+  @Expose()
+  employeeId!: string;
+
+  @ApiProperty({ required: false })
+  @Expose()
+  organizationName?: string;
+
+  @ApiProperty({ required: false })
+  @Expose()
+  organizationId?: string;
+
   @ApiProperty({ enum: UserRole })
   @Expose()
   role!: UserRole;

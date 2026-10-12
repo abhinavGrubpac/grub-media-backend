@@ -22,12 +22,28 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
+import { ProfileUpdateDto } from '../dto/profile-update.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
   constructor(private readonly users: UsersService) {}
+
+  @Get('profile')
+  @ApiOperation({ summary: 'Get the current user profile' })
+  profile(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+    return this.users.findById(user.id);
+  }
+
+  @Patch('profile')
+  @ApiOperation({ summary: 'Update editable profile fields' })
+  updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileUpdateDto,
+  ): Promise<UserResponseDto> {
+    return this.users.updateProfile(user.id, dto);
+  }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.create')

@@ -13,6 +13,7 @@ import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserQueryDto, USER_SORTABLE_FIELDS, UserSortField } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
+import { ProfileUpdateDto } from '../dto/profile-update.dto';
 
 @Injectable()
 export class UsersService {
@@ -48,6 +49,12 @@ export class UsersService {
 
   async findById(id: string): Promise<UserResponseDto> {
     return this.toDto(await this.getOrThrow(id));
+  }
+
+  async updateProfile(id: string, dto: ProfileUpdateDto): Promise<UserResponseDto> {
+    await this.getOrThrow(id);
+    const user = await this.prisma.client.user.update({ where: { id }, data: dto });
+    return this.toDto(user);
   }
 
   async list(query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
