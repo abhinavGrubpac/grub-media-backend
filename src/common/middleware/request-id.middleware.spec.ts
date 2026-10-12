@@ -47,6 +47,14 @@ describe('RequestIdMiddleware', () => {
     expect(setHeader).toHaveBeenCalledWith('X-Request-ID', id);
   });
 
+  it('preserves an id already assigned upstream (e.g. pino) when no valid header', () => {
+    const req = { headers: {}, id: 'upstream-uuid-value' } as never;
+    const setHeader = jest.fn();
+    new RequestIdMiddleware().use(req, { setHeader } as never, jest.fn());
+    expect((req as { id: string }).id).toBe('upstream-uuid-value');
+    expect(setHeader).toHaveBeenCalledWith('X-Request-ID', 'upstream-uuid-value');
+  });
+
   it('uses the first value when the header is delivered as an array', () => {
     const req = { headers: { 'x-request-id': ['valid_id_abc', 'other'] } } as never;
     const setHeader = jest.fn();

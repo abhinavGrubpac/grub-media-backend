@@ -52,6 +52,11 @@ export class EnvironmentVariables {
   @IsString()
   LOG_LEVEL?: string;
 
+  // Optional: contact endpoint returns a mailto: link to this address.
+  @IsOptional()
+  @IsString()
+  SUPPORT_EMAIL?: string;
+
   // THROTTLE_* are intentionally optional: they have safe operational defaults
   // defined canonically in src/config/throttle.config.ts. Validation here only
   // ensures that IF provided they are integers. (Reviewed: T2 finding F1.)
@@ -102,6 +107,35 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   AWS_SECRET_ACCESS_KEY?: string;
+
+  // SMTP_* are optional; the app starts without them (emails will fail at send time).
+  @IsOptional()
+  @IsString()
+  SMTP_HOST?: string;
+
+  @IsOptional()
+  @IsInt()
+  SMTP_PORT?: number;
+
+  @IsOptional()
+  @IsString()
+  SMTP_USER?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_PASS?: string;
+
+  @IsOptional()
+  @IsString()
+  MAIL_FROM?: string;
+
+  @IsOptional()
+  @IsString()
+  FRONTEND_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_SECURE?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

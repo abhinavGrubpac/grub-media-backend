@@ -31,6 +31,14 @@ describe('Users (e2e)', () => {
     expect(res.body).toMatchObject({ success: false, statusCode: 403, errorCode: 'FORBIDDEN' });
   });
 
+  it('EMPLOYEE cannot list or read the user directory (403) — admin only', async () => {
+    const { accessToken } = await login(app, employee.email, employee.password);
+    await request(app.getHttpServer())
+      .get('/api/v1/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(403);
+  });
+
   it('ADMIN can create a user; the response has no passwordHash', async () => {
     const { accessToken } = await login(app, admin.email, admin.password);
     const res = await request(app.getHttpServer())

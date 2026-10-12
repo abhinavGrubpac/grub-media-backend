@@ -23,3 +23,15 @@ export class InvalidCredentialsException extends UnauthorizedException {
     super({ message: 'Invalid credentials', errorCode: ERROR_CODES.UNAUTHORIZED });
   }
 }
+
+export class HelpCategoryNotFoundException extends NotFoundException {
+  constructor() {
+    super({ message: 'Help category not found', errorCode: ERROR_CODES.NOT_FOUND });
+  }
+}
+
+export class HelpFaqNotFoundException extends NotFoundException {
+  constructor() {
+    super({ message: 'Help FAQ not found', errorCode: ERROR_CODES.NOT_FOUND });
+  }
+}

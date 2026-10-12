@@ -38,17 +38,21 @@ export class UsersController {
     return this.users.create(dto, actor.id);
   }
 
+  // User directory is admin-only — a regular user reads their own profile via
+  // GET /auth/me. Self-service read/update of /users/:id is deferred (ADR note).
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.read')
   @Get()
-  @ApiOperation({ summary: 'List users (paginated)' })
+  @ApiOperation({ summary: 'List users (paginated, admin only)' })
   @ResponseMessage('Users fetched successfully')
   list(@Query() query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
     return this.users.list(query);
   }
 
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.read')
   @Get(':id')
-  @ApiOperation({ summary: 'Get a user by id' })
+  @ApiOperation({ summary: 'Get a user by id (admin only)' })
   @ResponseMessage('User fetched successfully')
   findOne(@Param('id') id: string): Promise<UserResponseDto> {
     return this.users.findById(id);
