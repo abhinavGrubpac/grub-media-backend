@@ -610,9 +610,14 @@ describe('Logs (e2e)', () => {
 
       const res = await exportPost({ logtype: 'SYSTEM' });
       const row = res.text.split('\r\n')[1];
-      expect(row).toBe(
-        `${res.text.split('\r\n')[1].split(',')[0]},${res.text.split('\r\n')[1].split(',')[1]},SYSTEM,,,,bare row,,,,`,
-      );
+
+      // id,created_at,logtype,category,action,action_text,user_id,emp_id,
+      // old_detail,new_detail,reference_id — every optional column is empty.
+      const cells = row.split(',');
+      expect(cells[2]).toBe('SYSTEM'); // logtype
+      expect(cells[5]).toBe('bare row'); // action_text
+      expect(cells.slice(3, 5)).toEqual(['', '']); // category + action
+      expect(cells.slice(6)).toEqual(['', '', '', '', '']); // user/emp/details/ref
       expect(res.text).not.toContain('null');
     });
 
