@@ -41,6 +41,7 @@ model User {
   employeeId          String               @default("")
   organizationName    String?
   organizationId      String?
+  jurisdiction        String?
   role                UserRole             @default(EMPLOYEE)
   status              UserStatus           @default(ACTIVE)
   tokenVersion        Int                  @default(0)

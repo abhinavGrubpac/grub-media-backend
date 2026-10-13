@@ -10,23 +10,26 @@ import {
   Post,
   Put,
   Query,
+  Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import type { Response } from 'express';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserQueryDto } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
+import { ProfileUpdateDto } from '../dto/profile-update.dto';
+import { BulkActivateDto } from '../dto/bulk-activate.dto';
 import { Paginated } from '../../../common/dto/paginated';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
-import { ProfileUpdateDto } from '../dto/profile-update.dto';
-import { BulkActivateDto } from '../dto/bulk-activate.dto';
-import { Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { ProfileOtpRequestDto } from '../../auth/dto/profile-otp-request.dto';
+import { ProfileOtpVerifyDto } from '../../auth/dto/profile-otp-verify.dto';
+import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -34,20 +37,66 @@ import type { Response } from 'express';
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
+  // ---------------------------------------------------------------------------
+  // Self-service profile
+  // ---------------------------------------------------------------------------
+
   @Get('profile')
   @ApiOperation({ summary: 'Get the current user profile' })
+  @ResponseMessage('Profile fetched successfully')
   profile(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
     return this.users.findById(user.id);
   }
 
   @Patch('profile')
-  @ApiOperation({ summary: 'Update editable profile fields' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update editable profile fields (name, logo, jurisdiction)' })
+  @ResponseMessage('Profile updated successfully')
   updateProfile(
     @CurrentUser() user: AuthUser,
     @Body() dto: ProfileUpdateDto,
   ): Promise<UserResponseDto> {
     return this.users.updateProfile(user.id, dto);
   }
+
+  @Post('profile/otp-request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request an OTP to verify a new email or phone number' })
+  @ResponseMessage('OTP sent to your new contact')
+  async requestProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpRequestDto,
+  ): Promise<null> {
+    await this.users.requestProfileOtp(user.id, dto);
+    return null;
+  }
+
+  @Post('profile/otp-verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify OTP and apply the new email or phone number' })
+  @ResponseMessage('Contact updated successfully')
+  verifyProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpVerifyDto,
+  ): Promise<UserResponseDto> {
+    return this.users.verifyProfileOtp(user.id, dto);
+  }
+
+  @Post('profile/password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change password (requires current password)' })
+  @ResponseMessage('Password changed successfully')
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<null> {
+    await this.users.changePassword(user.id, dto);
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin CRUD
+  // ---------------------------------------------------------------------------
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.create')
@@ -58,8 +107,6 @@ export class UsersController {
     return this.users.create(dto, actor.id);
   }
 
-  // User directory is admin-only — a regular user reads their own profile via
-  // GET /auth/me. Self-service read/update of /users/:id is deferred (ADR note).
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.read')
   @Get()

@@ -1,10 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpPurpose, UserStatus } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
@@ -27,9 +21,6 @@ import { OtpRequestDto } from '../dto/otp-request.dto';
 import { OtpVerifyDto } from '../dto/otp-verify.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { AuthResponseDto, TokenResponseDto } from '../dto/auth-response.dto';
-import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
-import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
-import { ChangePasswordDto } from '../dto/change-password.dto';
 
 interface RequestCtx {
   ip?: string;
@@ -98,57 +89,6 @@ export class AuthService {
 
   async me(userId: string): Promise<UserResponseDto> {
     return this.users.findById(userId);
-  }
-
-  async requestProfileOtp(userId: string, dto: ProfileOtpRequestDto): Promise<void> {
-    const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
-    if (!user) throw new InvalidCredentialsException();
-    if (dto.type === 'email' && !/^\S+@\S+\.\S+$/.test(dto.value))
-      throw new BadRequestException('Invalid email');
-    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
-    const code = String(Math.floor(1000 + Math.random() * 9000));
-    await this.prisma.client.otpCode.create({
-      data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
-    });
-    this.logger.log(`Profile ${dto.type} OTP for ${userId}: ${code}`);
-  }
-
-  async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
-    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
-    const claim = await this.prisma.client.otpCode.updateMany({
-      where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
-      data: { usedAt: new Date() },
-    });
-    if (!claim.count) throw new BadRequestException('Invalid or expired OTP');
-    if (dto.type === 'email') {
-      const existing = await this.prisma.client.user.findUnique({ where: { email: dto.value } });
-      if (existing && existing.id !== userId) throw new ConflictException('Email already in use');
-      await this.prisma.client.user.update({ where: { id: userId }, data: { email: dto.value } });
-    } else
-      await this.prisma.client.user.update({
-        where: { id: userId },
-        data: { phoneNumber: dto.value },
-      });
-    return this.users.findById(userId);
-  }
-
-  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
-    const user = await this.users.findByEmailWithHash(
-      (await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } })).email,
-    );
-    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
-      throw new InvalidCredentialsException();
-    }
-    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
-      throw new BadRequestException({
-        message: 'New password must differ from the current password',
-        errorCode: ERROR_CODES.BAD_REQUEST,
-      });
-    }
-    await this.prisma.client.user.update({
-      where: { id: userId },
-      data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
-    });
   }
 
   // ---------------------------------------------------------------------------

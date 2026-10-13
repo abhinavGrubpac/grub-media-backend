@@ -1,12 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
-import { UserStatus, type User } from '@prisma/client';
+import { OtpPurpose, UserStatus, type User } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
+import { MailerService } from '../../mailer/mailer.service';
 import { Paginated } from '../../../common/dto/paginated';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
+import { ERROR_CODES } from '../../../common/constants/error-codes';
 import {
   EmailAlreadyExistsException,
+  InvalidCredentialsException,
   UserNotFoundException,
 } from '../../../common/exceptions/domain.exceptions';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -14,10 +17,20 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserQueryDto, USER_SORTABLE_FIELDS, UserSortField } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { ProfileUpdateDto } from '../dto/profile-update.dto';
+import { ProfileOtpRequestDto } from '../../auth/dto/profile-otp-request.dto';
+import { ProfileOtpVerifyDto } from '../../auth/dto/profile-otp-verify.dto';
+import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
+
+const OTP_TTL_MINUTES = 10;
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailer: MailerService,
+  ) {}
 
   private toDto(user: User): UserResponseDto {
     return plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true });
@@ -53,9 +66,103 @@ export class UsersService {
 
   async updateProfile(id: string, dto: ProfileUpdateDto): Promise<UserResponseDto> {
     await this.getOrThrow(id);
-    const user = await this.prisma.client.user.update({ where: { id }, data: dto });
+    const user = await this.prisma.client.user.update({
+      where: { id },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        logoUrl: dto.logoUrl,
+        jurisdiction: dto.jurisdiction,
+      },
+    });
     return this.toDto(user);
   }
+
+  // ---------------------------------------------------------------------------
+  // Profile contact update (OTP-gated)
+  // ---------------------------------------------------------------------------
+
+  async requestProfileOtp(userId: string, dto: ProfileOtpRequestDto): Promise<void> {
+    const user = await this.prisma.client.user.findFirst({ where: { id: userId } });
+    if (!user) throw new InvalidCredentialsException();
+
+    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
+
+    // Invalidate any previous unused OTPs for this purpose.
+    await this.prisma.otpCode.updateMany({
+      where: { userId, purpose, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    await this.prisma.otpCode.create({
+      data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
+    });
+
+    if (dto.type === 'email') {
+      await this.mailer.sendOtp(dto.value, code);
+    } else {
+      // SMS not yet supported — log for dev visibility.
+      this.logger.log(`[DEV] Profile phone OTP for user ${userId}: ${code}`);
+    }
+  }
+
+  async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
+    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
+    const claim = await this.prisma.otpCode.updateMany({
+      where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (!claim.count)
+      throw new BadRequestException({
+        message: 'Invalid or expired OTP',
+        errorCode: ERROR_CODES.BAD_REQUEST,
+      });
+
+    if (dto.type === 'email') {
+      // Check all users (incl. soft-deleted) so a deleted account's email can't be claimed.
+      const existing = await this.prisma.user.findFirst({ where: { email: dto.value } });
+      if (existing && existing.id !== userId)
+        throw new ConflictException({
+          message: 'Email already in use',
+          errorCode: ERROR_CODES.CONFLICT,
+        });
+      await this.prisma.client.user.update({ where: { id: userId }, data: { email: dto.value } });
+    } else {
+      await this.prisma.client.user.update({
+        where: { id: userId },
+        data: { phoneNumber: dto.value },
+      });
+    }
+    return this.findById(userId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Password change (requires current password)
+  // ---------------------------------------------------------------------------
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.findByEmailWithHash(
+      (await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } })).email,
+    );
+    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+      throw new InvalidCredentialsException();
+    }
+    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
+      throw new BadRequestException({
+        message: 'New password must differ from the current password',
+        errorCode: ERROR_CODES.BAD_REQUEST,
+      });
+    }
+    await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin operations
+  // ---------------------------------------------------------------------------
 
   async list(query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
     const search = query.search?.trim();
