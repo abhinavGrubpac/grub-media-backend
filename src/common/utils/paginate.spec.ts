@@ -13,6 +13,10 @@ describe('toSkipTake', () => {
   it('page 1 has skip 0', () => {
     expect(toSkipTake(dto({ page: 1, limit: 50 }))).toEqual({ skip: 0, take: 50 });
   });
+
+  it('accepts any object carrying page/limit (not only PaginationQueryDto)', () => {
+    expect(toSkipTake({ page: 2, limit: 10 })).toEqual({ skip: 10, take: 10 });
+  });
 });
 
 describe('buildMeta', () => {
