@@ -10,6 +10,7 @@ jest.mock('nodemailer', () => ({
 }));
 
 const configValues: Record<string, unknown> = {
+  'mailer.configured': true,
   'mailer.host': 'smtp.test.com',
   'mailer.port': 587,
   'mailer.secure': false,

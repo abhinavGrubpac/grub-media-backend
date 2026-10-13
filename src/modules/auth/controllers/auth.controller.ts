@@ -48,9 +48,9 @@ export class AuthController {
   @Post('login/otp-request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a 4-digit OTP login code via email' })
-  @ResponseMessage('OTP sent if account exists')
-  async requestOtpLogin(@Body() dto: OtpRequestDto): Promise<null> {
-    await this.auth.requestOtpLogin(dto);
+  @ResponseMessage('OTP sent to your registered email')
+  async requestOtpLogin(@Body() dto: OtpRequestDto, @Req() req: Request): Promise<null> {
+    await this.auth.requestOtpLogin(dto, ctxOf(req as never));
     return null;
   }
 
@@ -58,7 +58,7 @@ export class AuthController {
   @Post('login/otp-verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP code and receive access + refresh tokens' })
-  @ResponseMessage('Logged in successfully')
+  @ResponseMessage('OTP verified. You are now logged in.')
   verifyOtpLogin(@Body() dto: OtpVerifyDto, @Req() req: Request): Promise<AuthResponseDto> {
     return this.auth.verifyOtpLogin(dto, ctxOf(req));
   }
@@ -67,7 +67,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password reset link via email' })
-  @ResponseMessage('Reset link sent if account exists')
+  @ResponseMessage('Password reset link sent to your email')
   async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<null> {
     await this.auth.forgotPassword(dto);
     return null;

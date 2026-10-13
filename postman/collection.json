@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "grub-media-backend",
-    "description": "GrubPac media backend — Auth, Users, Health. Login auto-captures {{accessToken}}/{{refreshToken}}; the collection sends the bearer token automatically.",
+    "name": "grub-media-backend — Authentication",
+    "description": "Authentication endpoints only. Login and refresh requests save the returned access and refresh tokens to the active Postman environment. Protected requests use {{accessToken}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -14,7 +14,7 @@
       "name": "Authentication",
       "item": [
         {
-          "name": "Login",
+          "name": "Login — Password",
           "request": {
             "auth": { "type": "noauth" },
             "method": "POST",
@@ -22,25 +22,10 @@
             "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login"] },
             "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@grubpac.com\",\n  \"password\": \"Str0ngPass1\"\n}" }
           },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('login ok', () => pm.response.code === 200);",
-                  "const data = pm.response.json().data;",
-                  "if (data) {",
-                  "  pm.environment.set('accessToken', data.accessToken);",
-                  "  pm.environment.set('refreshToken', data.refreshToken);",
-                  "}"
-                ]
-              }
-            }
-          ]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('login returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
         },
         {
-          "name": "Refresh",
+          "name": "Refresh Tokens",
           "request": {
             "auth": { "type": "noauth" },
             "method": "POST",
@@ -48,57 +33,29 @@
             "url": { "raw": "{{baseUrl}}/api/v1/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "refresh"] },
             "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
           },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json().data;",
-                  "if (data) {",
-                  "  pm.environment.set('accessToken', data.accessToken);",
-                  "  pm.environment.set('refreshToken', data.refreshToken);",
-                  "}"
-                ]
-              }
-            }
-          ]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('refresh returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
         },
         {
-          "name": "OTP Login — Request",
+          "name": "Login — Request OTP",
           "request": {
             "auth": { "type": "noauth" },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-request"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" }
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" },
+            "description": "Requests a 4-digit login code by email. The response is the same whether or not the account exists."
           }
         },
         {
-          "name": "OTP Login — Verify",
+          "name": "Login — Verify OTP",
           "request": {
             "auth": { "type": "noauth" },
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-verify"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\",\n  \"code\": \"1234\"\n}" },
-            "description": "Submit the 4-digit OTP code received by email. Returns the same token pair as the password login."
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\",\n  \"code\": \"1234\"\n}" }
           },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json().data;",
-                  "if (data) {",
-                  "  pm.environment.set('accessToken', data.accessToken);",
-                  "  pm.environment.set('refreshToken', data.refreshToken);",
-                  "}"
-                ]
-              }
-            }
-          ]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('OTP login returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
         },
         {
           "name": "Forgot Password",
@@ -108,7 +65,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": { "raw": "{{baseUrl}}/api/v1/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "forgot-password"] },
             "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" },
-            "description": "Always returns 200 regardless of whether the email exists (no user enumeration)."
+            "description": "Requests a password reset link. The response does not reveal whether the account exists."
           }
         },
         {
@@ -118,90 +75,44 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": { "raw": "{{baseUrl}}/api/v1/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "reset-password"] },
-            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<token-from-email-link>\",\n  \"password\": \"NewStr0ngPass1\"\n}" },
-            "description": "Token is the `?token=` query param value from the reset link. Invalidates all existing sessions."
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<token-from-email-link>\",\n  \"password\": \"NewStr0ngPass1\"\n}" }
           }
         },
         {
-          "name": "Me",
+          "name": "Get Current User",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"] } }
+        },
+        {
+          "name": "Request Profile Verification OTP",
           "request": {
-            "method": "GET",
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"] }
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "otp-request"] },
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\"\n}" },
+            "description": "Request a verification code for a new email or phone number. Set type to email or phone."
+          }
+        },
+        {
+          "name": "Verify Profile OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "otp-verify"] },
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\",\n  \"code\": \"1234\"\n}" }
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"Str0ngPass1\",\n  \"newPassword\": \"NewStr0ngPass1\"\n}" }
           }
         },
         {
           "name": "Logout",
-          "request": {
-            "method": "POST",
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Users",
-      "item": [
-        {
-          "name": "List users",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20&sortBy=createdAt&sortOrder=desc",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "users"],
-              "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" },
-                { "key": "sortBy", "value": "createdAt" },
-                { "key": "sortOrder", "value": "desc" }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create user",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"newuser@grubpac.com\",\n  \"password\": \"NewPass123\",\n  \"firstName\": \"New\",\n  \"lastName\": \"User\",\n  \"role\": \"EMPLOYEE\"\n}" }
-          }
-        },
-        {
-          "name": "Get user by id",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", ":id"], "variable": [{ "key": "id", "value": "" }] }
-          }
-        },
-        {
-          "name": "Update user",
-          "request": {
-            "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", ":id"], "variable": [{ "key": "id", "value": "" }] },
-            "body": { "mode": "raw", "raw": "{\n  \"firstName\": \"Updated\",\n  \"status\": \"ACTIVE\"\n}" }
-          }
-        },
-        {
-          "name": "Delete user",
-          "request": {
-            "method": "DELETE",
-            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", ":id"], "variable": [{ "key": "id", "value": "" }] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Health",
-      "item": [
-        {
-          "name": "Health",
-          "request": {
-            "auth": { "type": "noauth" },
-            "method": "GET",
-            "url": { "raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"] }
-          }
+          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"] } }
         }
       ]
     }
