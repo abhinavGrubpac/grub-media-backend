@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LogType } from '@prisma/client';
 import type { Response } from 'express';
@@ -34,7 +34,7 @@ export class LogsController {
   constructor(private readonly logs: LogsService) {}
 
   @Get('filters')
-  @ApiOperation({ summary: 'Categories + actions for the log filter panel (V2)' })
+  @ApiOperation({ summary: 'Categories + actions for the log filter panel' })
   @ResponseMessage('Log filters fetched successfully')
   getFilters(@Query() query: LogFiltersQueryDto): Promise<FilterResponseDTO> {
     return this.logs.getFilters(query.logtype);
@@ -50,21 +50,6 @@ export class LogsController {
   @ResponseMessage('Logs fetched successfully')
   search(@Query() query: LogSearchQueryDto): Promise<LogListResponseDTO> {
     return this.logs.search(query);
-  }
-
-  @Post('export')
-  @SkipResponseWrap()
-  @ApiOperation({
-    summary: 'Export the logs of the current page as CSV (filters + page/limit)',
-    description:
-      'Frontend applies its filters, sends them with the page currently on ' +
-      'screen, and only those pagination rows are written to the CSV.',
-  })
-  async export(
-    @Body() query: ExportRequestDto,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<string> {
-    return this.streamCsv(query, res);
   }
 
   @Get('export')

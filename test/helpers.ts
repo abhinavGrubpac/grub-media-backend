@@ -6,9 +6,56 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
 
-/** Boot a Nest app with the same global config as main.ts (minus helmet/cors/swagger). */
+/**
+ * The e2e suite must only ever touch the throwaway docker database.
+ * `AppModule`'s ConfigModule loads `.env`, which can overwrite the
+ * DATABASE_URL that env-e2e.ts set — silently repointing every PrismaClient
+ * at the real dev database. Guard against that before any destructive helper
+ * runs: refuse unless we are unmistakably on the local test instance.
+ */
+export const TEST_DB_HOST = 'localhost';
+export const TEST_DB_PORT = '5433';
+export const TEST_DB_NAME = 'grub_test';
+
+export async function assertTestDatabase(app: INestApplication): Promise<void> {
+  const prisma = prismaOf(app);
+  const rows = (await prisma.$queryRawUnsafe('SELECT current_database() AS db')) as Array<{
+    db: string;
+  }>;
+  const { db } = rows;
+
+  // The live dev database is Neon's `Grubpac`; the throwaway docker one is
+  // `grub_test`. Check the database NAME only: inet_server_addr/port report the
+  // server's own view, which inside docker is the container IP and port 5432,
+  // not the mapped localhost:5433 the client connected through.
+  if (db !== TEST_DB_NAME) {
+    throw new Error(
+      'Refusing to run e2e database helpers against a non-test database. ' +
+        `Connected to db=${db}, expected db=${TEST_DB_NAME}. ` +
+        'Check test/env-e2e.ts and DATABASE_URL resolution.',
+    );
+  }
+}
+
+/** The throwaway docker database. Must match docker-compose.test.yml. */
+export const TEST_DATABASE_URL = 'postgresql://grub:grub@localhost:5433/grub_test?schema=public';
+
+/**
+ * Boot a Nest app with the same global config as main.ts (minus helmet/cors/swagger).
+ *
+ * PrismaService is overridden with an EXPLICIT test datasource URL: AppModule's
+ * ConfigModule loads `.env` at boot, which overwrites the DATABASE_URL that
+ * env-e2e.ts set — without this, every query would silently hit the real dev
+ * database. assertTestDatabase() double-checks before any destructive helper.
+ */
 export async function createTestApp(): Promise<INestApplication> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(PrismaService)
+    .useFactory({
+      inject: [],
+      factory: () => new PrismaService(TEST_DATABASE_URL),
+    })
+    .compile();
   const app = moduleRef.createNestApplication({ bufferLogs: false });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -30,6 +77,7 @@ export function prismaOf(app: INestApplication): PrismaService {
 
 /** Wipe all rows between tests (base client — not soft-delete filtered). */
 export async function cleanDatabase(app: INestApplication): Promise<void> {
+  await assertTestDatabase(app);
   const prisma = prismaOf(app);
   await prisma.session.deleteMany({});
   await prisma.auditLog.deleteMany({});
@@ -78,6 +126,7 @@ export async function login(
 
 /** Wipe every log row + its taxonomy. Separate from cleanDatabase on purpose. */
 export async function cleanLogs(app: INestApplication): Promise<void> {
+  await assertTestDatabase(app);
   const prisma = prismaOf(app);
   await prisma.log.deleteMany({});
   await prisma.logAction.deleteMany({});
