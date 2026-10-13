@@ -13,6 +13,9 @@ import { Public } from '../decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
+import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
+import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 
 function ctxOf(req: Request): { ip?: string; userAgent?: string } {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
@@ -45,9 +48,9 @@ export class AuthController {
   @Post('login/otp-request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a 4-digit OTP login code via email' })
-  @ResponseMessage('OTP sent if account exists')
-  async requestOtpLogin(@Body() dto: OtpRequestDto): Promise<null> {
-    await this.auth.requestOtpLogin(dto);
+  @ResponseMessage('OTP sent to your registered email')
+  async requestOtpLogin(@Body() dto: OtpRequestDto, @Req() req: Request): Promise<null> {
+    await this.auth.requestOtpLogin(dto, ctxOf(req as never));
     return null;
   }
 
@@ -55,7 +58,7 @@ export class AuthController {
   @Post('login/otp-verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP code and receive access + refresh tokens' })
-  @ResponseMessage('Logged in successfully')
+  @ResponseMessage('OTP verified. You are now logged in.')
   verifyOtpLogin(@Body() dto: OtpVerifyDto, @Req() req: Request): Promise<AuthResponseDto> {
     return this.auth.verifyOtpLogin(dto, ctxOf(req));
   }
@@ -64,7 +67,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password reset link via email' })
-  @ResponseMessage('Reset link sent if account exists')
+  @ResponseMessage('Password reset link sent to your email')
   async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<null> {
     await this.auth.forgotPassword(dto);
     return null;
@@ -96,5 +99,33 @@ export class AuthController {
   @ResponseMessage('Current user')
   me(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
     return this.auth.me(user.id);
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/otp-request')
+  requestProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpRequestDto,
+  ): Promise<null> {
+    return this.auth.requestProfileOtp(user.id, dto).then(() => null);
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/otp-verify')
+  verifyProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpVerifyDto,
+  ): Promise<UserResponseDto> {
+    return this.auth.verifyProfileOtp(user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/password')
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<null> {
+    await this.auth.changePassword(user.id, dto);
+    return null;
   }
 }

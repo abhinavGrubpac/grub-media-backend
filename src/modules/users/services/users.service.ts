@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
-import type { User, UserStatus } from '@prisma/client';
+import { UserStatus, type User } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { Paginated } from '../../../common/dto/paginated';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
@@ -13,6 +13,7 @@ import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserQueryDto, USER_SORTABLE_FIELDS, UserSortField } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
+import { ProfileUpdateDto } from '../dto/profile-update.dto';
 
 @Injectable()
 export class UsersService {
@@ -50,8 +51,31 @@ export class UsersService {
     return this.toDto(await this.getOrThrow(id));
   }
 
+  async updateProfile(id: string, dto: ProfileUpdateDto): Promise<UserResponseDto> {
+    await this.getOrThrow(id);
+    const user = await this.prisma.client.user.update({ where: { id }, data: dto });
+    return this.toDto(user);
+  }
+
   async list(query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
-    const where = { role: query.role, status: query.status };
+    const search = query.search?.trim();
+    const where = {
+      deletedAt: null,
+      role: query.role,
+      status: query.status,
+      ...(search
+        ? {
+            OR: [
+              { email: { contains: search, mode: 'insensitive' as const } },
+              { firstName: { contains: search, mode: 'insensitive' as const } },
+              { lastName: { contains: search, mode: 'insensitive' as const } },
+              { employeeId: { contains: search, mode: 'insensitive' as const } },
+              { phoneNumber: { contains: search, mode: 'insensitive' as const } },
+              { organizationName: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
     const { skip, take } = toSkipTake(query);
     // Authoritatively allowlist the sort column — never pass an arbitrary
     // client string to Prisma orderBy (would 500 / leak schema internals).
@@ -96,6 +120,54 @@ export class UsersService {
   async softDelete(id: string): Promise<void> {
     await this.getOrThrow(id);
     await this.prisma.client.user.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  async bulkActivate(ids: string[]): Promise<number> {
+    const result = await this.prisma.client.user.updateMany({
+      where: { id: { in: ids }, status: UserStatus.SUSPENDED, deletedAt: null },
+      data: { status: UserStatus.ACTIVE },
+    });
+    return result.count;
+  }
+
+  async toCsv(query: UserQueryDto): Promise<string> {
+    const search = query.search?.trim();
+    const rows = await this.prisma.client.user.findMany({
+      where: {
+        deletedAt: null,
+        role: query.role,
+        status: query.status,
+        ...(search
+          ? {
+              OR: [
+                { email: { contains: search, mode: 'insensitive' as const } },
+                { firstName: { contains: search, mode: 'insensitive' as const } },
+                { lastName: { contains: search, mode: 'insensitive' as const } },
+                { employeeId: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const esc = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    return [
+      'id,email,firstName,lastName,employeeId,role,status,createdAt',
+      ...rows.map((u) =>
+        [
+          u.id,
+          u.email,
+          u.firstName,
+          u.lastName,
+          u.employeeId,
+          u.role,
+          u.status,
+          u.createdAt.toISOString(),
+        ]
+          .map(esc)
+          .join(','),
+      ),
+    ].join('\n');
   }
 
   private async getOrThrow(id: string): Promise<User> {

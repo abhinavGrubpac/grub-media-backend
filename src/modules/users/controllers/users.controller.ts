@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -22,12 +23,31 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
+import { ProfileUpdateDto } from '../dto/profile-update.dto';
+import { BulkActivateDto } from '../dto/bulk-activate.dto';
+import { Res } from '@nestjs/common';
+import type { Response } from 'express';
 
 @ApiTags('Users')
 @ApiBearerAuth()
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
   constructor(private readonly users: UsersService) {}
+
+  @Get('profile')
+  @ApiOperation({ summary: 'Get the current user profile' })
+  profile(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+    return this.users.findById(user.id);
+  }
+
+  @Patch('profile')
+  @ApiOperation({ summary: 'Update editable profile fields' })
+  updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileUpdateDto,
+  ): Promise<UserResponseDto> {
+    return this.users.updateProfile(user.id, dto);
+  }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.create')
@@ -47,6 +67,20 @@ export class UsersController {
   @ResponseMessage('Users fetched successfully')
   list(@Query() query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
     return this.users.list(query);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Get('export/csv')
+  async exportCsv(@Query() query: UserQueryDto, @Res() res: Response): Promise<void> {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
+    res.send(await this.users.toCsv(query));
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Put('bulk-activate')
+  async bulkActivate(@Body() dto: BulkActivateDto): Promise<{ activated: number }> {
+    return { activated: await this.users.bulkActivate(dto.ids) };
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)

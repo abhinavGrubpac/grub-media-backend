@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, UserStatus } from '@prisma/client';
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 /**
@@ -18,6 +18,10 @@ export const USER_SORTABLE_FIELDS = [
 export type UserSortField = (typeof USER_SORTABLE_FIELDS)[number];
 
 export class UserQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ description: 'Search name, email, employee ID, phone, or organization' })
+  @IsOptional()
+  @IsString()
+  search?: string;
   @ApiPropertyOptional({ enum: UserRole })
   @IsOptional()
   @IsEnum(UserRole)
