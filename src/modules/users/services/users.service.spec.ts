@@ -249,7 +249,7 @@ describe('UsersService', () => {
         userId: 'admin-1',
         empId: 'u1',
         // No employeeId on the fixture → logRefOf falls back to the email.
-        referenceId: 'a@b.c',
+        target: 'a@b.c',
       }),
     );
   });

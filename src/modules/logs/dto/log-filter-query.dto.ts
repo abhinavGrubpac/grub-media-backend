@@ -33,7 +33,8 @@ export abstract class LogFilterQueryDto {
   logtype!: LogType;
 
   @ApiPropertyOptional({
-    description: 'Free-text search over action text, reference/user/employee ids and details',
+    description:
+      'Free-text search over action text, action name, category name, user/employee ids and details',
     example: 'salary revised',
   })
   @IsOptional()
@@ -77,20 +78,19 @@ export abstract class LogFilterQueryDto {
   categories?: number[];
 
   @ApiPropertyOptional({
-    description: 'Comma-separated action ids to include',
-    example: '7,8',
+    description: 'Comma-separated action names to include (text match, case-insensitive)',
+    example: 'Login,Logout',
   })
   @IsOptional()
   @Transform(({ value }) =>
     String(value)
       .split(',')
       .map((part) => part.trim())
-      .filter(Boolean)
-      .map(Number),
+      .filter(Boolean),
   )
   @IsArray()
   @ArrayMinSize(1)
-  @IsInt({ each: true })
-  @Min(1, { each: true })
-  actions?: number[];
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  actions?: string[];
 }

@@ -1,7 +1,9 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { LogType } from '@prisma/client';
 import type { Request } from 'express';
 import { AuthService } from '../services/auth.service';
+import { LogsService } from '../../logs/services/logs.service';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { LoginDto } from '../dto/login.dto';
 import { OtpRequestDto } from '../dto/otp-request.dto';
@@ -21,7 +23,10 @@ function ctxOf(req: Request): { ip?: string; userAgent?: string } {
 @ApiTags('Authentication')
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly logs: LogsService,
+  ) {}
 
   @Public()
   @Post('login')
@@ -94,7 +99,16 @@ export class AuthController {
   @Get('me')
   @ApiOperation({ summary: 'Get the current authenticated user' })
   @ResponseMessage('Current user')
-  me(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
-    return this.auth.me(user.id);
+  async me(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+    const profile = await this.auth.me(user.id);
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'View Profile',
+      actionText: 'Viewed current session user',
+      userId: user.id,
+      target: user.id,
+    });
+    return profile;
   }
 }

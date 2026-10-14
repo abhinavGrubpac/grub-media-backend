@@ -142,7 +142,7 @@ describe('AuthService.login', () => {
       InvalidCredentialsException,
     );
     expect((logs as never as { record: jest.Mock }).record).toHaveBeenCalledWith(
-      expect.objectContaining({ actionName: 'Failed Login', referenceId: 'a@b.c' }),
+      expect.objectContaining({ actionName: 'Failed Login', target: 'a@b.c' }),
     );
   });
 

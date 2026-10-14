@@ -4,10 +4,13 @@ import { AuthUser } from '../../auth/decorators/current-user.decorator';
 const actor: AuthUser = { id: 'admin-1', role: 'ADMIN' as never, tokenVersion: 0 };
 const superActor: AuthUser = { id: 'sa-1', role: 'SUPER_ADMIN' as never, tokenVersion: 0 };
 
+/** Read endpoints also write an audit row — a no-op LogsService double. */
+const logs = { record: jest.fn().mockResolvedValue(undefined) } as never;
+
 describe('UsersController (thin delegation)', () => {
   it('create delegates to the service with actor id and role', async () => {
     const service = { create: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
+    const ctrl = new UsersController(service, logs);
     await ctrl.create({ email: 'a@b.c' } as never, actor);
     expect((service as { create: jest.Mock }).create).toHaveBeenCalledWith(
       { email: 'a@b.c' },
@@ -18,15 +21,15 @@ describe('UsersController (thin delegation)', () => {
 
   it('list passes the query through to the service', async () => {
     const service = { list: jest.fn().mockResolvedValue({ data: [], meta: {} }) } as never;
-    const ctrl = new UsersController(service);
+    const ctrl = new UsersController(service, logs);
     const query = { page: 2, limit: 10, sortOrder: 'asc' };
-    await ctrl.list(query as never);
+    await ctrl.list(query as never, actor);
     expect((service as { list: jest.Mock }).list).toHaveBeenCalledWith(query);
   });
 
   it('remove delegates to softDelete with the actor id and returns null', async () => {
     const service = { softDelete: jest.fn().mockResolvedValue(undefined) } as never;
-    const ctrl = new UsersController(service);
+    const ctrl = new UsersController(service, logs);
     const result = await ctrl.remove('u1', actor);
     expect(result).toBeNull();
     expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith(
@@ -38,14 +41,14 @@ describe('UsersController (thin delegation)', () => {
 
   it('findOne delegates to findById', async () => {
     const service = { findById: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
-    await ctrl.findOne('u1');
+    const ctrl = new UsersController(service, logs);
+    await ctrl.findOne('u1', actor);
     expect((service as { findById: jest.Mock }).findById).toHaveBeenCalledWith('u1');
   });
 
   it('update forwards id, dto, actor id and role', async () => {
     const service = { update: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
+    const ctrl = new UsersController(service, logs);
     await ctrl.update('u1', { firstName: 'X' } as never, actor);
     expect((service as { update: jest.Mock }).update).toHaveBeenCalledWith(
       'u1',

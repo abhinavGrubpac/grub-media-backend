@@ -1,10 +1,10 @@
 import { LogType, Prisma, PrismaClient } from '@prisma/client';
 
 /**
- * Log System seed — creates the category/action taxonomy for all three log
- * streams (SYSTEM, ACTIVITY, EMPLOYEE) plus ~400 realistic log rows spread
- * over the last 90 days, so pagination, filtering and the CSV export can be
- * exercised end to end.
+ * Log System seed — creates the category taxonomy for all three log streams
+ * (SYSTEM, ACTIVITY, EMPLOYEE) plus ~400 realistic log rows spread over the
+ * last 90 days, so pagination, filtering and the CSV export can be exercised
+ * end to end. Action names are stored flat on each row (no action table).
  *
  * Idempotent: the taxonomy is upserted on its unique keys (same contract as
  * LogsService.record) and the rows are only inserted when `log` is empty.
@@ -272,12 +272,11 @@ const BATCH_SIZE = 100;
 
 interface TaxonomyIndex {
   categories: Map<string, number>;
-  actions: Map<string, number>;
 }
 
-/** Upsert every category + action, then return name → id lookups. */
+/** Upsert every category, then return name → id lookups. */
 async function ensureTaxonomy(): Promise<TaxonomyIndex> {
-  const index: TaxonomyIndex = { categories: new Map(), actions: new Map() };
+  const index: TaxonomyIndex = { categories: new Map() };
 
   for (const logtype of LOG_TYPES) {
     for (const category of TAXONOMY[logtype]) {
@@ -287,15 +286,6 @@ async function ensureTaxonomy(): Promise<TaxonomyIndex> {
         update: {},
       });
       index.categories.set(`${logtype}:${category.name}`, row.id);
-
-      for (const action of category.actions) {
-        const actionRow = await prisma.logAction.upsert({
-          where: { name_categoryId: { name: action.name, categoryId: row.id } },
-          create: { name: action.name, categoryId: row.id },
-          update: {},
-        });
-        index.actions.set(`${logtype}:${category.name}:${action.name}`, actionRow.id);
-      }
     }
   }
 
@@ -340,13 +330,12 @@ function makeRow(
   return {
     typeEnum: logtype,
     categoryId: index.categories.get(`${logtype}:${category.name}`) ?? null,
-    actionId: index.actions.get(`${logtype}:${category.name}:${action.name}`) ?? null,
+    actionName: action.name,
     actionText,
     userId: rng() < 0.9 ? user : null,
     empId: rng() < 0.8 ? emp : null,
     oldDetail: useDetail ? JSON.stringify(detail[0]) : null,
     newDetail: useDetail ? JSON.stringify(detail[1]) : null,
-    referenceId: rng() < 0.7 ? ref : null,
     createdAt,
   };
 }
@@ -421,15 +410,14 @@ async function backfillNullActionText(): Promise<number> {
       id: true,
       userId: true,
       empId: true,
-      referenceId: true,
-      action: { select: { name: true } },
+      actionName: true,
     },
   });
 
   let updated = 0;
   for (const row of nulls) {
     const rng = mulberry32(row.id);
-    const templates = row.action ? textsByAction.get(row.action.name) : undefined;
+    const templates = row.actionName ? textsByAction.get(row.actionName) : undefined;
     if (!templates || templates.length === 0) {
       continue;
     }
@@ -437,7 +425,7 @@ async function backfillNullActionText(): Promise<number> {
     const ctx = {
       user: row.userId ?? pick(rng, USERS),
       emp: row.empId ?? pick(rng, EMPS),
-      ref: row.referenceId ?? `${pick(rng, REF_PREFIXES)}-${9000 + row.id}`,
+      ref: `${pick(rng, REF_PREFIXES)}-${9000 + row.id}`,
       ip: `10.0.${Math.floor(rng() * 255)}.${Math.floor(rng() * 255)}`,
     };
 
@@ -456,9 +444,7 @@ const MIX_TOTAL = 300;
 
 async function main(): Promise<void> {
   const taxonomy = await ensureTaxonomy();
-  console.log(
-    `Taxonomy ready: ${taxonomy.categories.size} categories, ${taxonomy.actions.size} actions`,
-  );
+  console.log(`Taxonomy ready: ${taxonomy.categories.size} categories`);
 
   const repaired = await backfillNullActionText();
   if (repaired > 0) {

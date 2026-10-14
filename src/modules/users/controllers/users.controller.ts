@@ -15,7 +15,9 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
+import { UserRole, LogType } from '@prisma/client';
 import { UsersService } from '../services/users.service';
+import { LogsService } from '../../logs/services/logs.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { ExportUsersDto } from '../dto/export-users.dto';
@@ -36,17 +38,25 @@ import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
 @ApiBearerAuth()
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
-
-  // ---------------------------------------------------------------------------
-  // Self-service profile
-  // ---------------------------------------------------------------------------
+  constructor(
+    private readonly users: UsersService,
+    private readonly logs: LogsService,
+  ) {}
 
   @Get('profile')
   @ApiOperation({ summary: 'Get the current user profile' })
   @ResponseMessage('Profile fetched successfully')
-  profile(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
-    return this.users.findById(user.id);
+  async profile(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+    const profile = await this.users.findById(user.id);
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'View Profile',
+      actionText: 'Viewed own profile',
+      userId: user.id,
+      target: user.id,
+    });
+    return profile;
   }
 
   @Patch('profile')
@@ -113,18 +123,24 @@ export class UsersController {
   @Get()
   @ApiOperation({ summary: 'List users (paginated, admin only)' })
   @ResponseMessage('Users fetched successfully')
-  list(@Query() query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
-    return this.users.list(query);
+  async list(
+    @Query() query: UserQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<Paginated<UserResponseDto>> {
+    const result = await this.users.list(query);
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Employment',
+      actionName: 'List Users',
+      actionText: `Listed user directory (page ${query.page})`,
+      userId: actor.id,
+    });
+    return result;
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  @RequirePermissions('users.read')
-  @Post('export/csv')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Export users as CSV (all / active / suspended / dismissed / selected IDs)',
-  })
-  async exportCsv(@Body() dto: ExportUsersDto, @Res() res: Response): Promise<void> {
+  @Get('export/csv')
+  async exportCsv(@Query() query: UserQueryDto, @Res() res: Response): Promise<void> {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
     res.send(await this.users.exportCsv(dto));
@@ -144,8 +160,17 @@ export class UsersController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a user by id (admin only)' })
   @ResponseMessage('User fetched successfully')
-  findOne(@Param('id') id: string): Promise<UserResponseDto> {
-    return this.users.findById(id);
+  async findOne(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<UserResponseDto> {
+    const user = await this.users.findById(id);
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Employment',
+      actionName: 'View User',
+      actionText: `Viewed user ${id}`,
+      userId: actor.id,
+      target: id,
+    });
+    return user;
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)

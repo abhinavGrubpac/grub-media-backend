@@ -31,7 +31,7 @@ export class AccessService {
       actionName: 'Create Permission',
       actionText: `Permission ${dto.module}.${dto.page}.${dto.action} created by ${actorId}`,
       userId: actorId,
-      referenceId: String(permission.id),
+      target: String(permission.id),
       newDetail: { module: dto.module, page: dto.page, action: dto.action },
     });
     return permission;
@@ -58,7 +58,7 @@ export class AccessService {
       actionName: 'Create Bundle',
       actionText: `Permission bundle "${bundle.name}" created by ${actorId}`,
       userId: actorId,
-      referenceId: String(bundle.id),
+      target: String(bundle.id),
       newDetail: { name: bundle.name, permissionCount: bundle.permissions.length },
     });
     return bundle;
@@ -76,7 +76,7 @@ export class AccessService {
       actionText: `Permission bundle ${bundleId} assigned to employee ${employeeId} by ${actor}`,
       userId: actor,
       empId: employeeId,
-      referenceId: bundleId,
+      target: bundleId,
     });
     return row;
   }
@@ -91,7 +91,7 @@ export class AccessService {
       actionText: `Permission bundle ${bundleId} removed from employee ${employeeId} by ${actor}`,
       userId: actor,
       empId: employeeId,
-      referenceId: bundleId,
+      target: bundleId,
     });
     return row;
   }
@@ -119,7 +119,7 @@ export class AccessService {
       actionText: `Admin ${admin.email} assigned to employee ${employee.email} by ${actor}`,
       userId: actor,
       empId: employeeId,
-      referenceId: logRefOf(admin),
+      target: logRefOf(admin),
     });
     return row;
   }

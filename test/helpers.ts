@@ -129,7 +129,6 @@ export async function cleanLogs(app: INestApplication): Promise<void> {
   await assertTestDatabase(app);
   const prisma = prismaOf(app);
   await prisma.log.deleteMany({});
-  await prisma.logAction.deleteMany({});
   await prisma.logCategory.deleteMany({});
 }
 
@@ -142,13 +141,13 @@ export interface SeedLogInput {
   empId?: string;
   oldDetail?: string;
   newDetail?: string;
-  referenceId?: string;
   createdAt?: Date;
 }
 
 /**
- * Insert log rows directly, upserting category/action by name exactly the way
- * LogsService.record does, so e2e fixtures exercise the real unique keys.
+ * Insert log rows directly, upserting the category by name exactly the way
+ * LogsService.record does, so e2e fixtures exercise the real unique key. The
+ * action name is stored flat on the row (no action taxonomy table).
  */
 export async function seedLogs(app: INestApplication, inputs: SeedLogInput[]): Promise<number[]> {
   const prisma = prismaOf(app);
@@ -163,26 +162,16 @@ export async function seedLogs(app: INestApplication, inputs: SeedLogInput[]): P
         })
       : null;
 
-    const action =
-      category && input.actionName
-        ? await prisma.logAction.upsert({
-            where: { name_categoryId: { name: input.actionName, categoryId: category.id } },
-            create: { name: input.actionName, categoryId: category.id },
-            update: {},
-          })
-        : null;
-
     const row = await prisma.log.create({
       data: {
         typeEnum: input.typeEnum,
         categoryId: category?.id ?? null,
-        actionId: action?.id ?? null,
+        actionName: input.actionName ?? null,
         actionText: input.actionText ?? null,
         userId: input.userId ?? null,
         empId: input.empId ?? null,
         oldDetail: input.oldDetail ?? null,
         newDetail: input.newDetail ?? null,
-        referenceId: input.referenceId ?? null,
         ...(input.createdAt ? { createdAt: input.createdAt } : {}),
       },
     });

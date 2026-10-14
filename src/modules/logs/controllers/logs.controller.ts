@@ -12,6 +12,7 @@ import { FilterResponseDTO, LogListResponseDTO } from '../dto/log.types';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { SkipResponseWrap } from '../../../common/decorators/skip-response-wrap.decorator';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
+import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 
 /**
  * Log System V2 endpoints (see `logs Grubmedia .drawio.pdf`):
@@ -25,6 +26,10 @@ import { RequirePermissions } from '../../auth/decorators/require-permissions.de
  * Every route requires a valid JWT plus the `logs.read` permission
  * (SUPER_ADMIN/ADMIN). Static routes are declared before `:logtype` so
  * Nest never matches them as a logtype param.
+ *
+ * Each read is itself audited into the SYSTEM stream under the
+ * 'Log Access' category — the read is recorded AFTER the page is built, so the
+ * response never contains its own audit row (later requests will see it).
  */
 @ApiTags('Logs')
 @ApiBearerAuth()
@@ -33,23 +38,45 @@ import { RequirePermissions } from '../../auth/decorators/require-permissions.de
 export class LogsController {
   constructor(private readonly logs: LogsService) {}
 
+  /** Audit a read of the log endpoints (SYSTEM / Log Access). */
+  private auditRead(u: AuthUser, actionName: string, actionText: string): Promise<void> {
+    return this.logs.record({
+      typeEnum: LogType.SYSTEM,
+      categoryName: 'Log Access',
+      actionName,
+      actionText,
+      userId: u.id,
+    });
+  }
+
   @Get('filters')
   @ApiOperation({ summary: 'Categories + actions for the log filter panel' })
   @ResponseMessage('Log filters fetched successfully')
-  getFilters(@Query() query: LogFiltersQueryDto): Promise<FilterResponseDTO> {
-    return this.logs.getFilters(query.logtype);
+  async getFilters(
+    @Query() query: LogFiltersQueryDto,
+    @CurrentUser() u: AuthUser,
+  ): Promise<FilterResponseDTO> {
+    const filters = await this.logs.getFilters(query.logtype);
+    await this.auditRead(u, 'View Log Filters', `Viewed log filters for ${query.logtype}`);
+    return filters;
   }
 
   @Get('search')
   @ApiOperation({
     summary: 'Search logs by free text, date range, categories and actions',
     description:
-      'Case-insensitive q over action text, ids and details. Dates are ' +
-      'inclusive UTC days (YYYY-MM-DD). categories/actions are comma-separated ids.',
+      'Case-insensitive q over action text, action/category names, ids and ' +
+      'details. Dates are inclusive UTC days (YYYY-MM-DD). categories = ' +
+      'comma-separated category ids, actions = comma-separated action names.',
   })
   @ResponseMessage('Logs fetched successfully')
-  search(@Query() query: LogSearchQueryDto): Promise<LogListResponseDTO> {
-    return this.logs.search(query);
+  async search(
+    @Query() query: LogSearchQueryDto,
+    @CurrentUser() u: AuthUser,
+  ): Promise<LogListResponseDTO> {
+    const result = await this.logs.search(query);
+    await this.auditRead(u, 'Search Logs', `Searched ${query.logtype} logs`);
+    return result;
   }
 
   @Get('export')
@@ -60,14 +87,16 @@ export class LogsController {
   })
   async exportGet(
     @Query() query: ExportRequestDto,
+    @CurrentUser() u: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    return this.streamCsv(query, res);
+    return this.streamCsv(query, res, u);
   }
 
   /** Shared CSV response writer: sets the attachment headers and streams the body. */
-  private async streamCsv(query: ExportRequestDto, res: Response): Promise<string> {
+  private async streamCsv(query: ExportRequestDto, res: Response, u: AuthUser): Promise<string> {
     const csv = await this.logs.exportCsv(query);
+    await this.auditRead(u, 'Export Logs', `Exported ${query.logtype} logs as CSV`);
     const filename = `logs-${query.logtype.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
@@ -77,10 +106,13 @@ export class LogsController {
   @Get(':logtype')
   @ApiOperation({ summary: 'List one log stream, newest first (page, limit)' })
   @ResponseMessage('Logs fetched successfully')
-  list(
+  async list(
     @Param('logtype', ParseLogTypePipe) logtype: LogType,
     @Query() query: PaginationQueryDto,
+    @CurrentUser() u: AuthUser,
   ): Promise<LogListResponseDTO> {
-    return this.logs.list(logtype, query);
+    const result = await this.logs.list(logtype, query);
+    await this.auditRead(u, 'View Logs', `Viewed ${logtype} log stream`);
+    return result;
   }
 }

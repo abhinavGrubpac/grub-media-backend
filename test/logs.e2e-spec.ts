@@ -157,7 +157,6 @@ describe('Logs (e2e)', () => {
         ...row,
         userId: `usr_${i}`,
         empId: `EMP${String(i).padStart(4, '0')}`,
-        referenceId: `REF-${i}`,
         createdAt: new Date(base + i * 86_400_000),
       })),
     );
@@ -302,7 +301,7 @@ describe('Logs (e2e)', () => {
       expect(new Set(ids).size).toBe(6);
     });
 
-    it('does not leak relation internals (only brief category/action projections)', async () => {
+    it('does not leak relation internals (only brief category projection)', async () => {
       const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/SYSTEM')
@@ -310,10 +309,12 @@ describe('Logs (e2e)', () => {
         .expect(200);
       const row = res.body.data[0];
       expect(row.category).toEqual({ id: expect.any(Number), name: expect.any(String) });
-      expect(row.action).toEqual({ id: expect.any(Number), name: expect.any(String) });
+      // The action is a flat name on the row — no action relation object.
+      expect(typeof row.actionName).toBe('string');
+      expect(row.action).toBeUndefined();
       expect(Object.keys(row).sort()).toEqual(
         [
-          'action',
+          'actionName',
           'actionText',
           'category',
           'createdAt',
@@ -321,7 +322,6 @@ describe('Logs (e2e)', () => {
           'id',
           'newDetail',
           'oldDetail',
-          'referenceId',
           'typeEnum',
           'userId',
         ].sort(),
@@ -368,12 +368,12 @@ describe('Logs (e2e)', () => {
       );
     });
 
-    it('q also matches the related action name, not just actionText', async () => {
-      // "Termination" appears in the action name AND the sentence — prove the
+    it('q also matches the action name, not just actionText', async () => {
+      // "Resignation" appears in the action name AND the sentence — prove the
       // action-name branch works by searching for a name only in the taxonomy.
       const res = await search('logtype=EMPLOYEE&q=Resignation');
       expect(res.body.meta.total).toBe(1);
-      expect(res.body.data[0].action.name).toBe('Resignation');
+      expect(res.body.data[0].actionName).toBe('Resignation');
     });
 
     it('q also matches the category name', async () => {
@@ -386,8 +386,7 @@ describe('Logs (e2e)', () => {
       ).toBe(true);
     });
 
-    it('q matches referenceId / userId / empId', async () => {
-      expect((await search('logtype=SYSTEM&q=REF-0')).body.meta.total).toBe(1);
+    it('q matches userId / empId', async () => {
       expect((await search('logtype=SYSTEM&q=usr_1')).body.meta.total).toBe(1);
       expect((await search('logtype=EMPLOYEE&q=EMP0003')).body.meta.total).toBe(2);
     });
@@ -433,17 +432,18 @@ describe('Logs (e2e)', () => {
       ).toBe(true);
     });
 
-    it('filters by action ids (comma-separated)', async () => {
+    it('filters by action names (comma-separated, case-insensitive)', async () => {
       const filters = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=SYSTEM')
         .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(200);
       const login = filters.body.data.actions.find((a: { name: string }) => a.name === 'Login');
+      expect(login).toBeDefined();
 
-      const res = await search(`logtype=SYSTEM&actions=${login.id}`);
+      const res = await search(`logtype=SYSTEM&actions=${encodeURIComponent(login.name)}`);
       expect(res.body.meta.total).toBe(2);
       expect(
-        res.body.data.every((r: { action: { name: string } }) => r.action.name === 'Login'),
+        res.body.data.every((r: { actionName: string | null }) => r.actionName === 'Login'),
       ).toBe(true);
     });
 
@@ -526,7 +526,7 @@ describe('Logs (e2e)', () => {
       // SkipResponseWrap → no success/data wrapper around the CSV body.
       expect(res.text.startsWith('success,')).toBe(false);
       expect(res.text.split('\r\n')[0]).toBe(
-        'id,created_at,logtype,category,action,action_text,user_id,emp_id,old_detail,new_detail,reference_id',
+        'id,created_at,logtype,category,action,action_text,user_id,emp_id,old_detail,new_detail',
       );
     });
 
@@ -616,12 +616,12 @@ describe('Logs (e2e)', () => {
       const row = res.text.split('\r\n')[1];
 
       // id,created_at,logtype,category,action,action_text,user_id,emp_id,
-      // old_detail,new_detail,reference_id — every optional column is empty.
+      // old_detail,new_detail — every optional column is empty.
       const cells = row.split(',');
       expect(cells[2]).toBe('SYSTEM'); // logtype
       expect(cells[5]).toBe('bare row'); // action_text
       expect(cells.slice(3, 5)).toEqual(['', '']); // category + action
-      expect(cells.slice(6)).toEqual(['', '', '', '', '']); // user/emp/details/ref
+      expect(cells.slice(6)).toEqual(['', '', '', '']); // user/emp/details
       expect(res.text).not.toContain('null');
     });
 
@@ -675,24 +675,39 @@ describe('Logs (e2e)', () => {
   // ── Cross-endpoint consistency ───────────────────────────────────────────
 
   describe('consistency across endpoints', () => {
-    it('list, search and export agree on total for the same stream', async () => {
+    it('list, search and export agree, and every read is itself audited', async () => {
       const token = adminTokenValue;
       const server = app.getHttpServer();
       const auth = { Authorization: `Bearer ${token}` };
 
-      const list = await request(server).get('/api/v1/logs/SYSTEM').set(auth).expect(200);
+      // Read-audits of these endpoints always land in the SYSTEM stream
+      // (category 'Log Access'), recorded AFTER the page is built — so a
+      // non-SYSTEM stream's totals stay stable across all three calls.
+      const list = await request(server).get('/api/v1/logs/EMPLOYEE').set(auth).expect(200);
       const search = await request(server)
-        .get('/api/v1/logs/search?logtype=SYSTEM')
+        .get('/api/v1/logs/search?logtype=EMPLOYEE')
         .set(auth)
         .expect(200);
       const exportAll = await request(server)
-        .get('/api/v1/logs/export?logtype=SYSTEM&page=1&limit=20')
+        .get('/api/v1/logs/export?logtype=EMPLOYEE&page=1&limit=20')
         .set(auth)
         .expect(200);
 
       expect(list.body.meta.total).toBe(6);
       expect(search.body.meta.total).toBe(6);
       expect(exportAll.text.split('\r\n').filter((l) => l.length > 0)).toHaveLength(7);
+
+      // …and each of those three reads appended one SYSTEM audit row.
+      const audits = await request(server)
+        .get(`/api/v1/logs/search?logtype=SYSTEM&q=${encodeURIComponent('Log Access')}`)
+        .set(auth)
+        .expect(200);
+      expect(audits.body.meta.total).toBe(3);
+      expect(
+        audits.body.data.every(
+          (r: { category: { name: string } }) => r.category.name === 'Log Access',
+        ),
+      ).toBe(true);
     });
 
     it('record() → visible immediately on list + searchable', async () => {
@@ -734,7 +749,7 @@ describe('Logs (e2e)', () => {
 
       const list = await request(server).get('/api/v1/logs/ACTIVITY').set(auth).expect(200);
       expect(list.body.data[0].category).toBeNull();
-      expect(list.body.data[0].action).toBeNull();
+      expect(list.body.data[0].actionName).toBeNull();
 
       const csv = await request(server)
         .get('/api/v1/logs/export?logtype=ACTIVITY')

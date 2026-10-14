@@ -6,44 +6,38 @@ import { LogsService } from './logs.service';
 const logRow = {
   id: 10,
   typeEnum: LogType.ACTIVITY,
+  actionName: 'Update Profile',
   actionText: 'Updated profile',
   userId: 'user-1',
   empId: null,
   oldDetail: null,
   newDetail: null,
-  referenceId: null,
   createdAt: new Date('2026-10-10T10:00:00.000Z'),
   category: { id: 1, name: 'Profile' },
-  action: { id: 7, name: 'Update' },
 };
 
 type Mocks = {
   findMany?: jest.Mock;
   count?: jest.Mock;
   create?: jest.Mock;
-  update?: jest.Mock;
+  groupBy?: jest.Mock;
   upsert?: jest.Mock;
 };
 
-function prismaMock(log: Mocks = {}, logCategory: Mocks = {}, logAction: Mocks = {}) {
+function prismaMock(log: Mocks = {}, logCategory: Mocks = {}) {
   return {
     client: {
       log: {
         findMany: log.findMany ?? jest.fn().mockResolvedValue([]),
         count: log.count ?? jest.fn().mockResolvedValue(0),
         create: log.create ?? jest.fn().mockResolvedValue({ id: 99 }),
-        update: log.update ?? jest.fn().mockResolvedValue({}),
+        groupBy: log.groupBy ?? jest.fn().mockResolvedValue([]),
       },
       logCategory: {
         findMany: logCategory.findMany ?? jest.fn().mockResolvedValue([]),
         upsert:
           logCategory.upsert ??
           jest.fn().mockResolvedValue({ id: 1, typeEnum: LogType.SYSTEM, name: 'X', image: null }),
-      },
-      logAction: {
-        findMany: logAction.findMany ?? jest.fn().mockResolvedValue([]),
-        upsert:
-          logAction.upsert ?? jest.fn().mockResolvedValue({ id: 7, categoryId: 1, name: 'Y' }),
       },
     },
   } as never;
@@ -62,6 +56,7 @@ describe('LogsService.list', () => {
     expect(call.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     expect(call.skip).toBe(25);
     expect(call.take).toBe(25);
+    expect(call.select.actionName).toBe(true);
     expect(call.select.category).toEqual({ select: { id: true, name: true } });
     expect(result.data).toEqual([logRow]);
     expect(result.meta).toEqual({ page: 2, limit: 25, total: 51, totalPages: 3 });
@@ -81,33 +76,53 @@ describe('LogsService.list', () => {
     // Invalid sortBy is dropped, but the valid sortOrder is still honoured.
     expect(findMany.mock.calls[0][0].orderBy).toEqual([{ createdAt: 'asc' }, { id: 'desc' }]);
   });
+
+  it('no longer honours a referenceId sortBy (column was removed)', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const svc = new LogsService(prismaMock({ findMany }));
+
+    await svc.list(LogType.SYSTEM, {
+      page: 1,
+      limit: 20,
+      sortBy: 'referenceId',
+      sortOrder: 'desc',
+    });
+
+    expect(findMany.mock.calls[0][0].orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+  });
 });
 
 describe('LogsService.getFilters', () => {
-  it('returns categories of the logtype and actions of its categories', async () => {
+  it('returns logtype categories and the distinct action names of the stream', async () => {
     const categoryFindMany = jest
       .fn()
       .mockResolvedValue([{ id: 1, typeEnum: LogType.SYSTEM, name: 'Auth', image: null }]);
-    const actionFindMany = jest.fn().mockResolvedValue([{ id: 7, categoryId: 1, name: 'Login' }]);
-    const svc = new LogsService(
-      prismaMock({}, { findMany: categoryFindMany }, { findMany: actionFindMany }),
-    );
+    const groupBy = jest.fn().mockResolvedValue([
+      { actionName: 'Login', categoryId: 1 },
+      { actionName: 'Role Changed', categoryId: null },
+    ]);
+    const svc = new LogsService(prismaMock({ groupBy }, { findMany: categoryFindMany }));
 
     const result = await svc.getFilters(LogType.SYSTEM);
 
     expect(categoryFindMany.mock.calls[0][0].where).toEqual({ typeEnum: LogType.SYSTEM });
-    expect(actionFindMany.mock.calls[0][0].where).toEqual({
-      category: { typeEnum: LogType.SYSTEM },
+    expect(groupBy.mock.calls[0][0].by).toEqual(['actionName', 'categoryId']);
+    expect(groupBy.mock.calls[0][0].where).toEqual({
+      typeEnum: LogType.SYSTEM,
+      actionName: { not: null },
     });
     expect(result).toEqual({
       categories: [{ id: 1, typeEnum: LogType.SYSTEM, name: 'Auth', image: null }],
-      actions: [{ id: 7, categoryId: 1, name: 'Login' }],
+      actions: [
+        { name: 'Login', categoryId: 1 },
+        { name: 'Role Changed', categoryId: null },
+      ],
     });
   });
 });
 
 describe('LogsService.search', () => {
-  it('builds the date range (UTC day bounds), id filters and free-text OR', async () => {
+  it('builds the date range (UTC day bounds), filters and free-text OR', async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const count = jest.fn().mockResolvedValue(0);
     const svc = new LogsService(prismaMock({ findMany, count }));
@@ -118,7 +133,7 @@ describe('LogsService.search', () => {
     query.start_date = '2026-10-01';
     query.end_date = '2026-10-12';
     query.categories = [1, 3];
-    query.actions = [7];
+    query.actions = ['Resignation'];
     await svc.search(query);
 
     const call = findMany.mock.calls[0][0];
@@ -128,15 +143,16 @@ describe('LogsService.search', () => {
       lte: new Date('2026-10-12T23:59:59.999Z'),
     });
     expect(call.where.categoryId).toEqual({ in: [1, 3] });
-    expect(call.where.actionId).toEqual({ in: [7] });
+    // Action filter is a case-insensitive text match on actionName.
+    expect(call.where.actionName).toEqual({ in: ['Resignation'], mode: 'insensitive' });
     expect(call.where.OR).toEqual(
       expect.arrayContaining([
         { actionText: { contains: 'salary', mode: 'insensitive' } },
-        { referenceId: { contains: 'salary', mode: 'insensitive' } },
-        { action: { name: { contains: 'salary', mode: 'insensitive' } } },
+        { actionName: { contains: 'salary', mode: 'insensitive' } },
         { category: { name: { contains: 'salary', mode: 'insensitive' } } },
       ]),
     );
+    expect(call.where.OR).toHaveLength(7);
   });
 
   it('omits empty filters entirely', async () => {
@@ -159,7 +175,7 @@ describe('LogsService.exportCsv', () => {
       {
         ...logRow,
         category: { name: 'Leave, Approval' },
-        action: { name: 'He said "hi"' },
+        actionName: 'He said "hi"',
       },
     ]);
     const svc = new LogsService(prismaMock({ findMany }));
@@ -170,7 +186,7 @@ describe('LogsService.exportCsv', () => {
 
     const lines = csv.split('\r\n');
     expect(lines[0]).toBe(
-      'id,created_at,logtype,category,action,action_text,user_id,emp_id,old_detail,new_detail,reference_id',
+      'id,created_at,logtype,category,action,action_text,user_id,emp_id,old_detail,new_detail',
     );
     expect(lines[1]).toContain('"Leave, Approval"');
     expect(lines[1]).toContain('"He said ""hi"""');
@@ -199,19 +215,15 @@ describe('LogsService.exportCsv', () => {
 });
 
 describe('LogsService.record', () => {
-  it('upserts category + action, then creates the log row with serialized details', async () => {
+  it('upserts the category and creates the row with a flat actionName', async () => {
     const upsertCategory = jest.fn().mockResolvedValue({
       id: 1,
       typeEnum: LogType.ACTIVITY,
       name: 'Authentication',
       image: null,
     });
-    const upsertAction = jest.fn().mockResolvedValue({ id: 7, categoryId: 1, name: 'Login' });
     const create = jest.fn().mockResolvedValue({ id: 99 });
-    const update = jest.fn().mockResolvedValue({ id: 99, referenceId: 'TCK-99' });
-    const svc = new LogsService(
-      prismaMock({ create, update }, { upsert: upsertCategory }, { upsert: upsertAction }),
-    );
+    const svc = new LogsService(prismaMock({ create }, { upsert: upsertCategory }));
 
     await svc.record({
       typeEnum: LogType.ACTIVITY,
@@ -219,7 +231,7 @@ describe('LogsService.record', () => {
       actionName: 'Login',
       actionText: 'User user-1 logged in',
       userId: 'user-1',
-      referenceId: 'user-1',
+      target: 'user-1',
       oldDetail: { status: 'INACTIVE' },
       newDetail: { status: 'ACTIVE' },
     });
@@ -229,38 +241,48 @@ describe('LogsService.record', () => {
       create: { name: 'Authentication', typeEnum: LogType.ACTIVITY },
       update: {},
     });
-    expect(upsertAction).toHaveBeenCalledWith({
-      where: { name_categoryId: { name: 'Login', categoryId: 1 } },
-      create: { name: 'Login', categoryId: 1 },
-      update: {},
-    });
+    expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith({
       data: {
         typeEnum: LogType.ACTIVITY,
         categoryId: 1,
-        actionId: 7,
+        actionName: 'Login',
         actionText: 'User user-1 logged in',
         userId: 'user-1',
         empId: null,
         oldDetail: '{"status":"INACTIVE"}',
+        // The caller's business pointer is folded into newDetail.target.
         newDetail: '{"status":"ACTIVE","target":"user-1"}',
-        referenceId: null,
       },
     });
-    // referenceId is stamped after insert with a ticket derived from the row id.
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 99 },
-      data: { referenceId: 'TCK-99' },
+  });
+
+  it('stores actionName even without a category (no taxonomy FK anymore)', async () => {
+    const upsertCategory = jest.fn();
+    const create = jest.fn().mockResolvedValue({ id: 101 });
+    const svc = new LogsService(prismaMock({ create }, { upsert: upsertCategory }));
+
+    await svc.record({ typeEnum: LogType.SYSTEM, actionName: 'View Logs' });
+
+    expect(upsertCategory).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        typeEnum: LogType.SYSTEM,
+        categoryId: null,
+        actionName: 'View Logs',
+        actionText: null,
+        userId: null,
+        empId: null,
+        oldDetail: null,
+        newDetail: null,
+      },
     });
   });
 
   it('skips taxonomy when names are omitted and keeps string details raw', async () => {
     const upsertCategory = jest.fn();
-    const upsertAction = jest.fn();
     const create = jest.fn().mockResolvedValue({ id: 100 });
-    const svc = new LogsService(
-      prismaMock({ create }, { upsert: upsertCategory }, { upsert: upsertAction }),
-    );
+    const svc = new LogsService(prismaMock({ create }, { upsert: upsertCategory }));
 
     await svc.record({
       typeEnum: LogType.SYSTEM,
@@ -269,18 +291,16 @@ describe('LogsService.record', () => {
     });
 
     expect(upsertCategory).not.toHaveBeenCalled();
-    expect(upsertAction).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledWith({
       data: {
         typeEnum: LogType.SYSTEM,
         categoryId: null,
-        actionId: null,
+        actionName: null,
         actionText: 'Config changed',
         userId: null,
         empId: null,
         oldDetail: 'kept raw',
         newDetail: null,
-        referenceId: null,
       },
     });
   });

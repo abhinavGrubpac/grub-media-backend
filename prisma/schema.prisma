@@ -189,26 +189,26 @@ model AuditLog {
 }
 
 /// Log System (see `logs Grubmedia .drawio.pdf`): one row per recorded event.
-/// FKs are nullable + SetNull so a log row is never blocked by taxonomy changes
-/// and history survives category/action deletion.
+/// The action name is denormalized onto the row (`actionName`) — there is no
+/// separate action taxonomy table; the category FK stays nullable + SetNull
+/// so a log row is never blocked by category changes.
 model Log {
-  id          Int          @id @default(autoincrement())
-  typeEnum    LogType
-  categoryId  Int?
-  actionId    Int?
-  actionText  String?
-  userId      String?
-  empId       String?
-  oldDetail   String?
-  newDetail   String?
-  referenceId String?
-  createdAt   DateTime     @default(now())
-  action      LogAction?   @relation(fields: [actionId], references: [id])
-  category    LogCategory? @relation(fields: [categoryId], references: [id])
+  id         Int          @id @default(autoincrement())
+  typeEnum   LogType
+  categoryId Int?
+  /// Denormalized action name, e.g. 'Login', 'Create Employee'.
+  actionName String?
+  actionText String?
+  userId     String?
+  empId      String?
+  oldDetail  String?
+  newDetail  String?
+  createdAt  DateTime     @default(now())
+  category   LogCategory? @relation(fields: [categoryId], references: [id])
 
   @@index([typeEnum, createdAt], map: "idx_type_date")
   @@index([categoryId], map: "idx_category")
-  @@index([actionId], map: "idx_action")
+  @@index([typeEnum, actionName], map: "idx_type_action")
   @@index([userId], map: "idx_user")
   @@index([typeEnum, categoryId, createdAt], map: "idx_type_cat_date")
   @@map("log")
@@ -221,23 +221,10 @@ model LogCategory {
   /// S3 object key/path — never the binary.
   image    String?
   logs     Log[]
-  actions  LogAction[]
 
   @@unique([name, typeEnum], map: "uk_name_type")
   @@index([typeEnum], map: "idx_log_type")
   @@map("log_categories")
-}
-
-model LogAction {
-  id         Int         @id @default(autoincrement())
-  categoryId Int
-  name       String
-  logs       Log[]
-  category   LogCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@unique([name, categoryId], map: "uk_name_category")
-  @@index([categoryId], map: "idx_action_category")
-  @@map("log_action")
 }
 
 model OtpCode {

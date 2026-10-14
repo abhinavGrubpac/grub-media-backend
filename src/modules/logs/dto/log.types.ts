@@ -14,23 +14,20 @@ export interface LogCategoryBriefDTO {
   name: string;
 }
 
-export interface LogActionBriefDTO {
-  id: number;
-  name: string;
-}
-
-/** One log row (LogResponseDTO) — nested category/action are brief projections. */
+/**
+ * One log row (LogResponseDTO). The action is a flat `actionName` string on
+ * the row itself — there is no action relation to project.
+ */
 export interface LogResponseDTO {
   id: number;
   typeEnum: LogType;
   category: LogCategoryBriefDTO | null;
-  action: LogActionBriefDTO | null;
+  actionName: string | null;
   actionText: string | null;
   userId: string | null;
   empId: string | null;
   oldDetail: string | null;
   newDetail: string | null;
-  referenceId: string | null;
   createdAt: Date;
 }
 
@@ -45,11 +42,13 @@ export interface CategoryDTO {
   image: string | null;
 }
 
-/** Filter-panel action (ActionDTO) — belongs to one category. */
+/**
+ * Filter-panel action (ActionDTO) — derived from the distinct `actionName`s
+ * present in the stream, each tied to the category it was logged under.
+ */
 export interface ActionDTO {
-  id: number;
-  categoryId: number;
   name: string;
+  categoryId: number | null;
 }
 
 /** GET /logs/filters payload (FilterResponseDTO) — categories + actions for one logtype. */
@@ -61,14 +60,15 @@ export interface FilterResponseDTO {
 /**
  * Input for LogsService.record() — the write side, callable from ANY module
  * (LogsModule is @Global, so only `constructor(private logs: LogsService)`).
- * Callers pass taxonomy NAMES, not ids: the service upserts them on their
- * unique keys (name+typeEnum / name+categoryId), so no seeding is needed.
+ * Callers pass taxonomy NAMES, not ids: the category is upserted on its
+ * unique key (name+typeEnum) and the action name is stored directly on the
+ * row, so no seeding is needed.
  */
 export interface RecordLogInput {
   typeEnum: LogType;
   /** Category to resolve/create, e.g. 'Authentication'. */
   categoryName?: string;
-  /** Action to resolve/create — only used when categoryName is set. */
+  /** Action name stored on the row, e.g. 'Login'. Independent of the category. */
   actionName?: string;
   /** Human sentence for the row, e.g. 'User foo@bar.com logged in'. */
   actionText?: string;
@@ -80,9 +80,8 @@ export interface RecordLogInput {
   newDetail?: unknown;
   /**
    * Business pointer for the affected row (user id, bundle id, admin id, …).
-   * This is NOT stored in the referenceId column — it is folded into
-   * newDetail.target so it survives. referenceId itself holds a generated
-   * ticket code (TCK-<logId>).
+   * Folded into newDetail.target so it survives on the row — there is no
+   * dedicated reference column anymore.
    */
-  referenceId?: string;
+  target?: string;
 }

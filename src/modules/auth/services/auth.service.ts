@@ -89,7 +89,7 @@ export class AuthService {
       actionName: 'Login',
       actionText: `User ${user.email} logged in from ${ctx.ip ?? 'unknown'}`,
       userId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
     return {
       ...pair,
@@ -107,7 +107,7 @@ export class AuthService {
       ...AUTH_LOG,
       actionName: 'Failed Login',
       actionText: `Failed login attempt for ${email} from ${ctx.ip ?? 'unknown'}`,
-      referenceId: email,
+      target: email,
     });
   }
 
@@ -123,7 +123,7 @@ export class AuthService {
       actionName: 'Token Refresh',
       actionText: `Access token refreshed for ${actor?.email ?? userId} from ${ctx.ip ?? 'unknown'}`,
       userId,
-      referenceId: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
+      target: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
     });
     return { accessToken, refreshToken: next };
   }
@@ -143,7 +143,7 @@ export class AuthService {
       actionName: 'Logout',
       actionText: `User ${actor?.email ?? userId} logged out`,
       userId,
-      referenceId: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
+      target: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
     });
   }
 
@@ -169,7 +169,7 @@ export class AuthService {
       actionName: 'OTP Requested',
       actionText: `Profile ${dto.type} change OTP requested by ${logRefOf(user)}`,
       userId,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
   }
 
@@ -197,7 +197,7 @@ export class AuthService {
       actionName: 'Update Profile',
       actionText: `Verified ${dto.type} changed to ${dto.value} for user ${before?.email ?? userId}`,
       userId,
-      referenceId: logRefOf(before ?? { id: userId, email: null, employeeId: null }),
+      target: logRefOf(before ?? { id: userId, email: null, employeeId: null }),
       oldDetail: { [dto.type]: oldField ?? null },
       newDetail: { [dto.type]: dto.value },
     });
@@ -226,7 +226,7 @@ export class AuthService {
       actionName: 'Password Changed',
       actionText: `Password changed for ${user.email}`,
       userId,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
   }
 
@@ -280,7 +280,7 @@ export class AuthService {
       actionName: 'OTP Requested',
       actionText: `Login OTP requested for ${user.email} from ${ctx.ip ?? 'unknown'}`,
       userId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
   }
 
@@ -328,7 +328,7 @@ export class AuthService {
       actionName: 'Login',
       actionText: `User ${user.email} logged in via OTP from ${ctx.ip ?? 'unknown'}`,
       userId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
     return {
       ...pair,
@@ -376,7 +376,7 @@ export class AuthService {
       actionName: 'Password Reset',
       actionText: `Password reset requested for ${user.email}`,
       userId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
     });
   }
 
@@ -436,7 +436,7 @@ export class AuthService {
       actionName: 'Password Reset',
       actionText: `Password reset completed for ${row.user.email}`,
       userId: row.userId,
-      referenceId: logRefOf(row.user),
+      target: logRefOf(row.user),
     });
   }
 }

@@ -134,7 +134,7 @@ export class UsersService {
       actionText: `Employee ${user.email} created by ${actorId ?? 'system'}`,
       userId: actorId,
       empId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
       newDetail: this.toDto(user),
     });
     return this.toDto(user);
@@ -283,7 +283,7 @@ export class UsersService {
       actionText: `Profile details updated for ${user.email}`,
       userId: id,
       empId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
       oldDetail: this.toDto(before),
       newDetail: this.toDto(user),
     });
@@ -372,7 +372,7 @@ export class UsersService {
       actionText: `Employee ${user.email} updated by ${actorId}`,
       userId: actorId,
       empId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
       oldDetail: this.toDto(before),
       newDetail: this.toDto(user),
     });
@@ -389,7 +389,7 @@ export class UsersService {
       actionText: `Employee ${user.email} status changed from ${before.status} to ${status} by ${actorId ?? 'system'}`,
       userId: actorId,
       empId: user.id,
-      referenceId: logRefOf(user),
+      target: logRefOf(user),
       oldDetail: { status: before.status },
       newDetail: { status },
     });
@@ -406,7 +406,7 @@ export class UsersService {
       actionText: `Employee ${before.email} deleted by ${actorId ?? 'system'}`,
       userId: actorId,
       empId: before.id,
-      referenceId: logRefOf(before),
+      target: logRefOf(before),
       oldDetail: this.toDto(before),
     });
   }
@@ -426,7 +426,7 @@ export class UsersService {
       actionName: 'Bulk Activate',
       actionText: `${result.count} employee(s) reactivated by ${actorId ?? 'system'}`,
       userId: actorId,
-      referenceId: ids.join(','),
+      target: ids.join(','),
       newDetail: { ids, activated: result.count },
     });
     return result.count;
