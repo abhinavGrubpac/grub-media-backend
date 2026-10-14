@@ -267,6 +267,8 @@ describe('UsersService', () => {
         typeEnum: 'EMPLOYEE',
         categoryName: 'Employment',
         actionName: 'Update Employee',
+        userId: 'admin-1',
+        empId: 'u1',
         oldDetail: expect.objectContaining({ id: 'u1' }),
         newDetail: expect.objectContaining({ id: 'u1' }),
       }),
@@ -285,6 +287,10 @@ describe('UsersService', () => {
         categoryName: 'Exit',
         actionName: 'Delete Employee',
         userId: 'admin-1',
+        empId: 'u1',
+        oldDetail: expect.objectContaining({ id: 'u1' }),
+        // The after state records the soft-delete timestamp.
+        newDetail: expect.objectContaining({ id: 'u1', deletedAt: expect.any(String) }),
       }),
     );
   });

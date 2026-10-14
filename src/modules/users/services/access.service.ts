@@ -126,8 +126,10 @@ export class AccessService {
       userId: actor,
       empId: employeeId,
       target: bundleId,
-      // The removed assignment is the "before" state; there is no after state.
+      // Before = the assignment that existed; after = the employee no longer
+      // holds the bundle.
       oldDetail: row,
+      newDetail: { userId: employeeId, bundleId, assigned: false },
     });
     return row;
   }
@@ -190,8 +192,10 @@ export class AccessService {
       actionText: `The administrator ${adminRef} was removed from ${employeeRef} by ${by}`,
       userId: actor,
       empId: employeeId,
-      // The removed assignment is the "before" state; there is no after state.
+      // Before = the assignment that existed; after = the employee no longer
+      // has that administrator.
       oldDetail: row,
+      newDetail: { employeeId, adminId: row.adminId, assigned: false },
     });
     return row;
   }

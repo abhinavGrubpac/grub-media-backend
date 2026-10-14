@@ -89,6 +89,7 @@ export class AuthService {
       actionName: 'Login',
       actionText: `User ${user.email} logged in from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
+      empId: user.id,
       target: logRefOf(user),
     });
     return {
@@ -133,6 +134,7 @@ export class AuthService {
       actionName: 'Token Refresh',
       actionText: `Session refreshed for ${actor?.email ?? userId} from ${ctx.ip ?? 'an unknown location'}`,
       userId,
+      empId: userId,
       target: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
     });
     return { accessToken, refreshToken: next };
@@ -153,6 +155,7 @@ export class AuthService {
       actionName: 'Logout',
       actionText: `User ${actor?.email ?? userId} logged out`,
       userId,
+      empId: userId,
       target: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
     });
   }
@@ -180,6 +183,7 @@ export class AuthService {
       actionName: 'OTP Requested',
       actionText: `A one-time code was requested to change the ${typeWord} of ${logRefOf(user)}`,
       userId,
+      empId: user.id,
       target: logRefOf(user),
     });
   }
@@ -202,6 +206,7 @@ export class AuthService {
         actionName: 'Failed OTP',
         actionText: `The one-time code entered to change the ${typeWord} of ${who} was wrong or expired`,
         userId,
+        empId: userId,
         target: userId,
       });
       throw new BadRequestException('Invalid or expired OTP');
@@ -222,6 +227,7 @@ export class AuthService {
       actionName: 'Update Profile',
       actionText: `The ${typeWord} of ${who} was changed to ${dto.value}`,
       userId,
+      empId: userId,
       target: who,
       oldDetail: { [dto.type]: oldField ?? null },
       newDetail: { [dto.type]: dto.value },
@@ -251,6 +257,7 @@ export class AuthService {
       actionName: 'Password Changed',
       actionText: `Password changed for ${user.email}`,
       userId,
+      empId: userId,
       target: logRefOf(user),
     });
   }
@@ -305,6 +312,7 @@ export class AuthService {
       actionName: 'OTP Requested',
       actionText: `A one-time sign-in code was requested for ${user.email} from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
+      empId: user.id,
       target: logRefOf(user),
     });
   }
@@ -353,6 +361,7 @@ export class AuthService {
       actionName: 'Login',
       actionText: `User ${user.email} signed in with a one-time code from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
+      empId: user.id,
       target: logRefOf(user),
     });
     return {
@@ -401,6 +410,7 @@ export class AuthService {
       actionName: 'Password Reset',
       actionText: `Password reset requested for ${user.email}`,
       userId: user.id,
+      empId: user.id,
       target: logRefOf(user),
     });
   }
@@ -461,6 +471,7 @@ export class AuthService {
       actionName: 'Password Reset',
       actionText: `Password reset completed for ${row.user.email}`,
       userId: row.userId,
+      empId: row.userId,
       target: logRefOf(row.user),
     });
   }

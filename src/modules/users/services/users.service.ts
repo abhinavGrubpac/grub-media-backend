@@ -399,7 +399,8 @@ export class UsersService {
 
   async softDelete(id: string, actorId?: string): Promise<void> {
     const before = await this.getOrThrow(id);
-    await this.prisma.client.user.update({ where: { id }, data: { deletedAt: new Date() } });
+    const deletedAt = new Date();
+    await this.prisma.client.user.update({ where: { id }, data: { deletedAt } });
     await this.logs.record({
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.exit,
@@ -409,6 +410,9 @@ export class UsersService {
       empId: before.id,
       target: logRefOf(before),
       oldDetail: this.toDto(before),
+      // A soft delete keeps the row, so the after state is the same record
+      // carrying its deletion timestamp (ISO string: JSON-safe for details).
+      newDetail: { ...this.toDto(before), deletedAt: deletedAt.toISOString() },
     });
   }
 

@@ -107,6 +107,7 @@ export class AuthController {
       actionName: 'View Profile',
       actionText: 'Viewed the profile of the signed-in user',
       userId: user.id,
+      empId: user.id,
       target: user.id,
     });
     return profile;

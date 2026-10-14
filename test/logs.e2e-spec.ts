@@ -186,6 +186,67 @@ describe('Logs (e2e)', () => {
 
   // ── Failed-request audit ─────────────────────────────────────────────────
 
+  // ── Column semantics ─────────────────────────────────────────────────────
+
+  describe('column semantics (userId / empId / oldDetail / newDetail)', () => {
+    /** Detail columns arrive as objects from Prisma; tolerate JSON strings too. */
+    const asObj = (value: unknown): Record<string, unknown> =>
+      (typeof value === 'string' ? JSON.parse(value) : (value ?? {})) as Record<string, unknown>;
+
+    it('a profile update logs the performer, the affected employee and both states', async () => {
+      const server = app.getHttpServer();
+      const { accessToken } = await login(app, admin.email, admin.password);
+      const auth = { Authorization: `Bearer ${accessToken}` };
+
+      const before = await request(server).get('/api/v1/users/profile').set(auth).expect(200);
+      const adminId = before.body.data.id as string;
+      const original = before.body.data.lastName as string;
+
+      const marker = `Semantics${Date.now()}`;
+      const updated = await request(server)
+        .patch('/api/v1/users/profile')
+        .set(auth)
+        .send({ lastName: marker })
+        .expect(200);
+      expect(updated.body.data.id).toBe(adminId);
+
+      // Restore the fixture the way we found it.
+      await request(server)
+        .patch('/api/v1/users/profile')
+        .set(auth)
+        .send({ lastName: original })
+        .expect(200);
+
+      const found = await request(server)
+        .get(`/api/v1/logs/search?logtype=ACTIVITY&q=${marker}`)
+        .set(auth)
+        .expect(200);
+      const row = (found.body.data as Array<Record<string, unknown>>).find(
+        (r) => r.actionName === 'Update Profile' && asObj(r.newDetail).lastName === marker,
+      );
+      if (!row) throw new Error('Update Profile audit row not found');
+      // userId = the user who performed the change…
+      expect(row.userId).toBe(adminId);
+      // …empId = the employee the change was applied to…
+      expect(row.empId).toBe(adminId);
+      // …oldDetail = the past state, newDetail = the updated state.
+      expect(asObj(row.oldDetail).lastName).toBe(original);
+      expect(asObj(row.newDetail).lastName).toBe(marker);
+
+      // Session rows carry the subject employee too: the login made above is
+      // findable under the employee's empId, not just the actor's userId.
+      const system = await request(server)
+        .get('/api/v1/logs/SYSTEM?page=1&limit=100')
+        .set(auth)
+        .expect(200);
+      const loginRow = (system.body.data as Array<Record<string, unknown>>).find(
+        (r) => r.actionName === 'Login' && r.userId === adminId,
+      );
+      if (!loginRow) throw new Error('Login audit row not found');
+      expect(loginRow.empId).toBe(adminId);
+    });
+  });
+
   describe('failed-request audit (Request Failed)', () => {
     async function systemRows() {
       const res = await request(app.getHttpServer())
