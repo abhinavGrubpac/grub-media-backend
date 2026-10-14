@@ -423,7 +423,76 @@ describe('AuthService.resetPassword', () => {
       }),
     );
   });
+
+  it('audits the reset with redacted markers and never the password itself', async () => {
+    const { svc, logs } = build({ claimCount: 1 });
+    await svc.resetPassword({ token: 'rt1.secret', password: 'NewPass1!' });
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.empId).toBe('u1');
+    expect(arg.oldDetail).toEqual({ password: '<redacted: previous value>' });
+    expect(arg.newDetail).toEqual({ password: '<redacted: new value>' });
+    // The reset password may never reach the audit trail.
+    expect(JSON.stringify(arg)).not.toContain('NewPass1!');
+  });
 });
 
-// changePassword / requestProfileOtp / verifyProfileOtp live in UsersService now.
-// Tests for those methods are in users.service.spec.ts.
+// ---------------------------------------------------------------------------
+// changePassword
+// ---------------------------------------------------------------------------
+
+describe('AuthService.changePassword', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('throws InvalidCredentials when the current password is wrong', async () => {
+    const { svc } = build({ verify: false });
+    await expect(
+      svc.changePassword('u1', { currentPassword: 'wrong', newPassword: 'NewPass1!' }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsException);
+  });
+
+  it('throws BadRequestException when new password is the same as current', async () => {
+    // verify: currentPassword → true (correct), then newPassword → true (same hash match)
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    const { svc } = build({});
+    await expect(
+      svc.changePassword('u1', { currentPassword: 'SamePass1!', newPassword: 'SamePass1!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('succeeds when current password is correct and new password is different', async () => {
+    // verify: currentPassword → true, newPassword → false (different)
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { svc, prisma } = build({});
+    await svc.changePassword('u1', { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' });
+    expect(
+      (prisma as never as { client: { user: { update: jest.Mock } } }).client.user.update,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tokenVersion: { increment: 1 } }),
+      }),
+    );
+  });
+
+  it('audits the change with redacted markers and never the passwords themselves', async () => {
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { svc, logs } = build({});
+    await svc.changePassword('u1', { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' });
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Changed');
+    expect(arg.empId).toBe('u1');
+    expect(arg.oldDetail).toEqual({ password: '<redacted: previous value>' });
+    expect(arg.newDetail).toEqual({ password: '<redacted: new value>' });
+    // Neither submitted password may ever reach the audit trail.
+    expect(JSON.stringify(arg)).not.toContain('OldPass1!');
+    expect(JSON.stringify(arg)).not.toContain('NewPass1!');
+  });
+});
