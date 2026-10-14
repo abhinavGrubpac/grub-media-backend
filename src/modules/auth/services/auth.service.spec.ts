@@ -35,6 +35,8 @@ function build(opts: {
   const users = {
     findByEmailWithHash: jest.fn().mockResolvedValue(opts.user === undefined ? userRow : opts.user),
     findById: jest.fn().mockResolvedValue({ id: 'u1' }),
+    verifyPassword: jest.fn().mockResolvedValue(opts.verify ?? true),
+    isLegacyHash: jest.fn().mockReturnValue(false),
   } as never;
   const tokens = {
     issuePair: jest.fn().mockResolvedValue({ accessToken: 'a', refreshToken: 'r' }),
@@ -164,6 +166,17 @@ describe('AuthService.login', () => {
     await expect(svc.login({ email: 'a@b.c', password: 'x' }, {})).rejects.toBeInstanceOf(
       InvalidCredentialsException,
     );
+  });
+
+  it('leaves legacy bcrypt hashes untouched (sibling login keeps working)', async () => {
+    const { svc, users, prisma } = build({ verify: true });
+    (users as never as { isLegacyHash: jest.Mock }).isLegacyHash.mockReturnValue(true);
+
+    await svc.login({ email: 'a@b.c', password: 'x' }, {});
+
+    expect(
+      (prisma as never as { client: { user: { update: jest.Mock } } }).client.user.update,
+    ).not.toHaveBeenCalled();
   });
 });
 

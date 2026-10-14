@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ReviewStatus } from '@prisma/client';
 import {
   assertActionableStatus,
+  assertValidMediaType,
   assertValidTakeAction,
   assertValidTransition,
   assertWithdrawable,
@@ -39,16 +40,27 @@ describe('validateTakeAction', () => {
   });
 });
 
+describe('assertValidMediaType', () => {
+  it('accepts Image and rejects everything else (media is always an image)', () => {
+    expect(() => assertValidMediaType('Image')).not.toThrow();
+    expect(() => assertValidMediaType('Video')).toThrow(BadRequestException);
+    expect(() => assertValidMediaType('image')).toThrow(BadRequestException);
+    expect(() => assertValidMediaType(undefined)).toThrow(BadRequestException);
+  });
+});
+
 describe('statusForAction', () => {
   it('maps each action to its review status', () => {
     expect(statusForAction('APPROVE')).toBe(ReviewStatus.APPROVED);
     expect(statusForAction('REJECT')).toBe(ReviewStatus.REJECTED);
     expect(statusForAction('HOLD')).toBe(ReviewStatus.ON_HOLD);
     expect(statusForAction('REQUEST_CHANGES')).toBe(ReviewStatus.NEEDS_CHANGES);
+    expect(statusForAction('RESUME')).toBe(ReviewStatus.PENDING);
   });
 
   it('isReviewAction narrows correctly', () => {
     expect(isReviewAction('HOLD')).toBe(true);
+    expect(isReviewAction('RESUME')).toBe(true);
     expect(isReviewAction('hold')).toBe(false);
   });
 });
@@ -90,11 +102,14 @@ describe('validateWithdrawal', () => {
 });
 
 describe('validateActionableStatus', () => {
-  it('allows PENDING and ON_HOLD to accept a decision', () => {
+  it('allows only PENDING to accept a decision', () => {
     expect(validateActionableStatus(ReviewStatus.PENDING)).toBeNull();
-    expect(validateActionableStatus(ReviewStatus.ON_HOLD)).toBeNull();
     expect(() => assertActionableStatus(ReviewStatus.PENDING)).not.toThrow();
-    expect(() => assertActionableStatus(ReviewStatus.ON_HOLD)).not.toThrow();
+  });
+
+  it('parks ON_HOLD with a resume-first message', () => {
+    expect(validateActionableStatus(ReviewStatus.ON_HOLD)).toContain('resume');
+    expect(() => assertActionableStatus(ReviewStatus.ON_HOLD)).toThrow(ConflictException);
   });
 
   it('blocks decided statuses as terminal for that version', () => {
@@ -111,14 +126,23 @@ describe('validateActionableStatus', () => {
 });
 
 describe('assertValidTransition', () => {
-  it('forbids ON_HOLD -> PENDING', () => {
-    expect(() => assertValidTransition(ReviewStatus.ON_HOLD, ReviewStatus.PENDING)).toThrow(
-      ConflictException,
-    );
+  it('allows ON_HOLD -> PENDING as the only on-hold exit', () => {
+    expect(() => assertValidTransition(ReviewStatus.ON_HOLD, ReviewStatus.PENDING)).not.toThrow();
   });
 
-  it('allows ON_HOLD -> decision and PENDING -> ON_HOLD', () => {
-    expect(() => assertValidTransition(ReviewStatus.ON_HOLD, ReviewStatus.APPROVED)).not.toThrow();
+  it('forbids every other direct change from ON_HOLD', () => {
+    for (const to of [
+      ReviewStatus.APPROVED,
+      ReviewStatus.REJECTED,
+      ReviewStatus.NEEDS_CHANGES,
+      ReviewStatus.ON_HOLD,
+    ]) {
+      expect(() => assertValidTransition(ReviewStatus.ON_HOLD, to)).toThrow(ConflictException);
+    }
+  });
+
+  it('allows PENDING -> any status', () => {
     expect(() => assertValidTransition(ReviewStatus.PENDING, ReviewStatus.ON_HOLD)).not.toThrow();
+    expect(() => assertValidTransition(ReviewStatus.PENDING, ReviewStatus.APPROVED)).not.toThrow();
   });
 });

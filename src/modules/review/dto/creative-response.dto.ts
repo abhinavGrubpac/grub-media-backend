@@ -14,6 +14,78 @@ export class CreativeBrandSummaryDto {
   @ApiProperty({ description: 'Non-compliance flag of the owning brand' })
   @Expose()
   is_flagged!: boolean;
+
+  @ApiPropertyOptional({ description: 'Brand industry category', nullable: true })
+  @Expose()
+  industry_category!: string | null;
+
+  @ApiPropertyOptional({ description: 'Display name of the flagging reviewer', nullable: true })
+  @Expose()
+  flagged_by!: string | null;
+
+  @ApiPropertyOptional({ description: 'When the brand was flagged', nullable: true })
+  @Expose()
+  flagged_on!: Date | null;
+}
+
+export class CreativeAgencySummaryDto {
+  @ApiProperty({ description: 'Upstream agency identifier' })
+  @Expose()
+  upstream_agency_id!: string;
+
+  @ApiProperty()
+  @Expose()
+  agency_name!: string;
+
+  @ApiPropertyOptional({ description: 'Agency city', nullable: true })
+  @Expose()
+  city!: string | null;
+
+  @ApiPropertyOptional({ description: 'Agency address', nullable: true })
+  @Expose()
+  address!: string | null;
+}
+
+export class CreativeScheduleSummaryDto {
+  @ApiProperty()
+  @Expose()
+  advert_id!: string;
+
+  @ApiProperty()
+  @Expose()
+  version_id!: string;
+
+  @ApiProperty()
+  @Expose()
+  status!: string;
+
+  @ApiProperty()
+  @Expose()
+  start_date!: Date;
+
+  @ApiProperty()
+  @Expose()
+  end_date!: Date;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  address_text!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  city_name!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  zone_name!: string | null;
+
+  @ApiPropertyOptional({ description: 'Coverage radius in km for map display', nullable: true })
+  @Expose()
+  radius_km!: number | null;
+
+  @ApiPropertyOptional({ description: 'WKT site location (where the ad will run)', nullable: true })
+  @Expose()
+  location!: string | null;
 }
 
 export class ReviewActionResponseDto {
@@ -78,6 +150,21 @@ export class CreativeVersionResponseDto {
   @Expose()
   created_at!: Date;
 
+  @ApiPropertyOptional({
+    description: 'Admin reviewer identity (upstream context)',
+    nullable: true,
+  })
+  @Expose()
+  admin_approved_by!: string | null;
+
+  @ApiPropertyOptional({ description: 'When admin approved (upstream context)', nullable: true })
+  @Expose()
+  admin_approved_at!: Date | null;
+
+  @ApiPropertyOptional({ description: 'Admin review comments (upstream context)', nullable: true })
+  @Expose()
+  admin_comments!: string | null;
+
   @ApiPropertyOptional({ nullable: true, type: ReviewActionResponseDto })
   @Expose()
   latest_action!: ReviewActionResponseDto | null;
@@ -141,4 +228,35 @@ export class CreativeResponseDto {
   @ApiPropertyOptional({ nullable: true })
   @Expose()
   last_action_at!: Date | null;
+
+  @ApiPropertyOptional({ type: CreativeAgencySummaryDto, nullable: true })
+  @Expose()
+  agency?: CreativeAgencySummaryDto | null;
+
+  @ApiPropertyOptional({ type: [CreativeVersionResponseDto] })
+  @Expose()
+  versions?: CreativeVersionResponseDto[];
+
+  @ApiPropertyOptional({ type: [CreativeScheduleSummaryDto] })
+  @Expose()
+  schedules?: CreativeScheduleSummaryDto[];
+
+  @ApiPropertyOptional({
+    description: 'Distinct cities targeted by all adverts linked to this creative (region summary)',
+    type: [String],
+  })
+  @Expose()
+  targeted_regions!: string[];
+
+  @ApiPropertyOptional({ description: 'Display name of the last viewer', nullable: true })
+  @Expose()
+  last_viewed_by!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  last_viewed_at!: Date | null;
+
+  @ApiPropertyOptional({ description: 'Minutes since last view', nullable: true })
+  @Expose()
+  viewed_minutes_ago!: number | null;
 }

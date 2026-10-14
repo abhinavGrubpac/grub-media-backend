@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
-import { Paginated } from '../../../common/dto/paginated';
+import { StandardMeta } from '../../../common/utils/paginate';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { SkipResponseWrap } from '../../../common/decorators/skip-response-wrap.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -9,7 +9,9 @@ import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { CreativeExportQueryDto } from '../dto/creative-export-query.dto';
+import { CreativeFinalizeDto } from '../dto/creative-finalize.dto';
 import { CreativeQueryDto } from '../dto/creative-query.dto';
+import { CreativeUploadRequestDto } from '../dto/creative-upload-request.dto';
 import { CreativeResponseDto, CreativeVersionResponseDto } from '../dto/creative-response.dto';
 import { CreateCreativeDto } from '../dto/create-creative.dto';
 import { TakeActionDto } from '../dto/take-action.dto';
@@ -31,7 +33,10 @@ export class ReviewController {
   // view/history/export -> 'creative:view', upload -> 'creative:upload', action -> 'creative:review'.
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Get()
-  findAll(@Query() query: CreativeQueryDto): Promise<Paginated<CreativeResponseDto>> {
+  findAll(@Query() query: CreativeQueryDto): Promise<{
+    items: (CreativeResponseDto & { versions?: CreativeVersionResponseDto[] })[];
+    meta: StandardMeta;
+  }> {
     return this.creativeService.findAll(query);
   }
 
@@ -61,6 +66,40 @@ export class ReviewController {
     @Param('id') id: string,
   ): Promise<{ creative: CreativeResponseDto; versions: CreativeVersionResponseDto[] }> {
     return this.creativeService.getHistory(id);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Get(':id')
+  getCreative(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CreativeResponseDto> {
+    return this.creativeService.getCreative(id, user.id);
+  }
+
+  /**
+   * S3 presigned upload handshake (API_SPECIFICATION.md §4). The client PUTs
+   * file bytes to upload_url, then calls finalize.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Post('upload')
+  @ResponseMessage('Upload URL issued')
+  requestUploadUrl(
+    @Body() dto: CreativeUploadRequestDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ upload_url: string; s3_key: string; file_url: string }> {
+    return this.creativeService.requestUploadUrl(dto, user.id);
+  }
+
+  /** Confirms a client upload (creates the creative or a new version). */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Post('finalize')
+  @ResponseMessage('Upload finalized')
+  finalizeUpload(
+    @Body() dto: CreativeFinalizeDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
+    return this.creativeService.finalizeUpload(dto, user.id);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)

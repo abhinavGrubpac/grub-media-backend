@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ReviewStatus } from '@prisma/client';
+import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { CreativeService } from './review.service';
 import { normalizeCreativeStatusFilter, CREATIVE_STATUS_FILTERS } from '../transitions';
 
@@ -65,7 +66,19 @@ function makeDeps() {
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   };
   const user = { findMany: jest.fn().mockResolvedValue([]) };
-  const client = { creative, creativeVersion, reviewAction, brand, agencyRef, advert, user };
+  const activityLog = { create: jest.fn().mockResolvedValue({ id: 'log1' }) };
+  const queryRaw = jest.fn().mockResolvedValue([]);
+  const client = {
+    creative,
+    creativeVersion,
+    reviewAction,
+    brand,
+    agencyRef,
+    advert,
+    user,
+    activityLog,
+    $queryRaw: queryRaw,
+  };
   const prisma = {
     client,
     $transaction: jest.fn(async (fn: (tx: typeof client) => Promise<unknown>) => fn(client)),
@@ -74,7 +87,21 @@ function makeDeps() {
     emitInTx: jest.fn().mockResolvedValue(undefined),
     emit: jest.fn().mockResolvedValue(undefined),
   };
-  const service = new CreativeService(prisma as never, outbox as never);
+  const adverts = {
+    scheduleVersion: jest.fn().mockResolvedValue({ id: 'a1', status: 'SCHEDULED' }),
+  };
+  const storage = {
+    buildKey: jest.fn().mockReturnValue('creatives/1-a.png'),
+    presignedUploadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/uploads/x?mock=1'),
+    assertFileUrlAllowed: jest.fn(),
+  };
+  const service = new CreativeService(
+    prisma as never,
+    outbox as never,
+    new ActivityLogService(prisma as never),
+    storage as never,
+    adverts as never,
+  );
   return {
     service,
     client,
@@ -86,6 +113,8 @@ function makeDeps() {
     advert,
     user,
     outbox,
+    storage,
+    adverts,
   };
 }
 
@@ -147,7 +176,7 @@ describe('CreativeService.findAll', () => {
     expect(creativeVersion.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { creativeId: { in: ['c1'] } } }),
     );
-    expect(result.data[0].versions).toHaveLength(1);
+    expect(result.items[0].versions).toHaveLength(1);
   });
 
   it('skips the thread query without include=history', async () => {
@@ -202,8 +231,8 @@ describe('CreativeService.findAll', () => {
       sortBy: 'uploaded_on',
       sortOrder: 'desc',
     } as never);
-    expect(result.data.map((row) => row.id)).toEqual(['c2', 'c1']);
-    expect(result.meta.total).toBe(2);
+    expect(result.items.map((row) => row.id)).toEqual(['c2', 'c1']);
+    expect(result.meta.totalItems).toBe(2);
   });
 });
 
@@ -248,6 +277,80 @@ describe('CreativeService.createCreative', () => {
       }),
     );
     expect(result.latest_version?.version_number).toBe(1);
+  });
+
+  it('books the schedule in the same call when provided', async () => {
+    const { service, brand, creative, creativeVersion, adverts } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockResolvedValue({ ...creativeRow });
+    creativeVersion.create.mockResolvedValue({ ...versionRow, versionNumber: 1 });
+    creative.update.mockResolvedValue(creativeRow);
+    adverts.scheduleVersion.mockResolvedValue({
+      id: 'a1',
+      status: 'SCHEDULED',
+      start_date: new Date('2026-11-01T00:00:00Z'),
+      end_date: new Date('2026-11-30T00:00:00Z'),
+      address_text: 'MG Road',
+      city_name: null,
+      zone_name: null,
+      radius_km: 2.5,
+      location: null,
+    });
+
+    const result = await service.createCreative(
+      {
+        brand_id: 'brand1',
+        creative_name: 'Festive Ad',
+        initial_version: { media_url: 's3://b/a.png', media_type: 'Image' },
+        schedule: {
+          lat: 12.9716,
+          lng: 77.5946,
+          start_date: new Date('2026-11-01T00:00:00Z'),
+          end_date: new Date('2026-11-30T00:00:00Z'),
+          radius: 2.5,
+        },
+      },
+      'u1',
+    );
+
+    expect(adverts.scheduleVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ lat: 12.9716, radius: 2.5 }),
+      'u1',
+    );
+    expect(result.schedules).toHaveLength(1);
+    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_km: 2.5 });
+  });
+
+  it('rejects a schedule without initial_version', async () => {
+    const { service, brand, adverts } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+
+    await expect(
+      service.createCreative(
+        {
+          brand_id: 'brand1',
+          creative_name: 'X',
+          schedule: {
+            lat: 12.9716,
+            lng: 77.5946,
+            start_date: new Date('2026-11-01T00:00:00Z'),
+            end_date: new Date('2026-11-30T00:00:00Z'),
+          },
+        },
+        'u1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(adverts.scheduleVersion).not.toHaveBeenCalled();
+  });
+
+  it('blocks creation for a deactivated brand (kill-switch preventative)', async () => {
+    const { service, brand, creative } = makeDeps();
+    brand.findUnique.mockResolvedValue({ ...brandRow, isActive: false });
+
+    await expect(
+      service.createCreative({ brand_id: 'brand1', creative_name: 'X' }, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+    expect(creative.create).not.toHaveBeenCalled();
   });
 });
 
@@ -324,6 +427,17 @@ describe('CreativeService.uploadVersion', () => {
     expect(result.replayed).toBe(true);
     expect(creativeVersion.create).not.toHaveBeenCalled();
   });
+
+  it('blocks uploads for a deactivated brand (kill-switch preventative)', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findUnique.mockResolvedValue({
+      ...creativeRow,
+      brand: { ...brandRow, isActive: false },
+    });
+
+    await expect(service.uploadVersion('c1', dto, 'user1')).rejects.toThrow(BadRequestException);
+    expect(creativeVersion.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('CreativeService.takeAction', () => {
@@ -395,6 +509,25 @@ describe('CreativeService.takeAction', () => {
     expect(advert.updateMany).not.toHaveBeenCalled();
   });
 
+  it('writes the audit-trail row for every decision', async () => {
+    const { service, creativeVersion, client } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+
+    await service.takeAction('v1', { action: 'APPROVE' }, 'reviewer1');
+
+    expect(client.activityLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorId: 'reviewer1',
+          action: 'review.approve',
+          entityType: 'CreativeVersion',
+          entityId: 'v1',
+        }),
+      }),
+    );
+  });
+
   it('conflicts when the version is already decided (one-way gate)', async () => {
     const { service, creativeVersion } = makeDeps();
     creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
@@ -404,17 +537,48 @@ describe('CreativeService.takeAction', () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it('allows ON_HOLD versions to move to a decision', async () => {
+  it('rejects direct decisions on ON_HOLD versions (resume first)', async () => {
     const { service, creativeVersion } = makeDeps();
     creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'ON_HOLD' });
-    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
 
-    await service.takeAction('v1', { action: 'APPROVE' }, 'reviewer1');
+    await expect(service.takeAction('v1', { action: 'APPROVE' }, 'reviewer1')).rejects.toThrow(
+      ConflictException,
+    );
+    expect(creativeVersion.update).not.toHaveBeenCalled();
+  });
+
+  it('resumes ON_HOLD back to PENDING via RESUME', async () => {
+    const { service, creativeVersion, reviewAction, outbox } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'ON_HOLD' });
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'PENDING' });
+
+    await service.takeAction('v1', { action: 'RESUME' }, 'reviewer1');
 
     expect(creativeVersion.update).toHaveBeenCalledWith({
       where: { id: 'v1' },
-      data: { status: 'APPROVED' },
+      data: { status: 'PENDING' },
     });
+    expect(reviewAction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ actorId: 'reviewer1', action: 'RESUME' }),
+      }),
+    );
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'review.resumed',
+        payload: expect.objectContaining({ from_status: 'ON_HOLD', new_status: 'PENDING' }),
+      }),
+    );
+  });
+
+  it('rejects RESUME on non-ON_HOLD versions', async () => {
+    const { service, creativeVersion } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+
+    await expect(service.takeAction('v1', { action: 'RESUME' }, 'reviewer1')).rejects.toThrow(
+      ConflictException,
+    );
   });
 });
 
@@ -466,6 +630,14 @@ describe('CreativeService.upsertThread', () => {
     agencyRef.findUnique.mockResolvedValue(null);
 
     await expect(service.upsertThread(input)).rejects.toThrow(NotFoundException);
+  });
+
+  it('blocks threads for a deactivated brand (kill-switch preventative)', async () => {
+    const { service, agencyRef, brand } = makeDeps();
+    agencyRef.findUnique.mockResolvedValue({ upstreamAgencyId: 'ag1' });
+    brand.findUnique.mockResolvedValue({ ...brandRow, isActive: false });
+
+    await expect(service.upsertThread(input)).rejects.toThrow(BadRequestException);
   });
 
   it('creates the thread with upstream attribution', async () => {
@@ -543,5 +715,210 @@ describe('CreativeService.getHistory', () => {
     creative.findUnique.mockResolvedValue(null);
 
     await expect(service.getHistory('missing')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CreativeService.getCreative', () => {
+  it('returns the full detail view and records the view', async () => {
+    const { service, creative, agencyRef, user } = makeDeps();
+    creative.findUnique.mockResolvedValue({
+      ...creativeRow,
+      brand: { ...brandRow, flaggedBy: 'manager1', flaggedOn: new Date('2026-10-10T00:00:00Z') },
+      upstreamAgencyId: 'ag1',
+      versions: [
+        {
+          ...versionRow,
+          actions: [],
+          adverts: [
+            {
+              id: 'a1',
+              versionId: 'v1',
+              addressText: 'MG Road',
+              status: 'SCHEDULED',
+              startDate: new Date('2026-11-01T00:00:00Z'),
+              endDate: new Date('2026-11-30T00:00:00Z'),
+              cityName: 'Bengaluru',
+              zoneName: 'Central',
+              radiusKm: 2.5,
+            },
+          ],
+        },
+      ],
+    });
+    agencyRef.findUnique.mockResolvedValue({
+      upstreamAgencyId: 'ag1',
+      agencyName: 'Test Agency',
+      city: 'Bengaluru',
+      address: 'MG Road',
+    });
+    user.findMany.mockResolvedValue([
+      { id: 'manager1', firstName: 'Riya', lastName: 'Sharma' },
+      { id: 'viewer1', firstName: 'Aarav', lastName: 'Mehta' },
+    ]);
+
+    const result = await service.getCreative('c1', 'viewer1');
+
+    expect(creative.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'c1' } }),
+    );
+    expect(result.id).toBe('c1');
+    expect(result.latest_version?.id).toBe('v1');
+    expect(result.versions).toHaveLength(1);
+    expect(result.agency).toMatchObject({ agency_name: 'Test Agency', city: 'Bengaluru' });
+    expect(result.schedules).toHaveLength(1);
+    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_km: 2.5 });
+    expect(result.brand.flagged_by).toBe('Riya Sharma');
+    expect(result.last_viewed_by).toBe('Aarav Mehta');
+    expect(result.viewed_minutes_ago).toBe(0);
+    expect(creative.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1' },
+        data: expect.objectContaining({ lastViewedBy: 'viewer1' }),
+      }),
+    );
+  });
+
+  it('summarizes targeted regions across all versions, deduped and sorted', async () => {
+    const { service, creative, user } = makeDeps();
+    const advert = (id: string, city: string | null) => ({
+      id,
+      versionId: 'v1',
+      addressText: `${city ?? 'Unknown'} site`,
+      status: 'SCHEDULED',
+      startDate: new Date('2026-11-01T00:00:00Z'),
+      endDate: new Date('2026-11-30T00:00:00Z'),
+      cityName: city,
+      zoneName: null,
+      radiusKm: null,
+    });
+    creative.findUnique.mockResolvedValue({
+      ...creativeRow,
+      brand: brandRow,
+      upstreamAgencyId: null,
+      versions: [
+        {
+          ...versionRow,
+          id: 'v1',
+          actions: [],
+          adverts: [advert('a1', 'Mumbai'), advert('a2', 'Bengaluru'), advert('a3', 'Mumbai')],
+        },
+        {
+          ...versionRow,
+          id: 'v2',
+          actions: [],
+          adverts: [advert('a4', null), advert('a5', 'Delhi')],
+        },
+      ],
+    });
+    user.findMany.mockResolvedValue([]);
+
+    const result = await service.getCreative('c1', 'viewer1');
+
+    expect(result.targeted_regions).toEqual(['Bengaluru', 'Delhi', 'Mumbai']);
+  });
+
+  it('reports no targeted regions before any deployment', async () => {
+    const { service, creative, user } = makeDeps();
+    creative.findUnique.mockResolvedValue({
+      ...creativeRow,
+      brand: brandRow,
+      upstreamAgencyId: null,
+      versions: [{ ...versionRow, actions: [], adverts: [] }],
+    });
+    user.findMany.mockResolvedValue([]);
+
+    const result = await service.getCreative('c1', 'viewer1');
+
+    expect(result.targeted_regions).toEqual([]);
+    expect(result.schedules).toEqual([]);
+  });
+
+  it('throws NotFound for an unknown creative', async () => {
+    const { service, creative } = makeDeps();
+    creative.findUnique.mockResolvedValue(null);
+
+    await expect(service.getCreative('missing', 'viewer1')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CreativeService.requestUploadUrl', () => {
+  it('issues a bucket key + upload URL for a live brand', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+
+    const result = await service.requestUploadUrl(
+      { brand_id: 'brand1', name: 'Diwali Film', media_type: 'Image' },
+      'u1',
+    );
+
+    expect(result.s3_key).toContain('creatives/');
+    expect(result.upload_url).toContain('mock-storage.local');
+    expect(result.file_url).toBe(result.s3_key);
+  });
+
+  it('rejects unknown brands and killed brands', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(null);
+    await expect(
+      service.requestUploadUrl({ brand_id: 'missing', name: 'X', media_type: 'Image' }, 'u1'),
+    ).rejects.toThrow(NotFoundException);
+
+    brand.findUnique.mockResolvedValue({ ...brandRow, isActive: false });
+    await expect(
+      service.requestUploadUrl({ brand_id: 'brand1', name: 'X', media_type: 'Image' }, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects non-image media everywhere (media is always an image)', async () => {
+    const { service, brand, creative } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.findUnique.mockResolvedValue({ ...creativeRow, brand: brandRow });
+
+    await expect(
+      service.requestUploadUrl({ brand_id: 'brand1', name: 'X', media_type: 'Video' }, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.createCreative(
+        {
+          brand_id: 'brand1',
+          creative_name: 'X',
+          initial_version: { media_url: 's3://b/a.mp4', media_type: 'Video' },
+        },
+        'u1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.uploadVersion('c1', { media_url: 's3://b/a.mp4', media_type: 'Video' }, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('CreativeService.finalizeUpload', () => {
+  it('requires creative_id or brand_id + name', async () => {
+    const { service } = makeDeps();
+
+    await expect(
+      service.finalizeUpload({ s3_key: 'creatives/1-a.png', media_type: 'Image' }, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('attaches a version to an existing creative', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findUnique.mockResolvedValue({ ...creativeRow, brand: brandRow });
+    creativeVersion.findFirst.mockResolvedValue(null);
+    creativeVersion.create.mockResolvedValue({ ...versionRow, id: 'v2', versionNumber: 2 });
+    creative.update.mockResolvedValue(creativeRow);
+
+    const result = await service.finalizeUpload(
+      { creative_id: 'c1', s3_key: 'creatives/2-b.png', media_type: 'Image' },
+      'u1',
+    );
+
+    expect(creativeVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mediaUrl: 'creatives/2-b.png' }),
+      }),
+    );
+    expect(result.id).toBe('v2');
   });
 });

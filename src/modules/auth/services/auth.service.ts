@@ -63,10 +63,13 @@ export class AuthService {
     if (!user || user.deletedAt || user.status !== UserStatus.ACTIVE) {
       throw new InvalidCredentialsException();
     }
-    const valid = await argon2.verify(user.passwordHash, dto.password);
+    const valid = await this.users.verifyPassword(user.passwordHash, dto.password);
     if (!valid) {
       throw new InvalidCredentialsException();
     }
+    // NOTE: no transparent rehash here. password_hash is a shared column with
+    // the sibling backend (bcrypt); overwriting it with argon2 would break
+    // sibling logins. Dual-verify keeps both systems working.
 
     await this.redis.del(key);
     const pair = await this.tokens.issuePair(user, ctx);

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsString, Length, ValidateNested } from 'class-validator';
+import { CreativeScheduleInputDto } from './creative-schedule.dto';
 
 export class InitialVersionDto {
   @ApiProperty({ description: 'Media file URL (bucket key)', maxLength: 2000 })
@@ -50,4 +51,14 @@ export class CreateCreativeDto {
   @ValidateNested()
   @Type(() => InitialVersionDto)
   initial_version?: InitialVersionDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional schedule (dates with time, location, radius). Books the advert in the same call; requires initial_version. Pre-approval booking is normal — go-live waits for APPROVE.',
+    type: CreativeScheduleInputDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreativeScheduleInputDto)
+  schedule?: CreativeScheduleInputDto;
 }

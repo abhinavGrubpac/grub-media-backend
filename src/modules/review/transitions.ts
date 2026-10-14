@@ -5,12 +5,12 @@ import { ActionType, ReviewStatus } from '@prisma/client';
  * Creative review state machine (WORKFLOWS.md §1).
  *
  * Pure functions only: rules stay unit-testable without a database. Only
- * PENDING and ON_HOLD versions accept a decision; APPROVED / REJECTED /
- * NEEDS_CHANGES / WITHDRAWN are terminal for that version — the only way
- * forward is a version increment (WORKFLOWS.md §1.3). ON_HOLD can move to a
- * decision but never back to PENDING.
+ * PENDING versions accept a decision; APPROVED / REJECTED / NEEDS_CHANGES /
+ * WITHDRAWN are terminal for that version — the only way forward is a
+ * version increment (WORKFLOWS.md §1.3). ON_HOLD parks the version: no
+ * decision applies to it directly, its only exit is RESUME back to PENDING.
  */
-export const REVIEW_ACTIONS = ['APPROVE', 'REJECT', 'HOLD', 'REQUEST_CHANGES'] as const;
+export const REVIEW_ACTIONS = ['APPROVE', 'REJECT', 'HOLD', 'REQUEST_CHANGES', 'RESUME'] as const;
 export type ReviewActionType = (typeof REVIEW_ACTIONS)[number];
 
 export const REVIEW_STATUS_BY_ACTION: Record<ReviewActionType, ReviewStatus> = {
@@ -18,6 +18,7 @@ export const REVIEW_STATUS_BY_ACTION: Record<ReviewActionType, ReviewStatus> = {
   REJECT: ReviewStatus.REJECTED,
   HOLD: ReviewStatus.ON_HOLD,
   REQUEST_CHANGES: ReviewStatus.NEEDS_CHANGES,
+  RESUME: ReviewStatus.PENDING,
 };
 
 export function isReviewAction(value: string): value is ReviewActionType {
@@ -51,6 +52,20 @@ export function validateTakeAction(input: {
 export function assertValidTakeAction(input: { action: string; comments?: string | null }): void {
   const message = validateTakeAction(input);
   if (message) throw new BadRequestException(message);
+}
+
+/**
+ * Creative media is always an image (platform rule). Strict, like all other
+ * review enums — 'image' does not normalize; send 'Image'.
+ */
+export const CREATIVE_MEDIA_TYPES = ['Image'] as const;
+
+export function assertValidMediaType(value: unknown): void {
+  if (value !== 'Image') {
+    throw new BadRequestException(
+      `media_type must be one of: ${CREATIVE_MEDIA_TYPES.join(', ')} (media is always an image)`,
+    );
+  }
 }
 
 export const WITHDRAWABLE_STATUSES: readonly ReviewStatus[] = [
@@ -90,20 +105,17 @@ export function assertWithdrawable(status: ReviewStatus): void {
 }
 
 /**
- * One-way review gate (WORKFLOWS.md §1.3): only a PENDING or ON_HOLD version
- * accepts a decision. PENDING may move to APPROVED / REJECTED / NEEDS_CHANGES
- * / ON_HOLD; ON_HOLD may move to a decision but never back to PENDING. Every
- * decided status is terminal for that version. Further review happens on a
- * new version, which always starts at PENDING.
+ * One-way review gate (WORKFLOWS.md §1.3): only a PENDING version accepts a
+ * decision (APPROVE / REJECT / HOLD / REQUEST_CHANGES). Every decided status
+ * is terminal for that version and can never revert. ON_HOLD parks the
+ * version — resume it to PENDING first. Further review happens on a new
+ * version, which always starts at PENDING.
  */
 export function validateActionableStatus(status: ReviewStatus | string): string | null {
-  if (
-    status === ReviewStatus.PENDING ||
-    status === ('PENDING' as string) ||
-    status === ReviewStatus.ON_HOLD ||
-    status === ('ON_HOLD' as string)
-  )
-    return null;
+  if (status === ReviewStatus.PENDING || status === ('PENDING' as string)) return null;
+  if (status === ReviewStatus.ON_HOLD || status === ('ON_HOLD' as string)) {
+    return 'version is ON_HOLD; resume it to PENDING before deciding';
+  }
   return (
     `version is already ${status}; decisions are final — ` +
     'upload a new version for further review'
@@ -116,18 +128,17 @@ export function assertActionableStatus(status: ReviewStatus | string): void {
 }
 
 /**
- * Additional guard for specific transition prohibitions.
- * ON_HOLD -> PENDING is strictly forbidden.
+ * Transition prohibitions. ON_HOLD parks the version: its only exit is
+ * RESUME back to PENDING — no decision applies to it directly.
  */
 export function assertValidTransition(
   from: ReviewStatus | string,
   to: ReviewStatus | string,
 ): void {
-  if (
-    (from === ReviewStatus.ON_HOLD || from === ('ON_HOLD' as string)) &&
-    (to === ReviewStatus.PENDING || to === ('PENDING' as string))
-  ) {
-    throw new ConflictException('Cannot move a version from ON_HOLD back to PENDING');
+  const onHold = from === ReviewStatus.ON_HOLD || from === ('ON_HOLD' as string);
+  const toPending = to === ReviewStatus.PENDING || to === ('PENDING' as string);
+  if (onHold && !toPending) {
+    throw new ConflictException('Version is ON_HOLD; resume it to PENDING before any other change');
   }
 }
 

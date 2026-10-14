@@ -20,6 +20,9 @@ import { HealthModule } from './modules/health/health.module';
 import { EventsModule } from './modules/events/events.module';
 import { ReviewModule } from './modules/review/review.module';
 import { HelpModule } from './modules/help/help.module';
+// Advert control + test intake (three-portal monorepo intake pending).
+import { AdvertModule } from './modules/advert/advert.module';
+import { IntakeModule } from './modules/intake/intake.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -92,6 +95,8 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     EventsModule,
     ReviewModule,
     HelpModule,
+    AdvertModule,
+    IntakeModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.

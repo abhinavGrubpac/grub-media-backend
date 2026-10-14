@@ -6,14 +6,18 @@ import {
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { Prisma, ReviewStatus } from '@prisma/client';
-import { Paginated } from '../../../common/dto/paginated';
-import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
+import { StandardMeta, standardMeta, toSkipTake } from '../../../common/utils/paginate';
 import { PrismaService } from '../../../database/prisma.service';
+import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
+import { StorageService } from '../../../common/storage/storage.service';
+import { assertBrandActive } from '../../../common/utils/brand';
+import { AdvertService } from '../../advert/services/advert.service';
 import { EventOutboxService } from '../../events/event.outbox';
 import { EventTypes } from '../../events/events.constants';
 import { CreativeQueryDto } from '../dto/creative-query.dto';
 import {
   CreativeResponseDto,
+  CreativeScheduleSummaryDto,
   CreativeVersionResponseDto,
   ReviewActionResponseDto,
 } from '../dto/creative-response.dto';
@@ -22,6 +26,7 @@ import { UploadVersionDto } from '../dto/upload-version.dto';
 import {
   actionTypeFor,
   assertActionableStatus,
+  assertValidMediaType,
   assertValidTakeAction,
   assertValidTransition,
   assertWithdrawable,
@@ -146,6 +151,7 @@ const REVIEW_EVENT_BY_ACTION = {
   REJECT: EventTypes.reviewRejected,
   HOLD: EventTypes.reviewOnHold,
   REQUEST_CHANGES: EventTypes.reviewNeedsChanges,
+  RESUME: EventTypes.reviewResumed,
 } as const;
 
 type CreativeWithBrandAndVersions = Prisma.CreativeGetPayload<{
@@ -165,11 +171,15 @@ export class CreativeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: EventOutboxService,
+    private readonly activity: ActivityLogService,
+    private readonly storage: StorageService,
+    private readonly adverts: AdvertService,
   ) {}
 
-  async findAll(
-    query: CreativeQueryDto,
-  ): Promise<Paginated<CreativeResponseDto & { versions?: CreativeVersionResponseDto[] }>> {
+  async findAll(query: CreativeQueryDto): Promise<{
+    items: (CreativeResponseDto & { versions?: CreativeVersionResponseDto[] })[];
+    meta: StandardMeta;
+  }> {
     const { skip, take } = toSkipTake(query);
     const order = query.sortOrder ?? 'desc';
     const where = buildCreativeWhere({
@@ -237,12 +247,13 @@ export class CreativeService {
       threadsByCreative.set(version.creativeId, list);
     }
 
-    const actorNames = await this.resolveActorNames(
-      this.collectActorIds([
+    const actorNames = await this.resolveActorNames([
+      ...this.collectActorIds([
         ...creatives.flatMap((creative) => creative.versions),
         ...threadVersions,
       ]),
-    );
+      ...this.collectRowIds(creatives),
+    ]);
     const data = creatives.map((creative) => {
       const response = this.toCreativeResponse(creative, actorNames);
       const latestAction = creative.versions[0]?.actions[0];
@@ -262,20 +273,26 @@ export class CreativeService {
     if (versionSort && query.sortBy) {
       const sorted = sortListed(data, query.sortBy, order);
       const page = sorted.slice(skip, skip + take);
-      return { data: page, meta: buildMeta(total, query.page, query.limit) };
+      return { items: page, meta: standardMeta(total, query.page, query.limit, page.length) };
     }
-    return { data, meta: buildMeta(total, query.page, query.limit) };
+    return { items: data, meta: standardMeta(total, query.page, query.limit, data.length) };
   }
 
   async createCreative(dto: CreateCreativeDto, actorId: string): Promise<CreativeResponseDto> {
     const brand = await this.prisma.client.brand.findUnique({ where: { id: dto.brand_id } });
     if (!brand) throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
+    // WORKFLOWS.md §2.3 preventative: killed brands accept no new creatives.
+    assertBrandActive(brand.isActive, brand.id);
+    if (dto.initial_version) assertValidMediaType(dto.initial_version.media_type);
 
     // Optional initial_version merges create + upload-version into one atomic
     // call (same auto-approve + idempotency rules as uploadVersion).
     const autoApprove = brand.autoApprove === true;
     const initialStatus = autoApprove ? ReviewStatus.APPROVED : ReviewStatus.PENDING;
 
+    if (dto.schedule && !dto.initial_version) {
+      throw new BadRequestException('schedule needs initial_version: nothing to book yet');
+    }
     const { creative, version } = await this.prisma.$transaction(async (tx) => {
       const created = await tx.creative.create({
         data: {
@@ -345,9 +362,64 @@ export class CreativeService {
       }
       return { creative: created, version: createdVersion };
     });
-    return this.toCreativeResponse(
+    const agency = brand.upstreamAgencyId
+      ? await this.prisma.client.agencyRef.findUnique({
+          where: { upstreamAgencyId: brand.upstreamAgencyId },
+        })
+      : null;
+    // Optional schedule books the advert in the same call (pre-approval
+    // booking is normal; go-live waits for APPROVE).
+    let schedules: CreativeScheduleSummaryDto[] = [];
+    if (dto.schedule && version) {
+      const booked = await this.adverts.scheduleVersion(
+        {
+          version_id: version.id,
+          lat: dto.schedule.lat,
+          lng: dto.schedule.lng,
+          address_text: dto.schedule.address_text ?? '',
+          start_date: dto.schedule.start_date,
+          end_date: dto.schedule.end_date,
+          city_name: dto.schedule.city_name ?? null,
+          zone_name: dto.schedule.zone_name ?? null,
+          radius: dto.schedule.radius ?? null,
+        },
+        actorId,
+      );
+      schedules = [
+        {
+          advert_id: booked.id,
+          version_id: version.id,
+          status: booked.status,
+          start_date: booked.start_date,
+          end_date: booked.end_date,
+          address_text: booked.address_text,
+          city_name: booked.city_name,
+          zone_name: booked.zone_name,
+          radius_km: booked.radius_km ?? null,
+          location: booked.location ?? null,
+        },
+      ];
+    }
+    const base = this.toCreativeResponse(
       { ...creative, brand, versions: version ? [{ ...version, actions: [] }] : [] },
       new Map(),
+    );
+    return plainToInstance(
+      CreativeResponseDto,
+      {
+        ...base,
+        agency: agency
+          ? {
+              upstream_agency_id: agency.upstreamAgencyId,
+              agency_name: agency.agencyName,
+              city: agency.city ?? null,
+              address: agency.address ?? null,
+            }
+          : null,
+        versions: version ? [this.toVersionResponse({ ...version, actions: [] }, new Map())] : [],
+        schedules,
+      },
+      { excludeExtraneousValues: true },
     );
   }
 
@@ -361,6 +433,9 @@ export class CreativeService {
     dto: UploadVersionDto & {
       upstream_version_id?: string;
       submitted_at?: Date | null;
+      admin_approved_by?: string | null;
+      admin_approved_at?: Date | null;
+      admin_comments?: string | null;
     },
     actorId: string,
   ): Promise<{ version: CreativeVersionResponseDto; replayed: boolean }> {
@@ -370,12 +445,14 @@ export class CreativeService {
       });
       if (replay) return { version: this.toVersionResponse(replay, new Map()), replayed: true };
     }
+    assertValidMediaType(dto.media_type);
 
     const creative = await this.prisma.client.creative.findUnique({
       where: { id: creativeId },
       include: { brand: true },
     });
     if (!creative) throw new NotFoundException(`Creative with ID ${creativeId} not found`);
+    assertBrandActive(creative.brand?.isActive ?? true, creative.brandId);
 
     const latest = await this.prisma.client.creativeVersion.findFirst({
       where: { creativeId },
@@ -401,6 +478,9 @@ export class CreativeService {
           createdBy: actorId,
           upstreamVersionId: dto.upstream_version_id ?? null,
           submittedAt: dto.submitted_at ?? null,
+          adminApprovedBy: dto.admin_approved_by ?? null,
+          adminApprovedAt: dto.admin_approved_at ?? null,
+          adminComments: dto.admin_comments ?? null,
         },
       });
       await tx.creative.update({
@@ -445,6 +525,161 @@ export class CreativeService {
   }
 
   /**
+   * Full creative detail (API_SPECIFICATION.md §4 + operator detail view):
+   * brand + agency + full version history + advert schedules with WKT
+   * locations. Records this view for last-viewed tracking (best-effort).
+   */
+  async getCreative(id: string, actorId: string): Promise<CreativeResponseDto> {
+    const creative = await this.prisma.client.creative.findUnique({
+      where: { id },
+      include: {
+        brand: true,
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+          include: {
+            actions: { orderBy: { createdAt: 'asc' } },
+            adverts: true,
+          },
+        },
+      },
+    });
+    if (!creative) throw new NotFoundException(`Creative with ID ${id} not found`);
+
+    const viewedAt = new Date();
+    try {
+      await this.prisma.client.creative.update({
+        where: { id },
+        data: { lastViewedBy: actorId, lastViewedAt: viewedAt },
+      });
+      creative.lastViewedBy = actorId;
+      creative.lastViewedAt = viewedAt;
+    } catch {
+      // View tracking must never break the read.
+    }
+
+    const actorNames = await this.resolveActorNames([
+      ...this.collectActorIds(creative.versions),
+      ...this.collectRowIds([creative]),
+      actorId,
+    ]);
+    const agency = creative.upstreamAgencyId
+      ? await this.prisma.client.agencyRef.findUnique({
+          where: { upstreamAgencyId: creative.upstreamAgencyId },
+        })
+      : null;
+    const advertIds = creative.versions.flatMap((version) =>
+      (version.adverts ?? []).map((advert) => advert.id),
+    );
+    const locations = await this.fetchAdvertLocations(advertIds);
+    // Creative-level region summary: distinct advert cities across all
+    // versions. Computed from the already-loaded adverts (no extra query),
+    // so creatives with no deployments report an empty list.
+    const targetedRegions = Array.from(
+      new Set(
+        creative.versions.flatMap((version) =>
+          (version.adverts ?? [])
+            .map((advert) => advert.cityName?.trim())
+            .filter((city): city is string => Boolean(city)),
+        ),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+    const base = this.toCreativeResponse(creative, actorNames);
+    return plainToInstance(
+      CreativeResponseDto,
+      {
+        ...base,
+        agency: agency
+          ? {
+              upstream_agency_id: agency.upstreamAgencyId,
+              agency_name: agency.agencyName,
+              city: agency.city ?? null,
+              address: agency.address ?? null,
+            }
+          : null,
+        versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
+        targeted_regions: targetedRegions,
+        schedules: creative.versions.flatMap((version) =>
+          (version.adverts ?? []).map((advert) => ({
+            advert_id: advert.id,
+            version_id: version.id,
+            status: advert.status,
+            start_date: advert.startDate,
+            end_date: advert.endDate,
+            address_text: advert.addressText,
+            city_name: advert.cityName,
+            zone_name: advert.zoneName,
+            radius_km: advert.radiusKm ?? null,
+            location: locations.get(advert.id) ?? null,
+          })),
+        ),
+      },
+      { excludeExtraneousValues: true },
+    );
+  }
+
+  /**
+   * S3 presigned upload handshake (API_SPECIFICATION.md §4). Returns a
+   * bucket key + upload URL; the client PUTs bytes there, then calls
+   * finalizeUpload. Mock-storage URLs in development (see StorageService).
+   */
+  async requestUploadUrl(
+    dto: { brand_id: string; name: string; media_type: string },
+    actorId: string,
+  ): Promise<{ upload_url: string; s3_key: string; file_url: string }> {
+    const brand = await this.prisma.client.brand.findUnique({ where: { id: dto.brand_id } });
+    if (!brand) throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
+    assertBrandActive(brand.isActive, brand.id);
+    assertValidMediaType(dto.media_type);
+    await this.outbox.emit({
+      eventType: 'creative.upload_intent',
+      entityType: 'Creative',
+      entityId: 'pending',
+      actorId,
+      key: actorId,
+      payload: { brand_id: dto.brand_id, name: dto.name, media_type: dto.media_type },
+    });
+    const s3Key = this.storage.buildKey('creatives', dto.name, 'png');
+    const uploadUrl = await this.storage.presignedUploadUrl(s3Key);
+    return { upload_url: uploadUrl, s3_key: s3Key, file_url: s3Key };
+  }
+
+  /**
+   * Confirms a client upload: creates the creative (or attaches a version
+   * to creative_id) with v1/PENDING semantics via the standard paths.
+   */
+  async finalizeUpload(
+    dto: {
+      creative_id?: string;
+      brand_id?: string;
+      name?: string;
+      s3_key: string;
+      media_type: string;
+    },
+    actorId: string,
+  ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
+    this.storage.assertFileUrlAllowed(dto.s3_key);
+    if (dto.creative_id) {
+      const { version } = await this.uploadVersion(
+        dto.creative_id,
+        { media_url: dto.s3_key, media_type: dto.media_type },
+        actorId,
+      );
+      return version;
+    }
+    if (!dto.brand_id || !dto.name) {
+      throw new BadRequestException('Provide creative_id or brand_id + name');
+    }
+    return this.createCreative(
+      {
+        brand_id: dto.brand_id,
+        creative_name: dto.name,
+        initial_version: { media_url: dto.s3_key, media_type: dto.media_type },
+      },
+      actorId,
+    );
+  }
+
+  /**
    * Records a review decision. Optimistic locking via expectedVersion: the
    * first write wins, the loser gets 409. REJECT/NEEDS_CHANGES cascade
    * advert.auto_revoked to every non-revoked advert of the version.
@@ -462,13 +697,16 @@ export class CreativeService {
     if (input.expectedVersion !== undefined && input.expectedVersion !== version.versionNumber) {
       throw new ConflictException('This asset has been updated by another user; refresh and retry');
     }
-    // WORKFLOWS.md §1.3 one-way gate: only PENDING / ON_HOLD accept a decision.
-    // Decided statuses are terminal for this version; further review needs a new version.
-    assertActionableStatus(version.status);
+    // WORKFLOWS.md §1.3 one-way gate: only PENDING accepts a decision.
+    // ON_HOLD parks the version — RESUME returns it to PENDING first.
+    // Decided statuses are terminal; further review needs a new version.
     assertValidTakeAction(input);
     const action = input.action as keyof typeof REVIEW_EVENT_BY_ACTION;
+    if (action === 'RESUME' && version.status !== ReviewStatus.ON_HOLD) {
+      throw new ConflictException('Only ON_HOLD versions can be resumed');
+    }
+    if (action !== 'RESUME') assertActionableStatus(version.status);
     const newStatus = statusForAction(action);
-    // Strict rule: ON_HOLD -> PENDING is never possible via takeAction.
     assertValidTransition(version.status, newStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -481,6 +719,17 @@ export class CreativeService {
           versionId,
           actorId,
           action: actionTypeFor(action),
+          comments: input.comments ?? null,
+        },
+      });
+      await this.activity.recordInTx(tx, {
+        actorId,
+        action: `review.${action.toLowerCase()}`,
+        entityType: 'CreativeVersion',
+        entityId: versionId,
+        metadata: {
+          from_status: version.status,
+          new_status: newStatus,
           comments: input.comments ?? null,
         },
       });
@@ -547,7 +796,10 @@ export class CreativeService {
     });
     if (!creative) throw new NotFoundException(`Creative with ID ${creativeId} not found`);
 
-    const actorNames = await this.resolveActorNames(this.collectActorIds(creative.versions));
+    const actorNames = await this.resolveActorNames([
+      ...this.collectActorIds(creative.versions),
+      ...this.collectRowIds([creative]),
+    ]);
     return {
       creative: this.toCreativeResponse(creative, actorNames),
       versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
@@ -628,6 +880,7 @@ export class CreativeService {
       (await this.prisma.client.brand.findUnique({ where: { id: input.upstream_brand_id } }));
     if (!brand)
       throw new NotFoundException(`Brand with upstream ID ${input.upstream_brand_id} not found`);
+    assertBrandActive(brand.isActive, brand.id);
 
     const existing = await this.prisma.client.creative.findUnique({
       where: { upstreamCreativeId: input.upstream_creative_id },
@@ -725,13 +978,42 @@ export class CreativeService {
     return [...ids];
   }
 
+  /** Brand flag authors + creative viewers referenced outside version threads. */
+  private collectRowIds(
+    creatives: Array<{
+      brand: { flaggedBy: string | null };
+      lastViewedBy: string | null;
+    }>,
+  ): string[] {
+    const ids: string[] = [];
+    for (const creative of creatives) {
+      if (creative.brand.flaggedBy) ids.push(creative.brand.flaggedBy);
+      if (creative.lastViewedBy) ids.push(creative.lastViewedBy);
+    }
+    return ids;
+  }
+
   private async resolveActorNames(actorIds: string[]): Promise<Map<string, string>> {
     if (actorIds.length === 0) return new Map();
     const users = await this.prisma.client.user.findMany({
       where: { id: { in: actorIds } },
       select: { id: true, firstName: true, lastName: true },
     });
-    return new Map(users.map((user) => [user.id, `${user.firstName} ${user.lastName}`.trim()]));
+    return new Map(
+      users.map((user) => {
+        const name = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
+        return [user.id, name || 'Unknown user'];
+      }),
+    );
+  }
+
+  /** WKT site locations for adverts (Prisma cannot project the PostGIS column). */
+  private async fetchAdvertLocations(ids: string[]): Promise<Map<string, string | null>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string; wkt: string | null }>>(
+      Prisma.sql`SELECT "id", ST_AsText("location") AS "wkt" FROM "Advert" WHERE "id" IN (${Prisma.join(ids)})`,
+    );
+    return new Map(rows.map((row) => [row.id, row.wkt]));
   }
 
   private toCreativeResponse(
@@ -749,6 +1031,10 @@ export class CreativeService {
           id: creative.brand.id,
           brand_name: creative.brand.brandName,
           is_flagged: creative.brand.isFlagged,
+          industry_category: creative.brand.industryCategory ?? null,
+          flagged_by:
+            (creative.brand.flaggedBy && actorNames.get(creative.brand.flaggedBy)) || null,
+          flagged_on: creative.brand.flaggedOn ?? null,
         },
         creative_name: creative.creativeName,
         external_ref_id: creative.externalRefId,
@@ -759,6 +1045,11 @@ export class CreativeService {
         latest_version: latestVersion ? this.toVersionResponse(latestVersion, actorNames) : null,
         last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
         last_action_at: latestAction ? latestAction.createdAt : null,
+        last_viewed_by: (creative.lastViewedBy && actorNames.get(creative.lastViewedBy)) || null,
+        last_viewed_at: creative.lastViewedAt ?? null,
+        viewed_minutes_ago: creative.lastViewedAt
+          ? Math.max(0, Math.round((Date.now() - creative.lastViewedAt.getTime()) / 60000))
+          : null,
       },
       { excludeExtraneousValues: true },
     );
@@ -786,6 +1077,9 @@ export class CreativeService {
         created_by: version.createdBy,
         created_by_name: actorNames.get(version.createdBy) ?? null,
         created_at: version.createdAt,
+        admin_approved_by: version.adminApprovedBy ?? null,
+        admin_approved_at: version.adminApprovedAt ?? null,
+        admin_comments: version.adminComments ?? null,
         latest_action: latestAction
           ? plainToInstance(
               ReviewActionResponseDto,
