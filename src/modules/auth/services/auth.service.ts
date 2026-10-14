@@ -171,7 +171,9 @@ export class AuthService {
     await this.prisma.client.otpCode.create({
       data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
     });
-    this.logger.log(`Profile ${dto.type} OTP for ${userId}: ${code}`);
+    // Never log the code itself: application logs are readable far beyond the
+    // device that requested the change (aggregators, support, backups).
+    this.logger.log(`Profile ${dto.type} OTP issued for ${userId}`);
 
     const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
     await this.logs.record({
