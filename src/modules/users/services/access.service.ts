@@ -64,6 +64,11 @@ export class AccessService {
     return bundle;
   }
   async assignBundle(actor: string, employeeId: string, bundleId: string) {
+    // Pre-read the existing assignment so the audit row can carry the previous
+    // state when this upsert reassigns rather than creates.
+    const previous = await this.prisma.client.userBundle.findUnique({
+      where: { userId_bundleId: { userId: employeeId, bundleId } },
+    });
     const row = await this.prisma.client.userBundle.upsert({
       where: { userId_bundleId: { userId: employeeId, bundleId } },
       update: { assignedBy: actor },
@@ -77,6 +82,8 @@ export class AccessService {
       userId: actor,
       empId: employeeId,
       target: bundleId,
+      oldDetail: previous ?? undefined,
+      newDetail: row,
     });
     return row;
   }
@@ -92,6 +99,8 @@ export class AccessService {
       userId: actor,
       empId: employeeId,
       target: bundleId,
+      // The removed assignment is the "before" state; there is no after state.
+      oldDetail: row,
     });
     return row;
   }
@@ -107,6 +116,11 @@ export class AccessService {
       (admin.role !== UserRole.ADMIN && admin.role !== UserRole.SUPER_ADMIN)
     )
       throw new NotFoundException('Employee or admin not found');
+    // Pre-read the current assignment so a replacement records who the previous
+    // admin was (oldDetail) alongside the new one (newDetail).
+    const previous = await this.prisma.client.adminEmployeeAssignment.findUnique({
+      where: { employeeId },
+    });
     const row = await this.prisma.client.adminEmployeeAssignment.upsert({
       where: { employeeId },
       update: { adminId, assignedBy: actor },
@@ -120,6 +134,8 @@ export class AccessService {
       userId: actor,
       empId: employeeId,
       target: logRefOf(admin),
+      oldDetail: previous ?? undefined,
+      newDetail: row,
     });
     return row;
   }
@@ -134,6 +150,8 @@ export class AccessService {
       actionText: `Admin assignment removed from employee ${employeeId} by ${actor}`,
       userId: actor,
       empId: employeeId,
+      // The removed assignment is the "before" state; there is no after state.
+      oldDetail: row,
     });
     return row;
   }

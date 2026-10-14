@@ -98,15 +98,22 @@ export class AuthService {
   }
 
   /**
-   * Audit a failed login attempt. The row is recorded against the email as
-   * text (the user may not exist), so failed attempts for unknown emails are
-   * visible to admins without a userId FK.
+   * Audit a failed sign-in attempt (password or OTP). The row is recorded
+   * against the email as text (the user may not exist), so failed attempts for
+   * unknown emails are visible to admins without a userId FK. The action name
+   * distinguishes the two flows: 'Failed Login' vs 'Failed OTP'.
    */
-  private async recordFailedLogin(email: string, ctx: RequestCtx): Promise<void> {
+  private async recordFailedLogin(
+    email: string,
+    ctx: RequestCtx,
+    kind: 'login' | 'otp' = 'login',
+  ): Promise<void> {
+    const actionName = kind === 'otp' ? 'Failed OTP' : 'Failed Login';
+    const what = kind === 'otp' ? 'OTP' : 'login';
     await this.logs.record({
       ...AUTH_LOG,
-      actionName: 'Failed Login',
-      actionText: `Failed login attempt for ${email} from ${ctx.ip ?? 'unknown'}`,
+      actionName,
+      actionText: `Failed ${what} attempt for ${email} from ${ctx.ip ?? 'unknown'}`,
       target: email,
     });
   }
@@ -179,7 +186,19 @@ export class AuthService {
       where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() },
     });
-    if (!claim.count) throw new BadRequestException('Invalid or expired OTP');
+    if (!claim.count) {
+      // Audit the failed verification alongside the profile flow's other rows
+      // (ACTIVITY/Profile), so rejected OTP attempts are visible to admins.
+      await this.logs.record({
+        typeEnum: LogType.ACTIVITY,
+        categoryName: 'Profile',
+        actionName: 'Failed OTP',
+        actionText: `Failed profile ${dto.type} OTP verification for user ${userId}`,
+        userId,
+        target: userId,
+      });
+      throw new BadRequestException('Invalid or expired OTP');
+    }
     const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
     const oldField = dto.type === 'email' ? before?.email : before?.phoneNumber;
     if (dto.type === 'email') {
@@ -296,7 +315,7 @@ export class AuthService {
 
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user || user.status !== UserStatus.ACTIVE) {
-      await this.recordFailedLogin(dto.email, ctx);
+      await this.recordFailedLogin(dto.email, ctx, 'otp');
       throw new InvalidCredentialsException();
     }
 
@@ -316,7 +335,7 @@ export class AuthService {
       });
 
       if (claim.count === 0) {
-        await this.recordFailedLogin(dto.email, ctx);
+        await this.recordFailedLogin(dto.email, ctx, 'otp');
         throw new InvalidCredentialsException();
       }
     }

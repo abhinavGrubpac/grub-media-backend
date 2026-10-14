@@ -427,6 +427,7 @@ export class UsersService {
       actionText: `${result.count} employee(s) reactivated by ${actorId ?? 'system'}`,
       userId: actorId,
       target: ids.join(','),
+      oldDetail: { ids, fromStatus: UserStatus.SUSPENDED },
       newDetail: { ids, activated: result.count },
     });
     return result.count;
