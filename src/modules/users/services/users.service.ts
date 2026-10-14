@@ -9,8 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
 import { OtpPurpose, UserRole, UserStatus, type User } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../database/prisma.service';
 import { MailerService } from '../../mailer/mailer.service';
+import { StorageService } from '../../storage/storage.service';
 import { Paginated } from '../../../common/dto/paginated';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
 import { ERROR_CODES } from '../../../common/constants/error-codes';
@@ -21,6 +23,7 @@ import {
 } from '../../../common/exceptions/domain.exceptions';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { ExportUsersDto } from '../dto/export-users.dto';
 import { UserQueryDto, USER_SORTABLE_FIELDS, UserSortField } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { ProfileUpdateDto } from '../dto/profile-update.dto';
@@ -39,6 +42,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
 
   private toDto(user: User): UserResponseDto {
@@ -80,13 +84,21 @@ export class UsersService {
     const existing = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (existing) throw new EmailAlreadyExistsException();
 
-    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    // If admin doesn't supply a password, generate a secure random one.
+    // The employee must use "forgot password" to set their own before logging in.
+    const rawPassword = dto.password ?? randomBytes(16).toString('base64url');
+    const passwordHash = await argon2.hash(rawPassword, { type: argon2.argon2id });
+
     const user = await this.prisma.client.user.create({
       data: {
         email: dto.email,
         passwordHash,
         firstName: dto.firstName,
         lastName: dto.lastName,
+        phoneNumber: dto.phoneNumber,
+        employeeId: dto.employeeId,
+        jurisdiction: dto.jurisdiction,
+        joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
         role: dto.role,
         createdBy: actorId,
       },
@@ -117,6 +129,22 @@ export class UsersService {
     return this.toDto(user);
   }
 
+  async uploadAvatar(userId: string, file: Express.Multer.File): Promise<UserResponseDto> {
+    const user = await this.getOrThrow(userId);
+
+    // Delete old avatar from S3 before replacing (fire-and-forget on failure)
+    if (user.logoUrl) {
+      void this.storage.deleteByUrl(user.logoUrl);
+    }
+
+    const logoUrl = await this.storage.uploadImage('avatars', userId, file);
+    const updated = await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { logoUrl },
+    });
+    return this.toDto(updated);
+  }
+
   async update(
     id: string,
     dto: UpdateUserDto,
@@ -131,6 +159,10 @@ export class UsersService {
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
+        phoneNumber: dto.phoneNumber,
+        employeeId: dto.employeeId,
+        jurisdiction: dto.jurisdiction,
+        joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
         role: dto.role,
         updatedBy: actorId,
       },
@@ -272,39 +304,57 @@ export class UsersService {
     return result.count;
   }
 
-  async toCsv(query: UserQueryDto): Promise<string> {
-    const search = query.search?.trim();
+  async exportCsv(dto: ExportUsersDto): Promise<string> {
+    const search = dto.search?.trim();
+    const statusMap = {
+      all: undefined,
+      active: 'ACTIVE',
+      suspended: 'SUSPENDED',
+      dismissed: 'INACTIVE',
+      selected: undefined,
+    } as const;
+
+    const where =
+      dto.type === 'selected'
+        ? { id: { in: dto.ids ?? [] }, deletedAt: null }
+        : {
+            deletedAt: null,
+            role: dto.role,
+            status: statusMap[dto.type],
+            ...(search
+              ? {
+                  OR: [
+                    { email: { contains: search, mode: 'insensitive' as const } },
+                    { firstName: { contains: search, mode: 'insensitive' as const } },
+                    { lastName: { contains: search, mode: 'insensitive' as const } },
+                    { employeeId: { contains: search, mode: 'insensitive' as const } },
+                    { phoneNumber: { contains: search, mode: 'insensitive' as const } },
+                    { organizationName: { contains: search, mode: 'insensitive' as const } },
+                  ],
+                }
+              : {}),
+          };
+
     const rows = await this.prisma.client.user.findMany({
-      where: {
-        deletedAt: null,
-        role: query.role,
-        status: query.status,
-        ...(search
-          ? {
-              OR: [
-                { email: { contains: search, mode: 'insensitive' as const } },
-                { firstName: { contains: search, mode: 'insensitive' as const } },
-                { lastName: { contains: search, mode: 'insensitive' as const } },
-                { lastName: { contains: search, mode: 'insensitive' as const } },
-                { employeeId: { contains: search, mode: 'insensitive' as const } },
-              ],
-            }
-          : {}),
-      },
+      where,
       orderBy: { createdAt: 'desc' },
     });
+
     const esc = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
     return [
-      'id,email,firstName,lastName,employeeId,role,status,createdAt',
+      'id,email,firstName,lastName,phoneNumber,employeeId,jurisdiction,role,status,joiningDate,createdAt',
       ...rows.map((u) =>
         [
           u.id,
           u.email,
           u.firstName,
           u.lastName,
+          u.phoneNumber,
           u.employeeId,
+          u.jurisdiction,
           u.role,
           u.status,
+          u.joiningDate?.toISOString(),
           u.createdAt.toISOString(),
         ]
           .map(esc)

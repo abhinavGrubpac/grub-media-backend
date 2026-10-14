@@ -100,6 +100,32 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   SMTP_SECURE?: string;
+
+  // ── S3 / Object Storage ───────────────────────────────────
+  // All optional — app starts without them; avatar upload will return 500 if missing.
+  @IsOptional()
+  @IsString()
+  AWS_S3_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_S3_BUCKET?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_ACCESS_KEY_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_SECRET_ACCESS_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_S3_ENDPOINT?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_CLOUDFRONT_URL?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

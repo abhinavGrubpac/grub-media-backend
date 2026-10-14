@@ -15,6 +15,8 @@ import { REDIS_CLIENT } from './redis/redis.service';
 import { FaultTolerantThrottlerStorage } from './redis/fault-tolerant-throttler.storage';
 import { AuthModule } from './modules/auth/auth.module';
 import { MailerModule } from './modules/mailer/mailer.module';
+import { StorageModule } from './modules/storage/storage.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
 import { HelpModule } from './modules/help/help.module';
@@ -84,8 +86,10 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     PrismaModule,
     RedisModule,
     MailerModule,
+    StorageModule,
     AuthModule,
     UsersModule,
+    UploadModule,
     HealthModule,
     HelpModule,
   ],

@@ -42,6 +42,7 @@ model User {
   organizationName    String?
   organizationId      String?
   jurisdiction        String?
+  joiningDate         DateTime?
   role                UserRole             @default(EMPLOYEE)
   status              UserStatus           @default(ACTIVE)
   tokenVersion        Int                  @default(0)

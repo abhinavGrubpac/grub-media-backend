@@ -48,6 +48,10 @@ export class UserResponseDto {
   @Expose()
   jurisdiction?: string;
 
+  @ApiProperty({ required: false })
+  @Expose()
+  joiningDate?: Date;
+
   @ApiProperty({ enum: UserRole })
   @Expose()
   role!: UserRole;
