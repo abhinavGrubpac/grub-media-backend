@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import {
   EmailAlreadyExistsException,
@@ -33,6 +33,10 @@ const mailerMock = {
   sendPasswordResetLink: jest.fn().mockResolvedValue(undefined),
 } as never;
 
+const configMock = {
+  get: jest.fn().mockReturnValue('test'),
+} as never;
+
 function prismaMock(overrides: Record<string, jest.Mock> = {}) {
   return {
     client: {
@@ -61,6 +65,7 @@ function build(
     prismaUser?: Record<string, unknown> | null;
     claimCount?: number;
     verify?: boolean;
+    nodeEnv?: string;
   } = {},
 ) {
   const prisma = {
@@ -96,7 +101,14 @@ function build(
     sendOtp: jest.fn().mockResolvedValue(undefined),
   } as never;
 
-  return { svc: new UsersService(prisma, mailer), prisma, mailer };
+  const config = {
+    get: jest.fn().mockImplementation((key: string) => {
+      if (key === 'app.nodeEnv') return opts.nodeEnv ?? 'test';
+      return undefined;
+    }),
+  } as never;
+
+  return { svc: new UsersService(prisma, mailer, config), prisma, mailer, config };
 }
 
 const newUser = { email: 'a@b.c', password: 'Str0ngPass1', firstName: 'A', lastName: 'B' };
@@ -112,8 +124,9 @@ describe('UsersService', () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null) }),
       mailerMock,
+      configMock,
     );
-    const result = await svc.create(newUser as never);
+    const result = await svc.create(newUser as never, 'admin-1', 'ADMIN' as never);
     expect(result).not.toHaveProperty('passwordHash');
     expect(result).not.toHaveProperty('deletedAt');
     expect(result.email).toBe('a@b.c');
@@ -124,8 +137,9 @@ describe('UsersService', () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null), create }),
       mailerMock,
+      configMock,
     );
-    await svc.create(newUser as never);
+    await svc.create(newUser as never, 'admin-1', 'ADMIN' as never);
     const passed = create.mock.calls[0][0].data;
     expect(passed.passwordHash).toBeDefined();
     expect(passed.passwordHash).not.toBe('Str0ngPass1');
@@ -137,12 +151,15 @@ describe('UsersService', () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow) }),
       mailerMock,
+      configMock,
     );
-    await expect(svc.create(newUser as never)).rejects.toBeInstanceOf(EmailAlreadyExistsException);
+    await expect(svc.create(newUser as never, 'admin-1', 'ADMIN' as never)).rejects.toBeInstanceOf(
+      EmailAlreadyExistsException,
+    );
   });
 
   it('list returns paginated DTOs without passwordHash and correct meta', async () => {
-    const svc = new UsersService(prismaMock(), mailerMock);
+    const svc = new UsersService(prismaMock(), mailerMock, configMock);
     const page = await svc.list({ page: 1, limit: 20, sortOrder: 'desc' } as never);
     expect(page.meta).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
     expect(page.data[0]).not.toHaveProperty('passwordHash');
@@ -153,19 +170,28 @@ describe('UsersService', () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null) }),
       mailerMock,
+      configMock,
     );
     await expect(svc.findById('nope')).rejects.toBeInstanceOf(UserNotFoundException);
   });
 
-  it('softDelete sets deletedAt via update after confirming existence', async () => {
+  it('softDelete sets deletedAt after confirming existence and hierarchy', async () => {
     const update = jest.fn().mockResolvedValue(userRow);
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
       mailerMock,
+      configMock,
     );
-    await svc.softDelete('u1');
+    await svc.softDelete('u1', 'actor-1', 'ADMIN' as never);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'u1' }, data: { deletedAt: expect.any(Date) } }),
+    );
+  });
+
+  it('softDelete throws Forbidden when actor tries to delete themselves', async () => {
+    const svc = new UsersService(prismaMock(), mailerMock, configMock);
+    await expect(svc.softDelete('u1', 'u1', 'ADMIN' as never)).rejects.toBeInstanceOf(
+      ForbiddenException,
     );
   });
 
@@ -174,11 +200,13 @@ describe('UsersService', () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
       mailerMock,
+      configMock,
     );
     await svc.update(
       'u1',
       { firstName: 'New', password: 'x', passwordHash: 'y' } as never,
       'admin',
+      'ADMIN' as never,
     );
     const data = update.mock.calls[0][0].data;
     expect(data).not.toHaveProperty('password');
@@ -187,20 +215,23 @@ describe('UsersService', () => {
     expect(data.updatedBy).toBe('admin');
   });
 
-  it('setStatus sends only the status field', async () => {
-    const update = jest.fn().mockResolvedValue(userRow);
+  it('update throws Forbidden when ADMIN tries to modify a SUPER_ADMIN', async () => {
+    const superAdminRow = { ...userRow, role: 'SUPER_ADMIN' };
     const svc = new UsersService(
-      prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
+      prismaMock({ findFirst: jest.fn().mockResolvedValue(superAdminRow) }),
       mailerMock,
+      configMock,
     );
-    await svc.setStatus('u1', 'SUSPENDED' as never);
-    expect(update).toHaveBeenCalledWith({ where: { id: 'u1' }, data: { status: 'SUSPENDED' } });
+    await expect(
+      svc.update('u1', { firstName: 'X' } as never, 'admin', 'ADMIN' as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('findByEmailWithHash returns the raw row (includes hash) for auth use', async () => {
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow) }),
       mailerMock,
+      configMock,
     );
     const row = await svc.findByEmailWithHash('a@b.c');
     expect(row?.passwordHash).toBe('HASH');
@@ -335,5 +366,38 @@ describe('UsersService.verifyProfileOtp', () => {
         data: expect.objectContaining({ phoneNumber: '+919876543210' }),
       }),
     );
+  });
+
+  it('bypasses OTP DB check in development mode when code is 1234 (email)', async () => {
+    const { svc, prisma } = build({ nodeEnv: 'development' });
+    await svc.verifyProfileOtp('u1', { type: 'email', value: 'new@example.com', code: '1234' });
+    expect(
+      (prisma as never as { otpCode: { updateMany: jest.Mock } }).otpCode.updateMany,
+    ).not.toHaveBeenCalled();
+    expect(
+      (prisma as never as { client: { user: { update: jest.Mock } } }).client.user.update,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ email: 'new@example.com' }) }),
+    );
+  });
+
+  it('bypasses OTP DB check in development mode when code is 1234 (phone)', async () => {
+    const { svc, prisma } = build({ nodeEnv: 'development' });
+    await svc.verifyProfileOtp('u1', { type: 'phone', value: '+919876543210', code: '1234' });
+    expect(
+      (prisma as never as { otpCode: { updateMany: jest.Mock } }).otpCode.updateMany,
+    ).not.toHaveBeenCalled();
+    expect(
+      (prisma as never as { client: { user: { update: jest.Mock } } }).client.user.update,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ phoneNumber: '+919876543210' }) }),
+    );
+  });
+
+  it('does NOT bypass OTP check in production mode when code is 1234', async () => {
+    const { svc } = build({ nodeEnv: 'production', claimCount: 0 });
+    await expect(
+      svc.verifyProfileOtp('u1', { type: 'email', value: 'new@example.com', code: '1234' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

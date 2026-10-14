@@ -104,7 +104,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Create a user (admin only)' })
   @ResponseMessage('User created')
   create(@Body() dto: CreateUserDto, @CurrentUser() actor: AuthUser): Promise<UserResponseDto> {
-    return this.users.create(dto, actor.id);
+    return this.users.create(dto, actor.id, actor.role);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
@@ -117,6 +117,7 @@ export class UsersController {
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.read')
   @Get('export/csv')
   async exportCsv(@Query() query: UserQueryDto, @Res() res: Response): Promise<void> {
     res.setHeader('Content-Type', 'text/csv');
@@ -125,7 +126,10 @@ export class UsersController {
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.update')
   @Put('bulk-activate')
+  @ApiOperation({ summary: 'Bulk-activate suspended or inactive users' })
+  @ResponseMessage('Users activated')
   async bulkActivate(@Body() dto: BulkActivateDto): Promise<{ activated: number }> {
     return { activated: await this.users.bulkActivate(dto.ids) };
   }
@@ -142,24 +146,58 @@ export class UsersController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.update')
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a user (admin only)' })
+  @ApiOperation({ summary: 'Update user name or role (admin only)' })
   @ResponseMessage('User updated')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
     @CurrentUser() actor: AuthUser,
   ): Promise<UserResponseDto> {
-    return this.users.update(id, dto, actor.id);
+    return this.users.update(id, dto, actor.id, actor.role);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Status transitions
+  // ---------------------------------------------------------------------------
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.update')
+  @Patch(':id/suspend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Suspend a user account (blocks login, reversible)' })
+  @ResponseMessage('User suspended')
+  suspend(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<UserResponseDto> {
+    return this.users.suspend(id, actor.id, actor.role);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.update')
+  @Patch(':id/activate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore a suspended or inactive user to active' })
+  @ResponseMessage('User activated')
+  activate(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<UserResponseDto> {
+    return this.users.activate(id, actor.id, actor.role);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.update')
+  @Patch(':id/dismiss')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Dismiss a user (set inactive — account persists, login blocked)' })
+  @ResponseMessage('User dismissed')
+  dismiss(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<UserResponseDto> {
+    return this.users.dismiss(id, actor.id, actor.role);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.delete')
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Soft-delete a user (admin only)' })
+  @ApiOperation({ summary: 'Soft-delete a user (permanent removal from listings)' })
   @ResponseMessage('User deleted')
-  async remove(@Param('id') id: string): Promise<null> {
-    await this.users.softDelete(id);
+  async remove(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<null> {
+    await this.users.softDelete(id, actor.id, actor.role);
     return null;
   }
 }
