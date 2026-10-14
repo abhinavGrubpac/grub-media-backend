@@ -29,7 +29,9 @@ import {
   IMAGE_SEARCH_CANDIDATE_LIMIT,
   IMAGE_SEARCH_DEFAULT_MAX_DISTANCE,
   IMAGE_SEARCH_MAX_DISTANCE,
+  IMAGE_UPLOAD_MAX_BYTES,
   assertImageHash,
+  dHashFromGrayscale,
   hammingDistanceHex,
 } from '../image-hash';
 import type { AdvertSearchSort, AdvertSortKey } from '../validators';
@@ -143,8 +145,8 @@ export interface AdvertSearchResult {
   search: AdvertSearchEcho;
 }
 
-export interface AdvertSearchResult {
-  items: AdvertResponseDto[] | AdvertBrandGroupDto[];
+export interface AdvertImageSearchResult {
+  items: AdvertResponseDto[];
   meta: StandardMeta;
   search: AdvertSearchEcho;
 }
@@ -494,6 +496,78 @@ export class AdvertService {
       meta: standardMeta(total, page, limit, items.length),
       search: echo,
     };
+  }
+
+  /**
+   * Reverse-image search: hash the upload with dHash and rank adverts by
+   * Hamming distance (nearest first). Only adverts with a stored image_hash
+   * participate; the search is recorded in history like radius search.
+   */
+  async searchByImage(
+    buffer: Buffer,
+    opts: { max_distance?: number; page?: number; limit?: number; actor_id?: string },
+  ): Promise<AdvertImageSearchResult> {
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('image file is required');
+    }
+    if (buffer.length > IMAGE_UPLOAD_MAX_BYTES) {
+      throw new BadRequestException(`image must be smaller than ${IMAGE_UPLOAD_MAX_BYTES} bytes`);
+    }
+    const maxDistance = Math.min(
+      Math.max(opts.max_distance ?? IMAGE_SEARCH_DEFAULT_MAX_DISTANCE, 0),
+      IMAGE_SEARCH_MAX_DISTANCE,
+    );
+    const page = opts.page ?? 1;
+    const limit = opts.limit ?? 50;
+    const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
+
+    let queryHash: string;
+    try {
+      const sharp = (await import('sharp')).default;
+      const pixels = await sharp(buffer).greyscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer();
+      queryHash = dHashFromGrayscale(pixels, 9, 8);
+    } catch {
+      throw new BadRequestException('image must be a PNG or JPEG file');
+    }
+
+    const candidates = await this.prisma.client.advert.findMany({
+      take: IMAGE_SEARCH_CANDIDATE_LIMIT,
+      orderBy: { createdAt: 'desc' },
+      include: { version: { include: { creative: { include: { brand: true } } } } },
+    });
+    const locations = await this.fetchLocationWkt(candidates.map((advert) => advert.id));
+    const ranked = candidates
+      .filter(
+        (advert): advert is typeof advert & { imageHash: string } =>
+          typeof advert.imageHash === 'string' && advert.imageHash.length > 0,
+      )
+      .map((advert) => ({
+        advert,
+        distance: hammingDistanceHex(queryHash, advert.imageHash),
+      }))
+      .filter((entry) => entry.distance <= maxDistance)
+      .sort((a, b) => a.distance - b.distance);
+    const total = ranked.length;
+    const rows = ranked.slice(skip, skip + take).map((entry) =>
+      this.toResponse(entry.advert, undefined, {
+        location: locations.get(entry.advert.id) ?? null,
+        hashDistance: entry.distance,
+      }),
+    );
+    const echo: AdvertSearchEcho = {
+      lat: null,
+      lng: null,
+      radius_km: null,
+      industry: null,
+      brand_id: null,
+      start: null,
+      end: null,
+      sort: 'distance_asc',
+      query_hash: queryHash,
+      max_distance: maxDistance,
+    };
+    await this.recordSearch(opts.actor_id, echo, total, rows);
+    return { items: rows, meta: standardMeta(total, page, limit, rows.length), search: echo };
   }
 
   private async geoSearch(
