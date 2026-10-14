@@ -65,7 +65,7 @@ describe('failureAuditMiddleware', () => {
       typeEnum: LogType.SYSTEM,
       categoryName: 'Request Failure',
       actionName: 'Request Failed',
-      actionText: 'GET /api/v1/users failed with 401 from 9.9.9.9',
+      actionText: 'A request to /api/v1/users was rejected because no valid sign-in was presented',
       target: '9.9.9.9',
       newDetail: { method: 'GET', path: '/api/v1/users', status: 401, ip: '9.9.9.9' },
     });
@@ -80,7 +80,7 @@ describe('failureAuditMiddleware', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].actionText).toBe(
-      'GET /api/v1/users failed with 403 for user u1 — Forbidden resource',
+      'A request to /api/v1/users was rejected because the signed-in user does not have permission for this',
     );
     expect(rows[0].userId).toBe('u1');
     expect(rows[0].target).toBe('u1');
@@ -91,13 +91,19 @@ describe('failureAuditMiddleware', () => {
   });
 
   it('audits 5xx responses too', () => {
-    expect(fire({ status: 500 })).toHaveLength(1);
+    const rows = fire({ status: 500 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actionText).toBe(
+      'A request to /api/v1/users failed because an internal error occurred on the server',
+    );
   });
 
   it('still audits when no failure detail was stashed (e.g. unmatched-route 404)', () => {
     const rows = fire({ path: '/api/v1/nope', status: 404 });
     expect(rows).toHaveLength(1);
-    expect(rows[0].actionText).toBe('GET /api/v1/nope failed with 404 from 9.9.9.9');
+    expect(rows[0].actionText).toBe(
+      'A request to /api/v1/nope was rejected because that address does not exist',
+    );
   });
 
   it('ignores successful responses (endpoints audit their own successes)', () => {

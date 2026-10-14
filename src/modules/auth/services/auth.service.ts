@@ -87,7 +87,7 @@ export class AuthService {
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'Login',
-      actionText: `User ${user.email} logged in from ${ctx.ip ?? 'unknown'}`,
+      actionText: `User ${user.email} logged in from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
       target: logRefOf(user),
     });
@@ -109,11 +109,14 @@ export class AuthService {
     kind: 'login' | 'otp' = 'login',
   ): Promise<void> {
     const actionName = kind === 'otp' ? 'Failed OTP' : 'Failed Login';
-    const what = kind === 'otp' ? 'OTP' : 'login';
+    const from = `from ${ctx.ip ?? 'an unknown location'}`;
     await this.logs.record({
       ...AUTH_LOG,
       actionName,
-      actionText: `Failed ${what} attempt for ${email} from ${ctx.ip ?? 'unknown'}`,
+      actionText:
+        kind === 'otp'
+          ? `Sign-in with a one-time code for ${email} failed ${from}`
+          : `Sign-in attempt for ${email} failed ${from}`,
       target: email,
     });
   }
@@ -128,7 +131,7 @@ export class AuthService {
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'Token Refresh',
-      actionText: `Access token refreshed for ${actor?.email ?? userId} from ${ctx.ip ?? 'unknown'}`,
+      actionText: `Session refreshed for ${actor?.email ?? userId} from ${ctx.ip ?? 'an unknown location'}`,
       userId,
       target: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
     });
@@ -170,11 +173,12 @@ export class AuthService {
     });
     this.logger.log(`Profile ${dto.type} OTP for ${userId}: ${code}`);
 
+    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
     await this.logs.record({
       typeEnum: LogType.ACTIVITY,
       categoryName: 'Profile',
       actionName: 'OTP Requested',
-      actionText: `Profile ${dto.type} change OTP requested by ${logRefOf(user)}`,
+      actionText: `A one-time code was requested to change the ${typeWord} of ${logRefOf(user)}`,
       userId,
       target: logRefOf(user),
     });
@@ -182,6 +186,9 @@ export class AuthService {
 
   async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
     const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
+    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
+    const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    const who = logRefOf(before ?? { id: userId, email: null, employeeId: null });
     const claim = await this.prisma.client.otpCode.updateMany({
       where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() },
@@ -193,13 +200,12 @@ export class AuthService {
         typeEnum: LogType.ACTIVITY,
         categoryName: 'Profile',
         actionName: 'Failed OTP',
-        actionText: `Failed profile ${dto.type} OTP verification for user ${userId}`,
+        actionText: `The one-time code entered to change the ${typeWord} of ${who} was wrong or expired`,
         userId,
         target: userId,
       });
       throw new BadRequestException('Invalid or expired OTP');
     }
-    const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
     const oldField = dto.type === 'email' ? before?.email : before?.phoneNumber;
     if (dto.type === 'email') {
       const existing = await this.prisma.client.user.findUnique({ where: { email: dto.value } });
@@ -214,9 +220,9 @@ export class AuthService {
       typeEnum: LogType.ACTIVITY,
       categoryName: 'Profile',
       actionName: 'Update Profile',
-      actionText: `Verified ${dto.type} changed to ${dto.value} for user ${before?.email ?? userId}`,
+      actionText: `The ${typeWord} of ${who} was changed to ${dto.value}`,
       userId,
-      target: logRefOf(before ?? { id: userId, email: null, employeeId: null }),
+      target: who,
       oldDetail: { [dto.type]: oldField ?? null },
       newDetail: { [dto.type]: dto.value },
     });
@@ -297,7 +303,7 @@ export class AuthService {
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'OTP Requested',
-      actionText: `Login OTP requested for ${user.email} from ${ctx.ip ?? 'unknown'}`,
+      actionText: `A one-time sign-in code was requested for ${user.email} from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
       target: logRefOf(user),
     });
@@ -345,7 +351,7 @@ export class AuthService {
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'Login',
-      actionText: `User ${user.email} logged in via OTP from ${ctx.ip ?? 'unknown'}`,
+      actionText: `User ${user.email} signed in with a one-time code from ${ctx.ip ?? 'an unknown location'}`,
       userId: user.id,
       target: logRefOf(user),
     });

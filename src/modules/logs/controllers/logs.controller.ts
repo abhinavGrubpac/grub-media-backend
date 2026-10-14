@@ -57,7 +57,11 @@ export class LogsController {
     @CurrentUser() u: AuthUser,
   ): Promise<FilterResponseDTO> {
     const filters = await this.logs.getFilters(query.logtype);
-    await this.auditRead(u, 'View Log Filters', `Viewed log filters for ${query.logtype}`);
+    await this.auditRead(
+      u,
+      'View Log Filters',
+      `Viewed the filter options for the ${query.logtype.toLowerCase()} logs`,
+    );
     return filters;
   }
 
@@ -75,7 +79,10 @@ export class LogsController {
     @CurrentUser() u: AuthUser,
   ): Promise<LogListResponseDTO> {
     const result = await this.logs.search(query);
-    await this.auditRead(u, 'Search Logs', `Searched ${query.logtype} logs`);
+    // Note: the sentence must not embed the search term itself — audit rows
+    // are free-text searchable, and a row repeating the term would match every
+    // later search for it (breaking search/export parity).
+    await this.auditRead(u, 'Search Logs', `Searched the ${query.logtype.toLowerCase()} logs`);
     return result;
   }
 
@@ -96,7 +103,11 @@ export class LogsController {
   /** Shared CSV response writer: sets the attachment headers and streams the body. */
   private async streamCsv(query: ExportRequestDto, res: Response, u: AuthUser): Promise<string> {
     const csv = await this.logs.exportCsv(query);
-    await this.auditRead(u, 'Export Logs', `Exported ${query.logtype} logs as CSV`);
+    await this.auditRead(
+      u,
+      'Export Logs',
+      `Downloaded the ${query.logtype.toLowerCase()} logs as a CSV file`,
+    );
     const filename = `logs-${query.logtype.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
@@ -112,7 +123,7 @@ export class LogsController {
     @CurrentUser() u: AuthUser,
   ): Promise<LogListResponseDTO> {
     const result = await this.logs.list(logtype, query);
-    await this.auditRead(u, 'View Logs', `Viewed ${logtype} log stream`);
+    await this.auditRead(u, 'View Logs', `Viewed the ${logtype.toLowerCase()} logs`);
     return result;
   }
 }

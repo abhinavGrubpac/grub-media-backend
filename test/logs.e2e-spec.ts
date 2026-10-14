@@ -195,15 +195,32 @@ describe('Logs (e2e)', () => {
       return res.body.data as Array<{ actionName: string | null; actionText: string | null }>;
     }
 
+    /**
+     * The generic failure row is written fire-and-forget after the response
+     * finishes, so a read immediately after the failing request can race the
+     * insert (especially on the remote test database). Poll until it lands.
+     */
+    async function eventuallyRows(
+      predicate: (rows: Array<{ actionName: string | null; actionText: string | null }>) => boolean,
+    ) {
+      const deadline = Date.now() + 5000;
+      let rows = await systemRows();
+      while (!predicate(rows) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        rows = await systemRows();
+      }
+      return rows;
+    }
+
     it('records a SYSTEM row for an unauthenticated 401 (method, path, status, message)', async () => {
       await request(app.getHttpServer()).get('/api/v1/users').expect(401);
 
-      const rows = await systemRows();
+      const rows = await eventuallyRows((rs) => rs.some((r) => r.actionName === 'Request Failed'));
       const generic = rows.filter((r) => r.actionName === 'Request Failed');
       expect(generic).toHaveLength(1);
-      // IP rendering varies with the loopback family (::1 vs ::ffff:127.0.0.1).
-      expect(generic[0].actionText).toMatch(
-        /^GET \/api\/v1\/users failed with 401 from \S+ — Unauthorized$/,
+      // Plain-English sentence; IP/method/status live in newDetail.
+      expect(generic[0].actionText).toBe(
+        'A request to /api/v1/users was rejected because no valid sign-in was presented',
       );
     });
 
@@ -230,13 +247,24 @@ describe('Logs (e2e)', () => {
         .send({ email: 'not-an-email' })
         .expect(400);
 
-      const rows = await systemRows();
+      const rows = await eventuallyRows((rs) =>
+        rs.some(
+          (r) =>
+            r.actionName === 'Request Failed' &&
+            (r.actionText ?? '').includes(
+              'was rejected because the request was malformed or invalid',
+            ),
+        ),
+      );
       const generic = rows.filter(
         (r) =>
-          r.actionName === 'Request Failed' && (r.actionText ?? '').includes('failed with 400'),
+          r.actionName === 'Request Failed' &&
+          (r.actionText ?? '').includes(
+            'was rejected because the request was malformed or invalid',
+          ),
       );
       expect(generic).toHaveLength(1);
-      expect(generic[0].actionText).toContain('POST /api/v1/auth/login');
+      expect(generic[0].actionText).toContain('/api/v1/auth/login');
     });
   });
 

@@ -105,7 +105,7 @@ export class AuthController {
       typeEnum: LogType.ACTIVITY,
       categoryName: 'Profile',
       actionName: 'View Profile',
-      actionText: 'Viewed current session user',
+      actionText: 'Viewed the profile of the signed-in user',
       userId: user.id,
       target: user.id,
     });

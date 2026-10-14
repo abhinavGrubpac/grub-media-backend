@@ -3,7 +3,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { LogType, UserRole } from '@prisma/client';
 import { BundleDto, PermissionDto } from '../dto/access.dto';
 import { LogsService } from '../../logs/services/logs.service';
-import { logRefOf } from '../../../common/utils/log-ref';
+import { describeActor, logRefOf } from '../../../common/utils/log-ref';
 
 /** Log taxonomy for access-management events (Log System EMPLOYEE stream). */
 const LOG_CATEGORY = 'Access Management';
@@ -29,7 +29,7 @@ export class AccessService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Create Permission',
-      actionText: `Permission ${dto.module}.${dto.page}.${dto.action} created by ${actorId}`,
+      actionText: `The permission ${dto.module}.${dto.page}.${dto.action} was added by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       target: String(permission.id),
       newDetail: { module: dto.module, page: dto.page, action: dto.action },
@@ -56,7 +56,7 @@ export class AccessService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Create Bundle',
-      actionText: `Permission bundle "${bundle.name}" created by ${actorId}`,
+      actionText: `The permission bundle "${bundle.name}" was created by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       target: String(bundle.id),
       newDetail: { name: bundle.name, permissionCount: bundle.permissions.length },
@@ -65,20 +65,34 @@ export class AccessService {
   }
   async assignBundle(actor: string, employeeId: string, bundleId: string) {
     // Pre-read the existing assignment so the audit row can carry the previous
-    // state when this upsert reassigns rather than creates.
-    const previous = await this.prisma.client.userBundle.findUnique({
-      where: { userId_bundleId: { userId: employeeId, bundleId } },
-    });
+    // state when this upsert reassigns rather than creates; resolve the names
+    // in the same round so the audit sentence reads like English, not raw ids.
+    const [previous, bundle, employee] = await Promise.all([
+      this.prisma.client.userBundle.findUnique({
+        where: { userId_bundleId: { userId: employeeId, bundleId } },
+      }),
+      this.prisma.client.permissionBundle.findUnique({
+        where: { id: bundleId },
+        select: { name: true },
+      }),
+      this.prisma.client.user.findUnique({
+        where: { id: employeeId },
+        select: { id: true, email: true, employeeId: true },
+      }),
+    ]);
     const row = await this.prisma.client.userBundle.upsert({
       where: { userId_bundleId: { userId: employeeId, bundleId } },
       update: { assignedBy: actor },
       create: { userId: employeeId, bundleId, assignedBy: actor },
     });
+    const bundleName = bundle?.name ?? bundleId;
+    const employeeRef = logRefOf(employee ?? { id: employeeId, email: null, employeeId: null });
+    const by = await describeActor(this.prisma, actor);
     await this.logs.record({
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Assign Bundle',
-      actionText: `Permission bundle ${bundleId} assigned to employee ${employeeId} by ${actor}`,
+      actionText: `The permission bundle "${bundleName}" was assigned to ${employeeRef} by ${by}`,
       userId: actor,
       empId: employeeId,
       target: bundleId,
@@ -91,11 +105,24 @@ export class AccessService {
     const row = await this.prisma.client.userBundle.delete({
       where: { userId_bundleId: { userId: employeeId, bundleId } },
     });
+    const [bundle, employee] = await Promise.all([
+      this.prisma.client.permissionBundle.findUnique({
+        where: { id: bundleId },
+        select: { name: true },
+      }),
+      this.prisma.client.user.findUnique({
+        where: { id: employeeId },
+        select: { id: true, email: true, employeeId: true },
+      }),
+    ]);
+    const bundleName = bundle?.name ?? bundleId;
+    const employeeRef = logRefOf(employee ?? { id: employeeId, email: null, employeeId: null });
+    const by = await describeActor(this.prisma, actor);
     await this.logs.record({
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Remove Bundle',
-      actionText: `Permission bundle ${bundleId} removed from employee ${employeeId} by ${actor}`,
+      actionText: `The permission bundle "${bundleName}" was removed from ${employeeRef} by ${by}`,
       userId: actor,
       empId: employeeId,
       target: bundleId,
@@ -130,7 +157,7 @@ export class AccessService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Assign Admin',
-      actionText: `Admin ${admin.email} assigned to employee ${employee.email} by ${actor}`,
+      actionText: `The administrator ${logRefOf(admin)} was assigned to ${logRefOf(employee)} by ${await describeActor(this.prisma, actor)}`,
       userId: actor,
       empId: employeeId,
       target: logRefOf(admin),
@@ -143,11 +170,24 @@ export class AccessService {
     const row = await this.prisma.client.adminEmployeeAssignment.delete({
       where: { employeeId },
     });
+    const [employee, admin] = await Promise.all([
+      this.prisma.client.user.findUnique({
+        where: { id: employeeId },
+        select: { id: true, email: true, employeeId: true },
+      }),
+      this.prisma.client.user.findUnique({
+        where: { id: row.adminId },
+        select: { id: true, email: true, employeeId: true },
+      }),
+    ]);
+    const employeeRef = logRefOf(employee ?? { id: employeeId, email: null, employeeId: null });
+    const adminRef = logRefOf(admin ?? { id: row.adminId, email: null, employeeId: null });
+    const by = await describeActor(this.prisma, actor);
     await this.logs.record({
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Unassign Admin',
-      actionText: `Admin assignment removed from employee ${employeeId} by ${actor}`,
+      actionText: `The administrator ${adminRef} was removed from ${employeeRef} by ${by}`,
       userId: actor,
       empId: employeeId,
       // The removed assignment is the "before" state; there is no after state.

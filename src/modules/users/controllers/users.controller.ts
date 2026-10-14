@@ -52,7 +52,7 @@ export class UsersController {
       typeEnum: LogType.ACTIVITY,
       categoryName: 'Profile',
       actionName: 'View Profile',
-      actionText: 'Viewed own profile',
+      actionText: 'Viewed their own profile',
       userId: user.id,
       target: user.id,
     });
@@ -132,7 +132,7 @@ export class UsersController {
       typeEnum: LogType.EMPLOYEE,
       categoryName: 'Employment',
       actionName: 'List Users',
-      actionText: `Listed user directory (page ${query.page})`,
+      actionText: `Viewed the employee directory, page ${query.page}`,
       userId: actor.id,
     });
     return result;
@@ -140,7 +140,19 @@ export class UsersController {
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Get('export/csv')
-  async exportCsv(@Query() query: UserQueryDto, @Res() res: Response): Promise<void> {
+  async exportCsv(
+    @Query() query: UserQueryDto,
+    @CurrentUser() actor: AuthUser,
+    @Res() res: Response,
+  ): Promise<void> {
+    const csv = await this.users.toCsv(query);
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Employment',
+      actionName: 'Export Users',
+      actionText: 'Downloaded the employee list as a CSV file',
+      userId: actor.id,
+    });
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
     res.send(await this.users.exportCsv(dto));
@@ -166,7 +178,7 @@ export class UsersController {
       typeEnum: LogType.EMPLOYEE,
       categoryName: 'Employment',
       actionName: 'View User',
-      actionText: `Viewed user ${id}`,
+      actionText: `Viewed the profile of ${user.email}`,
       userId: actor.id,
       target: id,
     });

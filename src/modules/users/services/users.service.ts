@@ -15,6 +15,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { logRefOf } from '../../../common/utils/log-ref';
 import { MailerService } from '../../mailer/mailer.service';
 import { StorageService } from '../../storage/storage.service';
+import { describeActor, logRefOf } from '../../../common/utils/log-ref';
 import { Paginated } from '../../../common/dto/paginated';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
 import { ERROR_CODES } from '../../../common/constants/error-codes';
@@ -131,7 +132,7 @@ export class UsersService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.onboarding,
       actionName: 'Create Employee',
-      actionText: `Employee ${user.email} created by ${actorId ?? 'system'}`,
+      actionText: `Employee ${user.email} was created by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       empId: user.id,
       target: logRefOf(user),
@@ -369,7 +370,7 @@ export class UsersService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.employment,
       actionName: 'Update Employee',
-      actionText: `Employee ${user.email} updated by ${actorId}`,
+      actionText: `Employee ${user.email} was updated by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       empId: user.id,
       target: logRefOf(user),
@@ -386,7 +387,7 @@ export class UsersService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.employment,
       actionName: 'Status Change',
-      actionText: `Employee ${user.email} status changed from ${before.status} to ${status} by ${actorId ?? 'system'}`,
+      actionText: `The status of ${user.email} was changed from ${before.status.toLowerCase()} to ${status.toLowerCase()} by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       empId: user.id,
       target: logRefOf(user),
@@ -403,7 +404,7 @@ export class UsersService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.exit,
       actionName: 'Delete Employee',
-      actionText: `Employee ${before.email} deleted by ${actorId ?? 'system'}`,
+      actionText: `Employee ${before.email} was deleted by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       empId: before.id,
       target: logRefOf(before),
@@ -424,7 +425,7 @@ export class UsersService {
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY.employment,
       actionName: 'Bulk Activate',
-      actionText: `${result.count} employee(s) reactivated by ${actorId ?? 'system'}`,
+      actionText: `${result.count} ${result.count === 1 ? 'employee was' : 'employees were'} reactivated by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       target: ids.join(','),
       oldDetail: { ids, fromStatus: UserStatus.SUSPENDED },
