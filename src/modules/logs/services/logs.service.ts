@@ -153,8 +153,9 @@ export class LogsService {
           userId: input.userId ?? null,
           empId: input.empId ?? null,
           oldDetail: this.serializeDetail(input.oldDetail),
-          // The caller's business pointer (bundle id, admin id, …) is folded
-          // into newDetail.target so the reference lives on the row itself.
+          // The caller's business pointer (bundle id, admin id, …) folds into
+          // newDetail.target — but only when the row carries real detail;
+          // rows without before/after state keep newDetail empty.
           newDetail: this.serializeDetail(this.withTarget(input.newDetail, input.target)),
         },
       });
@@ -210,9 +211,12 @@ export class LogsService {
 
   /**
    * Folds the caller's business pointer into newDetail under `target` so the
-   * reference always lives on the row.
+   * reference travels with the row's state.
    * - object detail → spread + target (non-destructive)
-   * - string/absent detail → wrapped as { detail?, target }
+   * - string detail → wrapped as { detail, target }
+   * - no detail at all → stays empty: a bare pointer is not before/after
+   *   state, so session/view/failed-attempt rows keep newDetail null (their
+   *   subject still reads in the plain-English actionText).
    */
   private withTarget(detail: unknown, target: string | null | undefined): unknown {
     if (target === null || target === undefined || target === '') {
@@ -221,7 +225,7 @@ export class LogsService {
     if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
       return { ...(detail as Record<string, unknown>), target };
     }
-    return detail === undefined || detail === null ? { target } : { detail, target };
+    return detail === undefined || detail === null ? undefined : { detail, target };
   }
 
   /** Shared count + page query with allowlisted sorting (default createdAt desc). */

@@ -193,7 +193,7 @@ describe('Logs (e2e)', () => {
     const asObj = (value: unknown): Record<string, unknown> =>
       (typeof value === 'string' ? JSON.parse(value) : (value ?? {})) as Record<string, unknown>;
 
-    it('a profile update logs the performer, the affected employee and both states', async () => {
+    it('data edits fill empId and both states; session rows leave them empty', async () => {
       const server = app.getHttpServer();
       const { accessToken } = await login(app, admin.email, admin.password);
       const auth = { Authorization: `Bearer ${accessToken}` };
@@ -233,8 +233,6 @@ describe('Logs (e2e)', () => {
       expect(asObj(row.oldDetail).lastName).toBe(original);
       expect(asObj(row.newDetail).lastName).toBe(marker);
 
-      // Session rows carry the subject employee too: the login made above is
-      // findable under the employee's empId, not just the actor's userId.
       const system = await request(server)
         .get('/api/v1/logs/SYSTEM?page=1&limit=100')
         .set(auth)
@@ -242,8 +240,12 @@ describe('Logs (e2e)', () => {
       const loginRow = (system.body.data as Array<Record<string, unknown>>).find(
         (r) => r.actionName === 'Login' && r.userId === adminId,
       );
+      // Session rows are not data edits: empId and the before/after columns
+      // stay empty — the subject still reads in the plain-English actionText.
       if (!loginRow) throw new Error('Login audit row not found');
-      expect(loginRow.empId).toBe(adminId);
+      expect(loginRow.empId).toBeNull();
+      expect(loginRow.oldDetail).toBeNull();
+      expect(loginRow.newDetail).toBeNull();
     });
   });
 

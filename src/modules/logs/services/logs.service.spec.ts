@@ -282,6 +282,34 @@ describe('LogsService.record', () => {
     });
   });
 
+  it('keeps newDetail empty for a target-only row (sessions/views have no after state)', async () => {
+    const upsertCategory = jest.fn();
+    const create = jest.fn().mockResolvedValue({ id: 102 });
+    const svc = new LogsService(prismaMock({ create }, { upsert: upsertCategory }));
+
+    await svc.record({
+      typeEnum: LogType.SYSTEM,
+      actionName: 'Login',
+      actionText: 'User user-1 logged in',
+      userId: 'user-1',
+      target: 'user-1',
+    });
+
+    // A bare pointer is not before/after state — newDetail stays null.
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        typeEnum: LogType.SYSTEM,
+        categoryId: null,
+        actionName: 'Login',
+        actionText: 'User user-1 logged in',
+        userId: 'user-1',
+        empId: null,
+        oldDetail: null,
+        newDetail: null,
+      },
+    });
+  });
+
   it('skips taxonomy when names are omitted and keeps string details raw', async () => {
     const upsertCategory = jest.fn();
     const create = jest.fn().mockResolvedValue({ id: 100 });

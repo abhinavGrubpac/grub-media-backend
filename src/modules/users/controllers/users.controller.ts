@@ -54,7 +54,6 @@ export class UsersController {
       actionName: 'View Profile',
       actionText: 'Viewed their own profile',
       userId: user.id,
-      empId: user.id,
       target: user.id,
     });
     return profile;
@@ -181,7 +180,6 @@ export class UsersController {
       actionName: 'View User',
       actionText: `Viewed the profile of ${user.email}`,
       userId: actor.id,
-      empId: id,
       target: id,
     });
     return user;

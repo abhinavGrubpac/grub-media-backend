@@ -132,7 +132,6 @@ describe('AuthService.login', () => {
         categoryName: 'Authentication',
         actionName: 'Login',
         userId: 'u1',
-        empId: 'u1', // session rows carry the subject employee as well
       }),
     );
   });
