@@ -26,6 +26,8 @@ enum UserStatus {
 enum OtpPurpose {
   LOGIN
   PASSWORD_RESET
+  PROFILE_EMAIL
+  PROFILE_PHONE
 }
 
 model User {
@@ -34,6 +36,12 @@ model User {
   passwordHash        String
   firstName           String
   lastName            String
+  phoneNumber         String?
+  logoUrl             String?
+  employeeId          String               @default("")
+  organizationName    String?
+  organizationId      String?
+  jurisdiction        String?
   role                UserRole             @default(EMPLOYEE)
   status              UserStatus           @default(ACTIVE)
   tokenVersion        Int                  @default(0)
@@ -45,8 +53,58 @@ model User {
   sessions            Session[]
   otpCodes            OtpCode[]
   passwordResetTokens PasswordResetToken[]
+  bundleAssignments  UserBundle[]
+  managedEmployees   AdminEmployeeAssignment[] @relation("AdminEmployees")
+  adminAssignment    AdminEmployeeAssignment? @relation("EmployeeAdmin")
 
   @@index([deletedAt])
+}
+
+model Permission {
+  id String @id @default(cuid())
+  module String
+  page String
+  action String
+  custom Boolean @default(false)
+  createdAt DateTime @default(now())
+  bundlePermissions BundlePermission[]
+  @@unique([module, page, action])
+}
+model PermissionBundle {
+  id String @id @default(cuid())
+  name String
+  description String?
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  permissions BundlePermission[]
+  users UserBundle[]
+  @@unique([createdBy, name])
+}
+model BundlePermission {
+  bundleId String
+  permissionId String
+  bundle PermissionBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@id([bundleId, permissionId])
+}
+model UserBundle {
+  userId String
+  bundleId String
+  assignedBy String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bundle PermissionBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  @@id([userId, bundleId])
+}
+model AdminEmployeeAssignment {
+  employeeId String @unique
+  adminId String
+  assignedBy String
+  createdAt DateTime @default(now())
+  admin User @relation("AdminEmployees", fields: [adminId], references: [id], onDelete: Cascade)
+  employee User @relation("EmployeeAdmin", fields: [employeeId], references: [id], onDelete: Cascade)
+  @@index([adminId])
 }
 
 model Session {

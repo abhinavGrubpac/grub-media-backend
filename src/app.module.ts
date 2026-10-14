@@ -12,6 +12,7 @@ import { validate } from './config/env.validation';
 import { PrismaModule } from './database/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { REDIS_CLIENT } from './redis/redis.service';
+import { FaultTolerantThrottlerStorage } from './redis/fault-tolerant-throttler.storage';
 import { AuthModule } from './modules/auth/auth.module';
 import { MailerModule } from './modules/mailer/mailer.module';
 import { UsersModule } from './modules/users/users.module';
@@ -68,8 +69,8 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     ThrottlerModule.forRootAsync({
       inject: [ConfigService, REDIS_CLIENT],
       useFactory: (config: ConfigService, redis: Redis | null) => {
-        // Use Redis storage if available, otherwise use in-memory fallback
-        const storage = redis ? new ThrottlerStorageRedisService(redis) : undefined;
+        const redisStorage = redis ? new ThrottlerStorageRedisService(redis) : undefined;
+        const storage = new FaultTolerantThrottlerStorage(redisStorage);
 
         return {
           throttlers: [

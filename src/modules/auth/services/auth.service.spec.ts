@@ -1,14 +1,17 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { InvalidCredentialsException } from '../../../common/exceptions/domain.exceptions';
+import {
+  InvalidCredentialsException,
+  UserNotFoundException,
+} from '../../../common/exceptions/domain.exceptions';
 
 jest.mock('argon2', () => ({
   verify: jest.fn(),
-  hash: jest.fn(),
+  hash: jest.fn().mockResolvedValue('NEWHASH'),
   argon2id: 2,
 }));
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const argon2 = require('argon2') as { verify: jest.Mock };
+const argon2 = require('argon2') as { verify: jest.Mock; hash: jest.Mock };
 
 const userRow = {
   id: 'u1',
@@ -27,6 +30,7 @@ function build(opts: {
   prismaUser?: Record<string, unknown> | null;
   claimCount?: number;
   resetRow?: Record<string, unknown> | null;
+  nodeEnv?: string;
 }) {
   const users = {
     findByEmailWithHash: jest.fn().mockResolvedValue(opts.user === undefined ? userRow : opts.user),
@@ -41,11 +45,19 @@ function build(opts: {
     increment: jest.fn().mockResolvedValue(opts.attempts ?? 1),
     del: jest.fn().mockResolvedValue(undefined),
   } as never;
-  const config = { get: jest.fn().mockReturnValue(5) } as never;
+  const config = {
+    get: jest.fn().mockImplementation((key: string, defaultVal?: unknown) => {
+      if (key === 'app.nodeEnv') return opts.nodeEnv ?? 'test';
+      return defaultVal ?? 5;
+    }),
+  } as never;
+
   argon2.verify.mockResolvedValue(opts.verify ?? true);
+  argon2.hash.mockResolvedValue('NEWHASH');
 
   const prismaUserResult =
     opts.prismaUser !== undefined ? opts.prismaUser : opts.user !== undefined ? opts.user : userRow;
+
   const defaultResetRow = {
     id: 'rt1',
     userId: 'u1',
@@ -54,10 +66,16 @@ function build(opts: {
     usedAt: null,
     user: userRow,
   };
+
   const prisma = {
     client: {
       user: {
         findFirst: jest.fn().mockResolvedValue(prismaUserResult),
+        findUnique: jest.fn().mockResolvedValue(prismaUserResult),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(prismaUserResult ?? userRow),
+        update: jest.fn().mockResolvedValue({}),
+        otpCode: { create: jest.fn().mockResolvedValue({}) },
+        otpCode_updateMany: jest.fn(),
       },
     },
     otpCode: {
@@ -73,8 +91,10 @@ function build(opts: {
     },
     user: {
       update: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
   } as never;
+
   const mailer = {
     sendOtp: jest.fn().mockResolvedValue(undefined),
     sendPasswordResetLink: jest.fn().mockResolvedValue(undefined),
@@ -85,10 +105,15 @@ function build(opts: {
     users,
     tokens,
     redis,
+    config,
     prisma,
     mailer,
   };
 }
+
+// ---------------------------------------------------------------------------
+// login
+// ---------------------------------------------------------------------------
 
 describe('AuthService.login', () => {
   afterEach(() => jest.clearAllMocks());
@@ -142,6 +167,10 @@ describe('AuthService.login', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// refresh / logout / me
+// ---------------------------------------------------------------------------
+
 describe('AuthService.refresh / logout / me', () => {
   afterEach(() => jest.clearAllMocks());
 
@@ -175,37 +204,66 @@ describe('AuthService.refresh / logout / me', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// requestOtpLogin
+// ---------------------------------------------------------------------------
+
 describe('AuthService.requestOtpLogin', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('creates an OTP record and sends email for a valid active user', async () => {
+  it('creates an OTP, invalidates old ones, and sends email for a valid active user', async () => {
     const { svc, prisma, mailer } = build({});
-    await svc.requestOtpLogin({ email: 'a@b.c' });
+    await svc.requestOtpLogin({ email: 'a@b.c' }, { ip: '1.1.1.1' });
+
+    // Invalidates existing unused OTPs first
+    expect(
+      (prisma as never as { otpCode: { updateMany: jest.Mock } }).otpCode.updateMany,
+    ).toHaveBeenCalledWith(expect.objectContaining({ data: { usedAt: expect.any(Date) } }));
+    // Then creates new OTP
     expect(
       (prisma as never as { otpCode: { create: jest.Mock } }).otpCode.create,
     ).toHaveBeenCalled();
+    // Sends the email
     expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).toHaveBeenCalledWith(
       'a@b.c',
       expect.stringMatching(/^\d{4}$/),
     );
   });
 
-  it('does nothing (no-op) when the email is not found — no user enumeration', async () => {
-    const { svc, prisma, mailer } = build({ prismaUser: null });
-    await svc.requestOtpLogin({ email: 'ghost@b.c' });
-    expect(
-      (prisma as never as { otpCode: { create: jest.Mock } }).otpCode.create,
-    ).not.toHaveBeenCalled();
+  it('throws UserNotFoundException when the email is not registered', async () => {
+    const { svc } = build({ prismaUser: null });
+    await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
+      UserNotFoundException,
+    );
+  });
+
+  it('throws Forbidden when account is inactive (does not send OTP)', async () => {
+    const { svc, mailer } = build({ prismaUser: { ...userRow, status: 'INACTIVE' } });
+    await expect(svc.requestOtpLogin({ email: 'a@b.c' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
+  });
+
+  it('throws Forbidden when the OTP request rate limit is exceeded', async () => {
+    const { svc, mailer } = build({ attempts: 4 });
+    await expect(svc.requestOtpLogin({ email: 'a@b.c' }, { ip: '1.1.1.1' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
     expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// verifyOtpLogin
+// ---------------------------------------------------------------------------
 
 describe('AuthService.verifyOtpLogin', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns tokens when OTP claim succeeds', async () => {
     const { svc, redis } = build({ claimCount: 1 });
-    const res = await svc.verifyOtpLogin({ email: 'a@b.c', code: '1234' }, { ip: '1.1.1.1' });
+    const res = await svc.verifyOtpLogin({ email: 'a@b.c', code: '5678' }, { ip: '1.1.1.1' });
     expect(res.accessToken).toBe('a');
     expect(res.refreshToken).toBe('r');
     expect((redis as never as { del: jest.Mock }).del).toHaveBeenCalled();
@@ -218,6 +276,13 @@ describe('AuthService.verifyOtpLogin', () => {
     );
   });
 
+  it('throws InvalidCredentials when user is not found', async () => {
+    const { svc } = build({ prismaUser: null });
+    await expect(
+      svc.verifyOtpLogin({ email: 'ghost@b.c', code: '1234' }, {}),
+    ).rejects.toBeInstanceOf(InvalidCredentialsException);
+  });
+
   it('throws Forbidden and does NOT hit DB when attempt limit is exceeded', async () => {
     const { svc, prisma } = build({ attempts: 6 });
     await expect(
@@ -227,50 +292,120 @@ describe('AuthService.verifyOtpLogin', () => {
       (prisma as never as { client: { user: { findFirst: jest.Mock } } }).client.user.findFirst,
     ).not.toHaveBeenCalled();
   });
+
+  it('bypasses OTP DB check in development mode when code is 1234', async () => {
+    const { svc, prisma } = build({ nodeEnv: 'development' });
+    const res = await svc.verifyOtpLogin({ email: 'a@b.c', code: '1234' }, { ip: '1.1.1.1' });
+    expect(res.accessToken).toBe('a');
+    // OTP DB lookup must be skipped
+    expect(
+      (prisma as never as { otpCode: { updateMany: jest.Mock } }).otpCode.updateMany,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does NOT bypass OTP check in production mode when code is 1234 (must fail DB lookup)', async () => {
+    const { svc } = build({ nodeEnv: 'production', claimCount: 0 });
+    await expect(svc.verifyOtpLogin({ email: 'a@b.c', code: '1234' }, {})).rejects.toBeInstanceOf(
+      InvalidCredentialsException,
+    );
+  });
 });
+
+// ---------------------------------------------------------------------------
+// forgotPassword
+// ---------------------------------------------------------------------------
 
 describe('AuthService.forgotPassword', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('creates a reset token and sends email for an active user', async () => {
+  it('invalidates old tokens, creates a new one, and sends email for an active user', async () => {
     const { svc, prisma, mailer } = build({});
     await svc.forgotPassword({ email: 'a@b.c' });
+
+    // Invalidates old tokens first
     expect(
-      (
-        prisma as never as {
-          passwordResetToken: { create: jest.Mock };
-        }
-      ).passwordResetToken.create,
+      (prisma as never as { passwordResetToken: { updateMany: jest.Mock } }).passwordResetToken
+        .updateMany,
+    ).toHaveBeenCalledWith(expect.objectContaining({ data: { usedAt: expect.any(Date) } }));
+    // Creates a new token
+    expect(
+      (prisma as never as { passwordResetToken: { create: jest.Mock } }).passwordResetToken.create,
     ).toHaveBeenCalled();
     expect(
       (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
     ).toHaveBeenCalledWith('a@b.c', expect.stringContaining('.'));
   });
 
-  it('does nothing (no-op) when email is not found — no user enumeration', async () => {
-    const { svc, prisma, mailer } = build({ prismaUser: null });
-    await svc.forgotPassword({ email: 'ghost@b.c' });
-    expect(
-      (
-        prisma as never as {
-          passwordResetToken: { create: jest.Mock };
-        }
-      ).passwordResetToken.create,
-    ).not.toHaveBeenCalled();
+  it('throws UserNotFoundException when email is not registered', async () => {
+    const { svc } = build({ prismaUser: null });
+    await expect(svc.forgotPassword({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
+      UserNotFoundException,
+    );
+  });
+
+  it('throws Forbidden when account is inactive (does not send reset link)', async () => {
+    const { svc, mailer } = build({ prismaUser: { ...userRow, status: 'INACTIVE' } });
+    await expect(svc.forgotPassword({ email: 'a@b.c' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(
       (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
     ).not.toHaveBeenCalled();
   });
 });
 
+// ---------------------------------------------------------------------------
+// resetPassword
+// ---------------------------------------------------------------------------
+
 describe('AuthService.resetPassword', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('throws BadRequestException for a token missing a dot separator', async () => {
     const { svc } = build({});
-    const { BadRequestException: BadReq } = await import('@nestjs/common');
     await expect(
-      svc.resetPassword({ token: 'notadottoken', password: 'newpassword1' }),
-    ).rejects.toBeInstanceOf(BadReq);
+      svc.resetPassword({ token: 'nodottoken', password: 'newpassword1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('throws BadRequestException when the reset token row is not found', async () => {
+    const { svc } = build({ resetRow: null });
+    await expect(
+      svc.resetPassword({ token: 'id.secret', password: 'NewPass1!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('throws BadRequestException when the linked account is not active', async () => {
+    const { svc } = build({
+      resetRow: {
+        id: 'rt1',
+        userId: 'u1',
+        hashedToken: 'HASH',
+        expiresAt: new Date(Date.now() + 3600000),
+        usedAt: null,
+        user: { ...userRow, status: 'INACTIVE' },
+      },
+    });
+    await expect(
+      svc.resetPassword({ token: 'rt1.secret', password: 'NewPass1!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('throws BadRequestException when the atomic claim fails (token already used)', async () => {
+    const { svc } = build({ claimCount: 0 });
+    await expect(
+      svc.resetPassword({ token: 'rt1.secret', password: 'NewPass1!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('resets password and bumps tokenVersion for a valid token', async () => {
+    const { svc, prisma } = build({ claimCount: 1 });
+    await svc.resetPassword({ token: 'rt1.secret', password: 'NewPass1!' });
+    expect((prisma as never as { user: { update: jest.Mock } }).user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tokenVersion: { increment: 1 } }),
+      }),
+    );
   });
 });
+
+// changePassword / requestProfileOtp / verifyProfileOtp live in UsersService now.
+// Tests for those methods are in users.service.spec.ts.

@@ -1,0 +1,7 @@
+ALTER TYPE "OtpPurpose" ADD VALUE 'PROFILE_EMAIL';
+ALTER TYPE "OtpPurpose" ADD VALUE 'PROFILE_PHONE';
+ALTER TABLE "User" ADD COLUMN "phoneNumber" TEXT,
+  ADD COLUMN "logoUrl" TEXT,
+  ADD COLUMN "employeeId" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "organizationName" TEXT,
+  ADD COLUMN "organizationId" TEXT;
