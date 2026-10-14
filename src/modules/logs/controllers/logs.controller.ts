@@ -19,8 +19,8 @@ import { RequirePermissions } from '../../auth/decorators/require-permissions.de
  *  1. GET /api/v1/logs/:logtype        page, limit (sorted default desc)
  *  2. GET /api/v1/logs/filters?logtype categories + actions for the filter panel
  *  3. GET /api/v1/logs/search          q, logtype, page, limit, start_date, end_date, categories, actions
- *  4. GET|POST /api/v1/logs/export    logtype, start_date, end_date, categories, actions, q, page, limit → CSV
- *                                     (only the rows of the current page are exported)
+ *  4. GET /api/v1/logs/export    logtype, start_date, end_date, categories, actions, q, page, limit → CSV
+ *                                 (only the rows of the current page are exported)
  *
  * Every route requires a valid JWT plus the `logs.read` permission
  * (SUPER_ADMIN/ADMIN). Static routes are declared before `:logtype` so
@@ -55,8 +55,8 @@ export class LogsController {
   @Get('export')
   @SkipResponseWrap()
   @ApiOperation({
-    summary: 'Export the logs of the current page as CSV (GET variant)',
-    description: 'Same as POST /logs/export — filters and page/limit come from the query string.',
+    summary: 'Export the logs of the current page as CSV',
+    description: 'Same filters as search — page/limit select which rows are written to the CSV.',
   })
   async exportGet(
     @Query() query: ExportRequestDto,

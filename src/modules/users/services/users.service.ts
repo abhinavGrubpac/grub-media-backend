@@ -10,7 +10,9 @@ import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
 import { OtpPurpose, Organization, UserRole, UserStatus, type User } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { UserStatus, LogType, type User } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
+import { logRefOf } from '../../../common/utils/log-ref';
 import { MailerService } from '../../mailer/mailer.service';
 import { StorageService } from '../../storage/storage.service';
 import { Paginated } from '../../../common/dto/paginated';
@@ -33,16 +35,26 @@ import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
 
 const OTP_TTL_MINUTES = 10;
 const DEV_OTP_BYPASS = '1234';
+import { LogsService } from '../../logs/services/logs.service';
+
+/** Log taxonomy names for user management events (Log System EMPLOYEE stream). */
+const LOG_CATEGORY = {
+  onboarding: 'Onboarding',
+  employment: 'Employment',
+  exit: 'Exit',
+} as const;
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
   constructor(
+    
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
     private readonly storage: StorageService,
+    private readonly logs: LogsService,
   ) {}
 
   private toDto(user: User & { organization?: Organization | null }): UserResponseDto {
@@ -105,6 +117,26 @@ export class UsersService {
       },
       include: { organization: true },
     });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.onboarding,
+      actionName: 'Create Employee',
+      actionText: `Employee ${user.email} created by ${actorId ?? 'system'}`,
+      userId: actorId,
+      empId: user.id,
+      referenceId: logRefOf(user),
+      newDetail: this.toDto(user),
+    });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.onboarding,
+      actionName: 'Create Employee',
+      actionText: `Employee ${user.email} created by ${actorId ?? 'system'}`,
+      userId: actorId,
+      empId: user.id,
+      referenceId: logRefOf(user),
+      newDetail: this.toDto(user),
+    });
     return this.toDto(user);
   }
 
@@ -118,7 +150,7 @@ export class UsersService {
   }
 
   async updateProfile(id: string, dto: ProfileUpdateDto): Promise<UserResponseDto> {
-    await this.getOrThrow(id);
+    const before = await this.getOrThrow(id);
     const user = await this.prisma.client.user.update({
       where: { id },
       data: {
@@ -244,6 +276,17 @@ export class UsersService {
       data: { status: UserStatus.INACTIVE, updatedBy: actorId },
       include: { organization: true },
     });
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'Update Profile',
+      actionText: `Profile details updated for ${user.email}`,
+      userId: id,
+      empId: user.id,
+      referenceId: logRefOf(user),
+      oldDetail: this.toDto(before),
+      newDetail: this.toDto(user),
+    });
     return this.toDto(user);
   }
 
@@ -306,8 +349,69 @@ export class UsersService {
     };
   }
 
-  /** Bulk-activate: lifts both SUSPENDED and INACTIVE users to ACTIVE. */
-  async bulkActivate(ids: string[]): Promise<number> {
+  async update(id: string, dto: UpdateUserDto, actorId: string): Promise<UserResponseDto> {
+    await this.getOrThrow(id);
+    // Map known fields explicitly — never spread the DTO straight into Prisma,
+    // so an unexpected key (e.g. a smuggled `password`/`role` escalation) can
+    // never reach the database even if upstream validation is misconfigured.
+    const before = await this.getOrThrow(id);
+    const user = await this.prisma.client.user.update({
+      where: { id },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: dto.role,
+        status: dto.status,
+        updatedBy: actorId,
+      },
+    });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.employment,
+      actionName: 'Update Employee',
+      actionText: `Employee ${user.email} updated by ${actorId}`,
+      userId: actorId,
+      empId: user.id,
+      referenceId: logRefOf(user),
+      oldDetail: this.toDto(before),
+      newDetail: this.toDto(user),
+    });
+    return this.toDto(user);
+  }
+
+  async setStatus(id: string, status: UserStatus, actorId?: string): Promise<UserResponseDto> {
+    const before = await this.getOrThrow(id);
+    const user = await this.prisma.client.user.update({ where: { id }, data: { status } });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.employment,
+      actionName: 'Status Change',
+      actionText: `Employee ${user.email} status changed from ${before.status} to ${status} by ${actorId ?? 'system'}`,
+      userId: actorId,
+      empId: user.id,
+      referenceId: logRefOf(user),
+      oldDetail: { status: before.status },
+      newDetail: { status },
+    });
+    return this.toDto(user);
+  }
+
+  async softDelete(id: string, actorId?: string): Promise<void> {
+    const before = await this.getOrThrow(id);
+    await this.prisma.client.user.update({ where: { id }, data: { deletedAt: new Date() } });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.exit,
+      actionName: 'Delete Employee',
+      actionText: `Employee ${before.email} deleted by ${actorId ?? 'system'}`,
+      userId: actorId,
+      empId: before.id,
+      referenceId: logRefOf(before),
+      oldDetail: this.toDto(before),
+    });
+  }
+
+  async bulkActivate(ids: string[], actorId?: string): Promise<number> {
     const result = await this.prisma.client.user.updateMany({
       where: {
         id: { in: ids },
@@ -315,6 +419,15 @@ export class UsersService {
         deletedAt: null,
       },
       data: { status: UserStatus.ACTIVE },
+    });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY.employment,
+      actionName: 'Bulk Activate',
+      actionText: `${result.count} employee(s) reactivated by ${actorId ?? 'system'}`,
+      userId: actorId,
+      referenceId: ids.join(','),
+      newDetail: { ids, activated: result.count },
     });
     return result.count;
   }

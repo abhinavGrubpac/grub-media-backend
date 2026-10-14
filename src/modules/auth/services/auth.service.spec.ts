@@ -1,9 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import {
-  InvalidCredentialsException,
-  UserNotFoundException,
-} from '../../../common/exceptions/domain.exceptions';
+import { InvalidCredentialsException } from '../../../common/exceptions/domain.exceptions';
 
 jest.mock('argon2', () => ({
   verify: jest.fn(),
@@ -100,14 +97,17 @@ function build(opts: {
     sendPasswordResetLink: jest.fn().mockResolvedValue(undefined),
   } as never;
 
+  const logs = { record: jest.fn().mockResolvedValue(undefined) } as never;
+
   return {
-    svc: new AuthService(users, tokens, redis, config, prisma, mailer),
+    svc: new AuthService(users, tokens, redis, config, prisma, mailer, logs),
     users,
     tokens,
     redis,
     config,
     prisma,
     mailer,
+    logs,
   };
 }
 
@@ -119,13 +119,31 @@ describe('AuthService.login', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns tokens + user on valid credentials and clears the attempt counter', async () => {
-    const { svc, redis } = build({ verify: true });
+    const { svc, redis, logs } = build({ verify: true });
     const res = await svc.login({ email: 'a@b.c', password: 'x' }, { ip: '1.1.1.1' });
     expect(res.accessToken).toBe('a');
     expect(res.refreshToken).toBe('r');
     expect(res.user).not.toHaveProperty('passwordHash');
     expect(res.user.email).toBe('a@b.c');
     expect((redis as never as { del: jest.Mock }).del).toHaveBeenCalled();
+    expect((logs as never as { record: jest.Mock }).record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        typeEnum: 'SYSTEM', // auth-session events live in the SYSTEM stream
+        categoryName: 'Authentication',
+        actionName: 'Login',
+        userId: 'u1',
+      }),
+    );
+  });
+
+  it('records an ACTIVITY/Failed Login audit row on a wrong password', async () => {
+    const { svc, logs } = build({ verify: false });
+    await expect(svc.login({ email: 'a@b.c', password: 'x' }, {})).rejects.toBeInstanceOf(
+      InvalidCredentialsException,
+    );
+    expect((logs as never as { record: jest.Mock }).record).toHaveBeenCalledWith(
+      expect.objectContaining({ actionName: 'Failed Login', referenceId: 'a@b.c' }),
+    );
   });
 
   it('throws InvalidCredentials on a wrong password', async () => {
@@ -230,11 +248,10 @@ describe('AuthService.requestOtpLogin', () => {
     );
   });
 
-  it('throws UserNotFoundException when the email is not registered', async () => {
-    const { svc } = build({ prismaUser: null });
-    await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
-      UserNotFoundException,
-    );
+  it('resolves silently without sending an OTP when the email is not registered (no enumeration)', async () => {
+    const { svc, mailer } = build({ prismaUser: null });
+    await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).resolves.toBeUndefined();
+    expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
   });
 
   it('throws Forbidden when account is inactive (does not send OTP)', async () => {
@@ -336,11 +353,12 @@ describe('AuthService.forgotPassword', () => {
     ).toHaveBeenCalledWith('a@b.c', expect.stringContaining('.'));
   });
 
-  it('throws UserNotFoundException when email is not registered', async () => {
-    const { svc } = build({ prismaUser: null });
-    await expect(svc.forgotPassword({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
-      UserNotFoundException,
-    );
+  it('resolves silently without sending a reset link when email is not registered (no enumeration)', async () => {
+    const { svc, mailer } = build({ prismaUser: null });
+    await expect(svc.forgotPassword({ email: 'ghost@b.c' })).resolves.toBeUndefined();
+    expect(
+      (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
+    ).not.toHaveBeenCalled();
   });
 
   it('throws Forbidden when account is inactive (does not send reset link)', async () => {

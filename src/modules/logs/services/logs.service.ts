@@ -9,6 +9,9 @@ import { LogFilterQueryDto } from '../dto/log-filter-query.dto';
 import { LogSearchQueryDto } from '../dto/log-search-query.dto';
 import { FilterResponseDTO, LogListResponseDTO, RecordLogInput } from '../dto/log.types';
 
+/** Prefix for the human-shareable ticket code stored in `Log.referenceId`. */
+const TICKET_PREFIX = 'TCK';
+
 @Injectable()
 export class LogsService {
   /** Sortable columns for log listings (allowlist — client sortBy never reaches Prisma raw). */
@@ -76,7 +79,7 @@ export class LogsService {
   }
 
   /**
-   * POST /logs/export — same filters as search, but only the rows of the page
+   * GET /logs/export — same filters as search, but only the rows of the page
    * currently shown in the UI are written to the CSV (page/limit → skip/take).
    */
   async exportCsv(query: ExportRequestDto): Promise<string> {
@@ -148,7 +151,7 @@ export class LogsService {
             })
           : undefined;
 
-      await this.prisma.client.log.create({
+      const created = await this.prisma.client.log.create({
         data: {
           typeEnum: input.typeEnum,
           categoryId: category?.id ?? null,
@@ -157,13 +160,41 @@ export class LogsService {
           userId: input.userId ?? null,
           empId: input.empId ?? null,
           oldDetail: this.serializeDetail(input.oldDetail),
-          newDetail: this.serializeDetail(input.newDetail),
-          referenceId: input.referenceId ?? null,
+          // The caller's business pointer (bundle id, admin id, …) is folded
+          // into newDetail.target so it survives — referenceId itself is
+          // reserved for the generated ticket code below.
+          newDetail: this.serializeDetail(this.withTarget(input.newDetail, input.referenceId)),
+          referenceId: null,
         },
+      });
+
+      // referenceId = human-shareable ticket derived from the row's own
+      // auto-increment id (id 1400 → "TCK-1400"), so a log can always be
+      // cited by its ticket. Second write; if it fails the row is still
+      // logged (referenceId stays null) and the error is swallowed below.
+      await this.prisma.client.log.update({
+        where: { id: created.id },
+        data: { referenceId: `${TICKET_PREFIX}-${created.id}` },
       });
     } catch (err) {
       this.logger.warn(`record() failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /**
+   * Folds the caller's business pointer into newDetail under `target` so the
+   * reference is not lost when referenceId is overwritten by the ticket code.
+   * - object detail → spread + target (non-destructive)
+   * - string/absent detail → wrapped as { detail?, target }
+   */
+  private withTarget(detail: unknown, target: string | null | undefined): unknown {
+    if (target === null || target === undefined || target === '') {
+      return detail;
+    }
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+      return { ...(detail as Record<string, unknown>), target };
+    }
+    return detail === undefined || detail === null ? { target } : { detail, target };
   }
 
   /** Shared count + page query with allowlisted sorting (default createdAt desc). */

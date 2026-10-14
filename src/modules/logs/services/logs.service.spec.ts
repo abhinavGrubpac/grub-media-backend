@@ -21,6 +21,7 @@ type Mocks = {
   findMany?: jest.Mock;
   count?: jest.Mock;
   create?: jest.Mock;
+  update?: jest.Mock;
   upsert?: jest.Mock;
 };
 
@@ -31,6 +32,7 @@ function prismaMock(log: Mocks = {}, logCategory: Mocks = {}, logAction: Mocks =
         findMany: log.findMany ?? jest.fn().mockResolvedValue([]),
         count: log.count ?? jest.fn().mockResolvedValue(0),
         create: log.create ?? jest.fn().mockResolvedValue({ id: 99 }),
+        update: log.update ?? jest.fn().mockResolvedValue({}),
       },
       logCategory: {
         findMany: logCategory.findMany ?? jest.fn().mockResolvedValue([]),
@@ -206,8 +208,9 @@ describe('LogsService.record', () => {
     });
     const upsertAction = jest.fn().mockResolvedValue({ id: 7, categoryId: 1, name: 'Login' });
     const create = jest.fn().mockResolvedValue({ id: 99 });
+    const update = jest.fn().mockResolvedValue({ id: 99, referenceId: 'TCK-99' });
     const svc = new LogsService(
-      prismaMock({ create }, { upsert: upsertCategory }, { upsert: upsertAction }),
+      prismaMock({ create, update }, { upsert: upsertCategory }, { upsert: upsertAction }),
     );
 
     await svc.record({
@@ -240,9 +243,14 @@ describe('LogsService.record', () => {
         userId: 'user-1',
         empId: null,
         oldDetail: '{"status":"INACTIVE"}',
-        newDetail: '{"status":"ACTIVE"}',
-        referenceId: 'user-1',
+        newDetail: '{"status":"ACTIVE","target":"user-1"}',
+        referenceId: null,
       },
+    });
+    // referenceId is stamped after insert with a ticket derived from the row id.
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 99 },
+      data: { referenceId: 'TCK-99' },
     });
   });
 

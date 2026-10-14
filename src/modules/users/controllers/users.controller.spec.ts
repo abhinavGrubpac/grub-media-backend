@@ -24,7 +24,7 @@ describe('UsersController (thin delegation)', () => {
     expect((service as { list: jest.Mock }).list).toHaveBeenCalledWith(query);
   });
 
-  it('remove delegates to softDelete with actor id and role', async () => {
+  it('remove delegates to softDelete with the actor id and returns null', async () => {
     const service = { softDelete: jest.fn().mockResolvedValue(undefined) } as never;
     const ctrl = new UsersController(service);
     const result = await ctrl.remove('u1', actor);

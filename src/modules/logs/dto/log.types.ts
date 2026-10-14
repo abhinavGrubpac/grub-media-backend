@@ -78,6 +78,11 @@ export interface RecordLogInput {
   /** Before/after state — objects are JSON.stringified into TEXT. */
   oldDetail?: unknown;
   newDetail?: unknown;
-  /** Id of the affected row. */
+  /**
+   * Business pointer for the affected row (user id, bundle id, admin id, …).
+   * This is NOT stored in the referenceId column — it is folded into
+   * newDetail.target so it survives. referenceId itself holds a generated
+   * ticket code (TCK-<logId>).
+   */
   referenceId?: string;
 }

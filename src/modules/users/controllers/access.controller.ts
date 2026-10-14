@@ -14,8 +14,8 @@ export class AccessController {
   @Get('permissions') permissions() {
     return this.access.permissions();
   }
-  @Post('permissions') permission(@Body() dto: PermissionDto) {
-    return this.access.createPermission(dto);
+  @Post('permissions') permission(@CurrentUser() u: AuthUser, @Body() dto: PermissionDto) {
+    return this.access.createPermission(u.id, dto);
   }
   @Get('bundles') bundles() {
     return this.access.bundles();
@@ -31,10 +31,11 @@ export class AccessController {
     return this.access.assignBundle(u.id, e, dto.bundleId);
   }
   @Delete('employees/:employeeId/bundles/:bundleId') remove(
+    @CurrentUser() u: AuthUser,
     @Param('employeeId') e: string,
     @Param('bundleId') b: string,
   ) {
-    return this.access.removeBundle(e, b);
+    return this.access.removeBundle(u.id, e, b);
   }
   @Put('employees/:employeeId/admin') assignAdmin(
     @CurrentUser() u: AuthUser,
@@ -43,8 +44,11 @@ export class AccessController {
   ) {
     return this.access.assignAdmin(u.id, e, dto.adminId);
   }
-  @Delete('employees/:employeeId/admin') unassign(@Param('employeeId') e: string) {
-    return this.access.unassignAdmin(e);
+  @Delete('employees/:employeeId/admin') unassign(
+    @CurrentUser() u: AuthUser,
+    @Param('employeeId') e: string,
+  ) {
+    return this.access.unassignAdmin(u.id, e);
   }
   @Get('assignments') assignments() {
     return this.access.assignments();

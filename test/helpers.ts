@@ -22,7 +22,7 @@ export async function assertTestDatabase(app: INestApplication): Promise<void> {
   const rows = (await prisma.$queryRawUnsafe('SELECT current_database() AS db')) as Array<{
     db: string;
   }>;
-  const { db } = rows;
+  const { db } = rows[0];
 
   // The live dev database is Neon's `Grubpac`; the throwaway docker one is
   // `grub_test`. Check the database NAME only: inet_server_addr/port report the
@@ -53,7 +53,7 @@ export async function createTestApp(): Promise<INestApplication> {
     .overrideProvider(PrismaService)
     .useFactory({
       inject: [],
-      factory: () => new PrismaService(TEST_DATABASE_URL),
+      factory: () => new PrismaService({ datasources: { db: { url: TEST_DATABASE_URL } } }),
     })
     .compile();
   const app = moduleRef.createNestApplication({ bufferLogs: false });
