@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OtpPurpose, UserStatus } from '@prisma/client';
+import { OtpPurpose, UserStatus, LogType } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
@@ -17,10 +17,8 @@ import { RedisService } from '../../../redis/redis.service';
 import { PrismaService } from '../../../database/prisma.service';
 import { MailerService } from '../../mailer/mailer.service';
 import { ERROR_CODES } from '../../../common/constants/error-codes';
-import {
-  InvalidCredentialsException,
-  UserNotFoundException,
-} from '../../../common/exceptions/domain.exceptions';
+import { logRefOf } from '../../../common/utils/log-ref';
+import { InvalidCredentialsException } from '../../../common/exceptions/domain.exceptions';
 import { LoginDto } from '../dto/login.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { OtpRequestDto } from '../dto/otp-request.dto';
@@ -30,6 +28,16 @@ import { AuthResponseDto, TokenResponseDto } from '../dto/auth-response.dto';
 import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
 import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
+import { LogsService } from '../../logs/services/logs.service';
+
+/**
+ * Log taxonomy for authentication-session events (Login / Logout / Failed
+ * Login / Password). These live in the SYSTEM stream alongside other security
+ * and configuration events — NOT the ACTIVITY stream, which is reserved for
+ * day-to-day employee activity (Profile / Leave / Payroll / Attendance).
+ * Pairing stream + category here keeps the two in sync at every call site.
+ */
+const AUTH_LOG = { typeEnum: LogType.SYSTEM, categoryName: 'Authentication' } as const;
 
 interface RequestCtx {
   ip?: string;
@@ -55,6 +63,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
+    private readonly logs: LogsService,
   ) {}
 
   async login(dto: LoginDto, ctx: RequestCtx): Promise<AuthResponseDto> {
@@ -71,29 +80,78 @@ export class AuthService {
     // Uniform failure: unknown email, wrong password, or non-active account all
     // return the same error so there is no user-enumeration signal.
     if (!user || user.deletedAt || user.status !== UserStatus.ACTIVE) {
+      await this.recordFailedLogin(dto.email, ctx);
       throw new InvalidCredentialsException();
     }
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) {
+      await this.recordFailedLogin(dto.email, ctx);
       throw new InvalidCredentialsException();
     }
 
     await this.redis.del(key);
     const pair = await this.tokens.issuePair(user, ctx);
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Login',
+      actionText: `User ${user.email} logged in from ${ctx.ip ?? 'unknown'}`,
+      userId: user.id,
+      referenceId: logRefOf(user),
+    });
     return {
       ...pair,
       user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
     };
   }
 
+  /**
+   * Audit a failed login attempt. The row is recorded against the email as
+   * text (the user may not exist), so failed attempts for unknown emails are
+   * visible to admins without a userId FK.
+   */
+  private async recordFailedLogin(email: string, ctx: RequestCtx): Promise<void> {
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Failed Login',
+      actionText: `Failed login attempt for ${email} from ${ctx.ip ?? 'unknown'}`,
+      referenceId: email,
+    });
+  }
+
   async refresh(refreshToken: string, ctx: RequestCtx): Promise<TokenResponseDto> {
-    const { accessToken, refreshToken: next } = await this.tokens.rotate(refreshToken, ctx);
+    const { accessToken, refreshToken: next, userId } = await this.tokens.rotate(refreshToken, ctx);
+    // Best-effort: resolve the actor so the audit reference is human-readable.
+    const actor = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, employeeId: true },
+    });
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Token Refresh',
+      actionText: `Access token refreshed for ${actor?.email ?? userId} from ${ctx.ip ?? 'unknown'}`,
+      userId,
+      referenceId: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
+    });
     return { accessToken, refreshToken: next };
   }
 
   /** Logout = revoke all sessions + bump tokenVersion (invalidates access tokens). */
   async logout(userId: string): Promise<void> {
     await this.tokens.revokeAllForUser(userId);
+    // Resolve the actor's employeeId/email so the audit reference is readable
+    // (EMP-### / email) rather than a raw cuid. Best-effort: on lookup failure
+    // the log still records the raw id.
+    const actor = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, employeeId: true },
+    });
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Logout',
+      actionText: `User ${actor?.email ?? userId} logged out`,
+      userId,
+      referenceId: logRefOf(actor ?? { id: userId, email: null, employeeId: null }),
+    });
   }
 
   async me(userId: string): Promise<UserResponseDto> {
@@ -111,6 +169,15 @@ export class AuthService {
       data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
     });
     this.logger.log(`Profile ${dto.type} OTP for ${userId}: ${code}`);
+
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'OTP Requested',
+      actionText: `Profile ${dto.type} change OTP requested by ${logRefOf(user)}`,
+      userId,
+      referenceId: logRefOf(user),
+    });
   }
 
   async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
@@ -120,6 +187,8 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
     if (!claim.count) throw new BadRequestException('Invalid or expired OTP');
+    const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    const oldField = dto.type === 'email' ? before?.email : before?.phoneNumber;
     if (dto.type === 'email') {
       const existing = await this.prisma.client.user.findUnique({ where: { email: dto.value } });
       if (existing && existing.id !== userId) throw new ConflictException('Email already in use');
@@ -129,6 +198,16 @@ export class AuthService {
         where: { id: userId },
         data: { phoneNumber: dto.value },
       });
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'Update Profile',
+      actionText: `Verified ${dto.type} changed to ${dto.value} for user ${before?.email ?? userId}`,
+      userId,
+      referenceId: logRefOf(before ?? { id: userId, email: null, employeeId: null }),
+      oldDetail: { [dto.type]: oldField ?? null },
+      newDetail: { [dto.type]: dto.value },
+    });
     return this.users.findById(userId);
   }
 
@@ -148,6 +227,13 @@ export class AuthService {
     await this.prisma.client.user.update({
       where: { id: userId },
       data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
+    });
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Password Changed',
+      actionText: `Password changed for ${user.email}`,
+      userId,
+      referenceId: logRefOf(user),
     });
   }
 
@@ -169,7 +255,9 @@ export class AuthService {
 
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user) {
-      throw new UserNotFoundException();
+      // No enumeration: unknown emails receive the same silent 200 as known
+      // ones, so an attacker can't probe which addresses have accounts.
+      return;
     }
     if (user.status !== UserStatus.ACTIVE) {
       throw new ForbiddenException({
@@ -193,6 +281,14 @@ export class AuthService {
     });
 
     await this.mailer.sendOtp(user.email, code);
+
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'OTP Requested',
+      actionText: `Login OTP requested for ${user.email} from ${ctx.ip ?? 'unknown'}`,
+      userId: user.id,
+      referenceId: logRefOf(user),
+    });
   }
 
   async verifyOtpLogin(dto: OtpVerifyDto, ctx: RequestCtx): Promise<AuthResponseDto> {
@@ -207,6 +303,7 @@ export class AuthService {
 
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user || user.status !== UserStatus.ACTIVE) {
+      await this.recordFailedLogin(dto.email, ctx);
       throw new InvalidCredentialsException();
     }
 
@@ -226,12 +323,20 @@ export class AuthService {
       });
 
       if (claim.count === 0) {
+        await this.recordFailedLogin(dto.email, ctx);
         throw new InvalidCredentialsException();
       }
     }
 
     await this.redis.del(key);
     const pair = await this.tokens.issuePair(user, ctx);
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Login',
+      actionText: `User ${user.email} logged in via OTP from ${ctx.ip ?? 'unknown'}`,
+      userId: user.id,
+      referenceId: logRefOf(user),
+    });
     return {
       ...pair,
       user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
@@ -245,7 +350,9 @@ export class AuthService {
   async forgotPassword(dto: ForgotPasswordDto): Promise<void> {
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user) {
-      throw new UserNotFoundException();
+      // No enumeration: unknown emails receive the same silent 200 as known
+      // ones, so an attacker can't probe which addresses have accounts.
+      return;
     }
     if (user.status !== UserStatus.ACTIVE) {
       throw new ForbiddenException({
@@ -271,6 +378,13 @@ export class AuthService {
     // Token format: `${id}.${rawSecret}` — id is the O(1) lookup key.
     const token = `${row.id}.${rawSecret}`;
     await this.mailer.sendPasswordResetLink(user.email, token);
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Password Reset',
+      actionText: `Password reset requested for ${user.email}`,
+      userId: user.id,
+      referenceId: logRefOf(user),
+    });
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
@@ -323,6 +437,13 @@ export class AuthService {
         passwordHash,
         tokenVersion: { increment: 1 },
       },
+    });
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Password Reset',
+      actionText: `Password reset completed for ${row.user.email}`,
+      userId: row.userId,
+      referenceId: logRefOf(row.user),
     });
   }
 }

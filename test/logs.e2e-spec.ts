@@ -8,12 +8,12 @@ import { cleanDatabase, cleanLogs, createTestApp, login, seedLogs, seedUser } fr
  *   GET  /api/v1/logs/filters?logtype=
  *   GET  /api/v1/logs/search
  *   GET  /api/v1/logs/:logtype
- *   POST /api/v1/logs/export   (CSV of the current page only)
- *   GET  /api/v1/logs/export
+ *   GET  /api/v1/logs/export   (CSV of the current page only)
  * Runs against the throwaway postgres/redis from docker-compose.test.yml.
  */
 describe('Logs (e2e)', () => {
   let app: INestApplication;
+  let adminTokenValue: string; // obtained in beforeEach, before the fixture seed
   const admin = { email: 'admin@grubpac.com', password: 'AdminPass1' };
   const employee = { email: 'emp@grubpac.com', password: 'EmpPass123' };
 
@@ -144,6 +144,11 @@ describe('Logs (e2e)', () => {
     await cleanDatabase(app);
     await seedUser(app, { ...admin, role: UserRole.ADMIN });
     await seedUser(app, { ...employee, role: UserRole.EMPLOYEE });
+    // Log in while the users exist, THEN wipe logs before seeding the fixture.
+    // login() writes a SYSTEM audit row (newest of all); wiping it here means
+    // no test ever observes it and the fixture's exact row counts stay intact.
+    adminTokenValue = (await login(app, admin.email, admin.password)).accessToken;
+    await cleanLogs(app);
     // createdAt spread 18 days so date-range filtering has something to bite on.
     const base = Date.UTC(2026, 8, 1); // 2026-09-01
     await seedLogs(
@@ -158,10 +163,6 @@ describe('Logs (e2e)', () => {
     );
   });
 
-  async function adminToken(): Promise<string> {
-    return (await login(app, admin.email, admin.password)).accessToken;
-  }
-
   // ── Auth & RBAC ──────────────────────────────────────────────────────────
 
   describe('auth + RBAC', () => {
@@ -170,7 +171,6 @@ describe('Logs (e2e)', () => {
       await request(server).get('/api/v1/logs/SYSTEM').expect(401);
       await request(server).get('/api/v1/logs/filters?logtype=SYSTEM').expect(401);
       await request(server).get('/api/v1/logs/search?logtype=SYSTEM').expect(401);
-      await request(server).post('/api/v1/logs/export').send({ logtype: 'SYSTEM' }).expect(401);
       await request(server).get('/api/v1/logs/export?logtype=SYSTEM').expect(401);
     });
 
@@ -181,11 +181,6 @@ describe('Logs (e2e)', () => {
       await request(server).get('/api/v1/logs/SYSTEM').set(auth).expect(403);
       await request(server).get('/api/v1/logs/filters?logtype=SYSTEM').set(auth).expect(403);
       await request(server).get('/api/v1/logs/search?logtype=SYSTEM').set(auth).expect(403);
-      await request(server)
-        .post('/api/v1/logs/export')
-        .set(auth)
-        .send({ logtype: 'SYSTEM' })
-        .expect(403);
       await request(server).get('/api/v1/logs/export?logtype=SYSTEM').set(auth).expect(403);
     });
   });
@@ -194,7 +189,7 @@ describe('Logs (e2e)', () => {
 
   describe('GET /logs/filters', () => {
     it('returns only the categories + actions of the requested logtype', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=SYSTEM')
         .set('Authorization', `Bearer ${token}`)
@@ -215,7 +210,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('is case-insensitive on logtype', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=employee')
         .set('Authorization', `Bearer ${token}`)
@@ -228,7 +223,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('returns 400 VALIDATION_ERROR for an unknown logtype', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=NOPE')
         .set('Authorization', `Bearer ${token}`)
@@ -237,7 +232,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('returns 400 when logtype is missing', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       await request(app.getHttpServer())
         .get('/api/v1/logs/filters')
         .set('Authorization', `Bearer ${token}`)
@@ -249,7 +244,7 @@ describe('Logs (e2e)', () => {
 
   describe('GET /logs/:logtype', () => {
     it('returns the paginated envelope sorted createdAt desc', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/SYSTEM?page=1&limit=20')
         .set('Authorization', `Bearer ${token}`)
@@ -267,7 +262,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('scopes strictly to the path logtype', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/EMPLOYEE')
         .set('Authorization', `Bearer ${token}`)
@@ -279,7 +274,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('paginates without overlap between pages', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const server = app.getHttpServer();
       const auth = { Authorization: `Bearer ${token}` };
 
@@ -308,7 +303,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('does not leak relation internals (only brief category/action projections)', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/SYSTEM')
         .set('Authorization', `Bearer ${token}`)
@@ -334,7 +329,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('rejects limit above the max (400)', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       await request(app.getHttpServer())
         .get('/api/v1/logs/SYSTEM?limit=999')
         .set('Authorization', `Bearer ${token}`)
@@ -342,7 +337,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('400s on an unknown logtype path param', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/NOT_A_TYPE')
         .set('Authorization', `Bearer ${token}`)
@@ -355,7 +350,7 @@ describe('Logs (e2e)', () => {
 
   describe('GET /logs/search', () => {
     async function search(qs: string) {
-      const token = await adminToken();
+      const token = adminTokenValue;
       return request(app.getHttpServer())
         .get(`/api/v1/logs/search?${qs}`)
         .set('Authorization', `Bearer ${token}`)
@@ -425,7 +420,7 @@ describe('Logs (e2e)', () => {
     it('filters by category ids (comma-separated)', async () => {
       const filters = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=SYSTEM')
-        .set('Authorization', `Bearer ${await adminToken()}`)
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(200);
       const security = filters.body.data.categories.find(
         (c: { name: string }) => c.name === 'Security',
@@ -441,7 +436,7 @@ describe('Logs (e2e)', () => {
     it('filters by action ids (comma-separated)', async () => {
       const filters = await request(app.getHttpServer())
         .get('/api/v1/logs/filters?logtype=SYSTEM')
-        .set('Authorization', `Bearer ${await adminToken()}`)
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(200);
       const login = filters.body.data.actions.find((a: { name: string }) => a.name === 'Login');
 
@@ -467,19 +462,18 @@ describe('Logs (e2e)', () => {
     });
 
     it('400s on a malformed date', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=SYSTEM&start_date=12-01-2026')
         .set('Authorization', `Bearer ${token}`)
         .expect(400);
       expect(res.body.errorCode).toBe('VALIDATION_ERROR');
-      expect(res.body.message).toEqual(
-        expect.arrayContaining([expect.stringContaining('start_date')]),
-      );
+      // The filter flattens class-validator's message array into one string.
+      expect(res.body.message).toEqual(expect.stringContaining('start_date'));
     });
 
     it('400s when q is blank', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=SYSTEM&q=%20%20')
         .set('Authorization', `Bearer ${token}`)
@@ -487,7 +481,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('400s on a non-numeric category id', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=SYSTEM&categories=abc')
         .set('Authorization', `Bearer ${token}`)
@@ -495,7 +489,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('400s on a non-numeric page', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=SYSTEM&page=abc')
         .set('Authorization', `Bearer ${token}`)
@@ -503,15 +497,14 @@ describe('Logs (e2e)', () => {
     });
   });
 
-  // ── POST /logs/export ────────────────────────────────────────────────────
+  // ── GET /logs/export ─────────────────────────────────────────────────────
 
-  describe('POST /logs/export', () => {
-    async function exportPost(body: Record<string, unknown>) {
-      const token = await adminToken();
+  describe('GET /logs/export', () => {
+    async function exportGet(query: string) {
+      const token = adminTokenValue;
       return request(app.getHttpServer())
-        .post('/api/v1/logs/export')
+        .get(`/api/v1/logs/export?${query}`)
         .set('Authorization', `Bearer ${token}`)
-        .send(body)
         .expect(200);
     }
 
@@ -525,7 +518,7 @@ describe('Logs (e2e)', () => {
     }
 
     it('returns a CSV attachment, not the JSON envelope', async () => {
-      const res = await exportPost({ logtype: 'SYSTEM' });
+      const res = await exportGet('logtype=SYSTEM');
       expect(res.headers['content-type']).toContain('text/csv');
       expect(res.headers['content-disposition']).toMatch(
         /^attachment; filename="logs-system-\d{4}-\d{2}-\d{2}\.csv"$/,
@@ -539,52 +532,63 @@ describe('Logs (e2e)', () => {
 
     it('exports ONLY the current page — never the whole filtered set', async () => {
       // 6 SYSTEM rows exist; page 2 of size 2 = rows 3-4 of the newest-first order.
-      const res = await exportPost({ logtype: 'SYSTEM', page: 2, limit: 2 });
+      const res = await exportGet('logtype=SYSTEM&page=2&limit=2');
       const lines = res.text.split('\r\n').filter((l) => l.length > 0);
       expect(lines).toHaveLength(3); // header + 2 data rows
       expect(lines.slice(1).map((l) => l.split(',')[3])).toEqual(['Security', 'Security']);
     });
 
     it('exports exactly the same rows the web page shows (matches search)', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const search = await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=ACTIVITY&page=2&limit=3')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      const res = await exportPost({ logtype: 'ACTIVITY', page: 2, limit: 3 });
+      const res = await exportGet('logtype=ACTIVITY&page=2&limit=3');
 
       expect(csvIds(res.text)).toEqual(search.body.data.map((r: { id: number }) => String(r.id)));
       expect(res.text.split('\r\n').filter((l) => l.length > 0)).toHaveLength(4);
     });
 
     it('defaults to page 1 / limit 20 when pagination is omitted', async () => {
-      const res = await exportPost({ logtype: 'ACTIVITY' });
+      const res = await exportGet('logtype=ACTIVITY');
       expect(res.text.split('\r\n').filter((l) => l.length > 0)).toHaveLength(7); // header + 6
     });
 
     it('honours the same filters as search', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const search = await request(app.getHttpServer())
         .get('/api/v1/logs/search?logtype=SYSTEM&q=login')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      const res = await exportPost({ logtype: 'SYSTEM', q: 'login' });
+      const res = await exportGet('logtype=SYSTEM&q=login');
       expect(csvIds(res.text)).toEqual(search.body.data.map((r: { id: number }) => String(r.id)));
       expect(search.body.meta.total).toBe(2);
     });
 
     it('honours the date range', async () => {
-      const res = await exportPost({
-        logtype: 'SYSTEM',
-        start_date: '2026-09-02',
-        end_date: '2026-09-03',
-      });
+      const res = await exportGet('logtype=SYSTEM&start_date=2026-09-02&end_date=2026-09-03');
       const lines = res.text.split('\r\n').filter((l) => l.length > 0);
       expect(lines).toHaveLength(3); // header + 2
       expect(res.text).toContain('2026-09-02');
       expect(res.text).toContain('2026-09-03');
+    });
+
+    it('accepts categories as a comma-separated id list', async () => {
+      const filters = await request(app.getHttpServer())
+        .get('/api/v1/logs/filters?logtype=SYSTEM')
+        .set('Authorization', `Bearer ${adminTokenValue}`)
+        .expect(200);
+      const security = filters.body.data.categories.find(
+        (c: { name: string }) => c.name === 'Security',
+      );
+
+      const res = await exportGet(`logtype=SYSTEM&categories=${security.id}`);
+      const lines = res.text.split('\r\n').filter((l) => l.length > 0);
+      expect(lines).toHaveLength(3); // header + 2 Security rows
+      expect(res.text).toContain(',Security,');
     });
 
     it('escapes commas, quotes and newlines per RFC 4180', async () => {
@@ -599,7 +603,7 @@ describe('Logs (e2e)', () => {
         },
       ]);
 
-      const res = await exportPost({ logtype: 'SYSTEM' });
+      const res = await exportGet('logtype=SYSTEM');
       expect(res.text).toContain('"He said ""hi"", then left\nline2"');
       expect(res.text).toContain('"{""a"":1}"');
     });
@@ -608,7 +612,7 @@ describe('Logs (e2e)', () => {
       await cleanLogs(app);
       await seedLogs(app, [{ typeEnum: LogType.SYSTEM, actionText: 'bare row' }]);
 
-      const res = await exportPost({ logtype: 'SYSTEM' });
+      const res = await exportGet('logtype=SYSTEM');
       const row = res.text.split('\r\n')[1];
 
       // id,created_at,logtype,category,action,action_text,user_id,emp_id,
@@ -622,109 +626,49 @@ describe('Logs (e2e)', () => {
     });
 
     it('400s when logtype is missing', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const res = await request(app.getHttpServer())
-        .post('/api/v1/logs/export')
+        .get('/api/v1/logs/export')
         .set('Authorization', `Bearer ${token}`)
-        .send({ page: 1, limit: 20 })
         .expect(400);
       expect(res.body.errorCode).toBe('VALIDATION_ERROR');
     });
 
-    it('400s on an unknown body field (whitelist)', async () => {
-      const token = await adminToken();
+    it('400s on an unknown query field (whitelist)', async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/v1/logs/export')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ logtype: 'SYSTEM', format: 'xlsx' })
+        .get('/api/v1/logs/export?logtype=SYSTEM&format=xlsx')
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(400);
       expect(res.body.errorCode).toBe('VALIDATION_ERROR');
     });
 
     it('400s on limit above the max', async () => {
-      const token = await adminToken();
       await request(app.getHttpServer())
-        .post('/api/v1/logs/export')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ logtype: 'SYSTEM', limit: 500 })
+        .get('/api/v1/logs/export?logtype=SYSTEM&limit=500')
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(400);
     });
 
     it('400s on a negative page', async () => {
-      const token = await adminToken();
       await request(app.getHttpServer())
-        .post('/api/v1/logs/export')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ logtype: 'SYSTEM', page: -1 })
+        .get('/api/v1/logs/export?logtype=SYSTEM&page=-1')
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(400);
-    });
-
-    it('returns an empty CSV body (header only) when the page is past the end', async () => {
-      const res = await exportPost({ logtype: 'SYSTEM', page: 99, limit: 20 });
-      const lines = res.text.split('\r\n').filter((l) => l.length > 0);
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain('id,created_at,logtype');
-    });
-
-    it('accepts categories/actions as comma-separated strings', async () => {
-      const filters = await request(app.getHttpServer())
-        .get('/api/v1/logs/filters?logtype=SYSTEM')
-        .set('Authorization', `Bearer ${await adminToken()}`)
-        .expect(200);
-      const security = filters.body.data.categories.find(
-        (c: { name: string }) => c.name === 'Security',
-      );
-
-      const res = await exportPost({ logtype: 'SYSTEM', categories: String(security.id) });
-      const lines = res.text.split('\r\n').filter((l) => l.length > 0);
-      expect(lines).toHaveLength(3); // header + 2 Security rows
-      expect(res.text).toContain(',Security,');
-    });
-
-    it('accepts categories/actions as a JSON array in the body', async () => {
-      const filters = await request(app.getHttpServer())
-        .get('/api/v1/logs/filters?logtype=ACTIVITY')
-        .set('Authorization', `Bearer ${await adminToken()}`)
-        .expect(200);
-      const leave = filters.body.data.categories.find((c: { name: string }) => c.name === 'Leave');
-
-      const res = await exportPost({ logtype: 'ACTIVITY', categories: [leave.id] });
-      const lines = res.text.split('\r\n').filter((l) => l.length > 0);
-      expect(lines).toHaveLength(3);
-    });
-  });
-
-  // ── GET /logs/export ─────────────────────────────────────────────────────
-
-  describe('GET /logs/export', () => {
-    it('mirrors POST — same filters and page-only rows, from the query string', async () => {
-      const token = await adminToken();
-      const server = app.getHttpServer();
-      const auth = { Authorization: `Bearer ${token}` };
-
-      const post = await request(server)
-        .post('/api/v1/logs/export')
-        .set(auth)
-        .send({ logtype: 'EMPLOYEE', page: 1, limit: 4 })
-        .expect(200);
-
-      const get = await request(server)
-        .get('/api/v1/logs/export?logtype=EMPLOYEE&page=1&limit=4')
-        .set(auth)
-        .expect(200);
-
-      expect(get.headers['content-type']).toContain('text/csv');
-      expect(get.text).toBe(post.text);
-      expect(get.text.split('\r\n').filter((l) => l.length > 0)).toHaveLength(5); // header + 4
     });
 
     it('400s on an unknown logtype', async () => {
-      const token = await adminToken();
       const res = await request(app.getHttpServer())
         .get('/api/v1/logs/export?logtype=NOPE')
-        .set('Authorization', `Bearer ${token}`)
+        .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(400);
       expect(res.body.errorCode).toBe('VALIDATION_ERROR');
+    });
+
+    it('returns an empty CSV body (header only) when the page is past the end', async () => {
+      const res = await exportGet('logtype=SYSTEM&page=99&limit=20');
+      const lines = res.text.split('\r\n').filter((l) => l.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('id,created_at,logtype');
     });
   });
 
@@ -732,7 +676,7 @@ describe('Logs (e2e)', () => {
 
   describe('consistency across endpoints', () => {
     it('list, search and export agree on total for the same stream', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const server = app.getHttpServer();
       const auth = { Authorization: `Bearer ${token}` };
 
@@ -752,7 +696,7 @@ describe('Logs (e2e)', () => {
     });
 
     it('record() → visible immediately on list + searchable', async () => {
-      const token = await adminToken();
+      const token = adminTokenValue;
       const server = app.getHttpServer();
       const auth = { Authorization: `Bearer ${token}` };
 
@@ -784,7 +728,7 @@ describe('Logs (e2e)', () => {
     it('a log with no category/action still lists and exports cleanly', async () => {
       await cleanLogs(app);
       await seedLogs(app, [{ typeEnum: LogType.ACTIVITY, actionText: 'orphan row' }]);
-      const token = await adminToken();
+      const token = adminTokenValue;
       const server = app.getHttpServer();
       const auth = { Authorization: `Bearer ${token}` };
 

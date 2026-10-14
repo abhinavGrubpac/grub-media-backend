@@ -79,8 +79,11 @@ export class UsersController {
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Put('bulk-activate')
-  async bulkActivate(@Body() dto: BulkActivateDto): Promise<{ activated: number }> {
-    return { activated: await this.users.bulkActivate(dto.ids) };
+  async bulkActivate(
+    @Body() dto: BulkActivateDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<{ activated: number }> {
+    return { activated: await this.users.bulkActivate(dto.ids, actor.id) };
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
@@ -111,8 +114,8 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Soft-delete a user (admin only)' })
   @ResponseMessage('User deleted')
-  async remove(@Param('id') id: string): Promise<null> {
-    await this.users.softDelete(id);
+  async remove(@Param('id') id: string, @CurrentUser() actor: AuthUser): Promise<null> {
+    await this.users.softDelete(id, actor.id);
     return null;
   }
 }

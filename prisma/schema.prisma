@@ -45,6 +45,7 @@ model User {
   deletedAt           DateTime?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+  sessions            Session[]
   otpCodes            OtpCode[]
   passwordResetTokens PasswordResetToken[]
   bundleAssignments  UserBundle[]
@@ -237,23 +238,6 @@ model PasswordResetToken {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-}
-
-enum UserRole {
-  SUPER_ADMIN
-  ADMIN
-  EMPLOYEE
-}
-
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-  SUSPENDED
-}
-
-enum OtpPurpose {
-  LOGIN
-  PASSWORD_RESET
 }
 
 /// Log stream discriminator — matches the `type_enum` column of the log,

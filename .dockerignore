@@ -7,4 +7,5 @@ coverage
 test
 docs
 *.log
+*.tsbuildinfo
 .DS_Store

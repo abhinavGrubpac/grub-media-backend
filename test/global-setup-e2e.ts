@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { Redis } from 'ioredis';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
@@ -70,8 +71,16 @@ function isOnlyComments(statement: string): boolean {
 }
 
 export default async function globalSetup(): Promise<void> {
+  // SAFETY: do NOT read process.env.DATABASE_URL here. Importing
+  // `@prisma/client` (top of this file) auto-loads `.env`, which points at the
+  // real/dev database — so DATABASE_URL is already populated by the time this
+  // line runs, and the `??` fallback would never fire. Trusting it would make
+  // the `DROP SCHEMA ... CASCADE` below destroy that database. The throwaway
+  // test DB is the only acceptable target; TEST_DATABASE_URL is the explicit
+  // escape hatch for CI if a custom throwaway DB is ever needed.
   const databaseUrl =
-    process.env.DATABASE_URL ?? 'postgresql://grub:grub@localhost:5433/grub_test?schema=public';
+    process.env.TEST_DATABASE_URL ??
+    'postgresql://grub:grub@localhost:5433/grub_test?schema=public';
 
   const prisma = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
@@ -99,7 +108,38 @@ export default async function globalSetup(): Promise<void> {
       }
       console.log(`applied migration ${dir}`);
     }
+
+    // Flush the throwaway test Redis too: rate-limit / login-lockout keys have
+    // a 15-min TTL and survive across runs, which made parallel runs flake with
+    // spurious 403 lockouts. Best-effort — a Redis hiccup shouldn't abort the DB
+    // setup (the tests will fail loudly on their own if Redis is truly down).
+    await flushTestRedis();
   } finally {
     await prisma.$disconnect();
+  }
+}
+
+/**
+ * Flush the throwaway test Redis (6380). SAFETY: the port is forced — just like
+ * DATABASE_URL, `process.env.REDIS_PORT` is polluted by `.env` (which points at
+ * the real Redis, 6379) because importing `@prisma/client` auto-loads it, and
+ * flushing the real instance would drop live sessions / rate-limits.
+ */
+async function flushTestRedis(): Promise<void> {
+  const redis = new Redis({
+    host: process.env.TEST_REDIS_HOST ?? 'localhost',
+    port: Number(process.env.TEST_REDIS_PORT ?? 6380),
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 3000,
+  });
+  try {
+    await redis.connect();
+    await redis.flushall();
+    console.log('flushed test redis (localhost:6380)');
+  } catch (err) {
+    console.warn(`could not flush test redis: ${(err as Error).message}`);
+  } finally {
+    redis.disconnect();
   }
 }

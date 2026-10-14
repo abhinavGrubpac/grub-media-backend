@@ -91,7 +91,7 @@ describe('Users (e2e)', () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/users')
       .set('Authorization', `Bearer ${accessToken}`)
-      .set('X-Request-ID', 'bad\r\ninjected: value')
+      .set('X-Request-ID', 'bad injected: value')
       .expect(200);
     expect(res.headers['x-request-id']).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,

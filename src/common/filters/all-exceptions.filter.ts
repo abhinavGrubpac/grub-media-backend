@@ -91,11 +91,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? (response as Record<string, unknown>)
         : { message: response };
     const rawMessage = body.message ?? exception.message;
-    const message = Array.isArray(rawMessage)
-      ? (rawMessage as string[]).join(', ')
-      : String(rawMessage);
+    // class-validator errors surface as a 400 whose `message` is an array of
+    // per-field strings (ValidationPipe). The pipe sets no `errorCode`, so map
+    // that shape to VALIDATION_ERROR. Domain 400s carry a string message and
+    // set errorCode explicitly, so they never match here.
+    const isValidationError = Array.isArray(rawMessage);
+    const message = isValidationError ? (rawMessage as string[]).join(', ') : String(rawMessage);
     const errorCode =
-      typeof body.errorCode === 'string' ? body.errorCode : this.statusToCode(status);
+      typeof body.errorCode === 'string'
+        ? body.errorCode
+        : isValidationError
+          ? ERROR_CODES.VALIDATION_ERROR
+          : this.statusToCode(status);
     return { status, message, errorCode };
   }
 

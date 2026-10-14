@@ -22,12 +22,12 @@ describe('UsersController (thin delegation)', () => {
     expect((service as { list: jest.Mock }).list).toHaveBeenCalledWith(query);
   });
 
-  it('remove delegates to softDelete and returns null', async () => {
+  it('remove delegates to softDelete with the actor id and returns null', async () => {
     const service = { softDelete: jest.fn().mockResolvedValue(undefined) } as never;
     const ctrl = new UsersController(service);
-    const result = await ctrl.remove('u1');
+    const result = await ctrl.remove('u1', actor);
     expect(result).toBeNull();
-    expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith('u1');
+    expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith('u1', 'admin-1');
   });
 
   it('findOne delegates to findById', async () => {
