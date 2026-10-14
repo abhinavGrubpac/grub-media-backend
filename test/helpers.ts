@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
+import { failureAuditMiddleware } from '../src/common/middleware/failure-audit.middleware';
 
 /**
  * The e2e suite must only ever touch the throwaway docker database.
@@ -59,6 +60,10 @@ export async function createTestApp(): Promise<INestApplication> {
   const app = moduleRef.createNestApplication({ bufferLogs: false });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  // Mirrors main.ts: MUST be registered before app.init() so the failure
+  // auditor wraps the body parser (malformed-JSON 400s included) — the same
+  // ordering bootstrap() relies on in production.
+  app.use(failureAuditMiddleware);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LogType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
+import { markRequestAudited, setAuditSink } from '../../../common/audit/request-audit';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
 import { toCsv } from '../../../common/utils/csv';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
@@ -44,7 +45,10 @@ export class LogsService {
 
   private readonly logger = new Logger(LogsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    // Single writer for audit rows — also used by the failure auditor.
+    setAuditSink(this);
+  }
 
   /** GET /logs/:logtype — one stream of logs, paginated, sorted desc by default. */
   async list(logtype: LogType, query: PaginationQueryDto): Promise<LogListResponseDTO> {
@@ -133,19 +137,17 @@ export class LogsService {
    *   so it can never break the calling business flow.
    */
   async record(input: RecordLogInput): Promise<void> {
+    // This request now has (or is getting) its own audit row — suppress the
+    // generic failure audit even if the insert below fails.
+    markRequestAudited();
     try {
-      const category = input.categoryName
-        ? await this.prisma.client.logCategory.upsert({
-            where: { name_typeEnum: { name: input.categoryName, typeEnum: input.typeEnum } },
-            create: { name: input.categoryName, typeEnum: input.typeEnum },
-            update: {},
-          })
-        : undefined;
+      // Best-effort: never let taxonomy bookkeeping lose the audit row.
+      const categoryId = await this.resolveCategoryId(input.typeEnum, input.categoryName);
 
       await this.prisma.client.log.create({
         data: {
           typeEnum: input.typeEnum,
-          categoryId: category?.id ?? null,
+          categoryId,
           actionName: input.actionName ?? null,
           actionText: input.actionText ?? null,
           userId: input.userId ?? null,
@@ -158,6 +160,51 @@ export class LogsService {
       });
     } catch (err) {
       this.logger.warn(`record() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Resolves (creating on first use) the category for a row — BEST-EFFORT:
+   * returns null instead of ever throwing, because losing the audit row over
+   * taxonomy bookkeeping is never acceptable.
+   *
+   * Concurrent first-writes of the same (name, typeEnum) race on the unique
+   * constraint: one upsert wins, the others get P2002. Those fall back to a
+   * plain read of the now-existing row; if even that fails (or the upsert
+   * errors for any other reason), the log row still lands without a category.
+   */
+  private async resolveCategoryId(typeEnum: LogType, name?: string): Promise<number | null> {
+    if (!name) return null;
+    try {
+      const row = await this.prisma.client.logCategory.upsert({
+        where: { name_typeEnum: { name, typeEnum } },
+        create: { name, typeEnum },
+        update: {},
+      });
+      return row.id;
+    } catch (err) {
+      const raced =
+        typeof err === 'object' &&
+        err !== null &&
+        (err as { name?: unknown }).name === 'PrismaClientKnownRequestError' &&
+        (err as { code?: unknown }).code === 'P2002';
+      if (raced) {
+        try {
+          const existing = await this.prisma.client.logCategory.findFirst({
+            where: { name, typeEnum },
+          });
+          if (existing) return existing.id;
+        } catch (findErr) {
+          this.logger.warn(
+            `record() category fallback failed: ${findErr instanceof Error ? findErr.message : String(findErr)}`,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `record() category upsert failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return null;
     }
   }
 

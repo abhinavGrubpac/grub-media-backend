@@ -1,6 +1,7 @@
 import { LogType } from '@prisma/client';
 import { ExportRequestDto } from '../dto/log-export-query.dto';
 import { LogSearchQueryDto } from '../dto/log-search-query.dto';
+import { requestAuditAls } from '../../../common/audit/request-audit';
 import { LogsService } from './logs.service';
 
 const logRow = {
@@ -18,6 +19,7 @@ const logRow = {
 
 type Mocks = {
   findMany?: jest.Mock;
+  findFirst?: jest.Mock;
   count?: jest.Mock;
   create?: jest.Mock;
   groupBy?: jest.Mock;
@@ -35,6 +37,7 @@ function prismaMock(log: Mocks = {}, logCategory: Mocks = {}) {
       },
       logCategory: {
         findMany: logCategory.findMany ?? jest.fn().mockResolvedValue([]),
+        findFirst: logCategory.findFirst ?? jest.fn().mockResolvedValue(null),
         upsert:
           logCategory.upsert ??
           jest.fn().mockResolvedValue({ id: 1, typeEnum: LogType.SYSTEM, name: 'X', image: null }),
@@ -311,5 +314,83 @@ describe('LogsService.record', () => {
 
     await expect(svc.record({ typeEnum: LogType.SYSTEM })).resolves.toBeUndefined();
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the current request as audited (suppresses the generic failure row)', async () => {
+    const svc = new LogsService(prismaMock());
+    const state = { audited: false };
+
+    await requestAuditAls.run(state, () => svc.record({ typeEnum: LogType.SYSTEM }));
+
+    expect(state.audited).toBe(true);
+  });
+
+  it('marks audited even when the insert fails, so failures are never double-logged', async () => {
+    const create = jest.fn().mockRejectedValue(new Error('db down'));
+    const svc = new LogsService(prismaMock({ create }));
+    const state = { audited: false };
+
+    await requestAuditAls.run(state, () => svc.record({ typeEnum: LogType.SYSTEM }));
+
+    expect(state.audited).toBe(true);
+  });
+
+  it('recovers a lost category-create race and still writes the row (P2002 fallback)', async () => {
+    const p2002 = Object.assign(new Error('Unique constraint failed'), {
+      name: 'PrismaClientKnownRequestError',
+      code: 'P2002',
+    });
+    const upsert = jest.fn().mockRejectedValue(p2002);
+    const findFirst = jest.fn().mockResolvedValue({ id: 7, name: 'Request Failure' });
+    const create = jest.fn().mockResolvedValue({ id: 5 });
+    const svc = new LogsService(prismaMock({ create }, { upsert, findFirst }));
+
+    await svc.record({ typeEnum: LogType.SYSTEM, categoryName: 'Request Failure' });
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { name: 'Request Failure', typeEnum: LogType.SYSTEM },
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          categoryId: 7,
+          typeEnum: LogType.SYSTEM,
+          actionName: null,
+          actionText: null,
+          userId: null,
+          empId: null,
+          oldDetail: null,
+          newDetail: null,
+        },
+      }),
+    );
+  });
+
+  it('writes the row WITHOUT a category when even the fallback read fails', async () => {
+    const upsert = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('race'), { name: 'PrismaClientKnownRequestError', code: 'P2002' }),
+      );
+    const findFirst = jest.fn().mockRejectedValue(new Error('db hiccup'));
+    const create = jest.fn().mockResolvedValue({ id: 6 });
+    const svc = new LogsService(prismaMock({ create }, { upsert, findFirst }));
+
+    await expect(
+      svc.record({ typeEnum: LogType.SYSTEM, categoryName: 'X' }),
+    ).resolves.toBeUndefined();
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ categoryId: null }) });
+  });
+
+  it('never lets a category upsert failure other than P2002 lose the row', async () => {
+    const upsert = jest.fn().mockRejectedValue(new Error('connection lost'));
+    const findFirst = jest.fn();
+    const create = jest.fn().mockResolvedValue({ id: 8 });
+    const svc = new LogsService(prismaMock({ create }, { upsert, findFirst }));
+
+    await svc.record({ typeEnum: LogType.SYSTEM, categoryName: 'X' });
+
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ categoryId: null }) });
   });
 });

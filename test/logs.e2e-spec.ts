@@ -184,6 +184,62 @@ describe('Logs (e2e)', () => {
     });
   });
 
+  // ── Failed-request audit ─────────────────────────────────────────────────
+
+  describe('failed-request audit (Request Failed)', () => {
+    async function systemRows() {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/logs/SYSTEM?page=1&limit=100')
+        .set('Authorization', `Bearer ${adminTokenValue}`)
+        .expect(200);
+      return res.body.data as Array<{ actionName: string | null; actionText: string | null }>;
+    }
+
+    it('records a SYSTEM row for an unauthenticated 401 (method, path, status, message)', async () => {
+      await request(app.getHttpServer()).get('/api/v1/users').expect(401);
+
+      const rows = await systemRows();
+      const generic = rows.filter((r) => r.actionName === 'Request Failed');
+      expect(generic).toHaveLength(1);
+      // IP rendering varies with the loopback family (::1 vs ::ffff:127.0.0.1).
+      expect(generic[0].actionText).toMatch(
+        /^GET \/api\/v1\/users failed with 401 from \S+ — Unauthorized$/,
+      );
+    });
+
+    it('does NOT double-log a failure that already produced its own row (dedup)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: 'nobody@grubpac.com', password: 'WrongPass1' })
+        .expect(401);
+
+      const rows = await systemRows();
+      // The purpose-built row exists…
+      expect(rows.some((r) => r.actionName === 'Failed Login')).toBe(true);
+      // …and no generic row was stacked on top of it for the same request.
+      expect(
+        rows.filter(
+          (r) => r.actionName === 'Request Failed' && (r.actionText ?? '').includes('/auth/login'),
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('audits validation 400s, which reach no endpoint logic of their own', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: 'not-an-email' })
+        .expect(400);
+
+      const rows = await systemRows();
+      const generic = rows.filter(
+        (r) =>
+          r.actionName === 'Request Failed' && (r.actionText ?? '').includes('failed with 400'),
+      );
+      expect(generic).toHaveLength(1);
+      expect(generic[0].actionText).toContain('POST /api/v1/auth/login');
+    });
+  });
+
   // ── GET /logs/filters ────────────────────────────────────────────────────
 
   describe('GET /logs/filters', () => {

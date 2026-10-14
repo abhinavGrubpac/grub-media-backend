@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ERROR_CODES } from '../constants/error-codes';
+import { requestAuditAls } from '../audit/request-audit';
 
 interface ErrorEnvelope {
   success: false;
@@ -48,6 +49,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = http.getRequest<{ url: string; id?: string }>();
 
     const { status, message, errorCode } = this.resolve(exception);
+
+    // Surface the resolved detail to the failure auditor (best-effort). The
+    // generic 'Request Failed' row is only written when no row was recorded
+    // for this request (e.g. validation errors or guard rejections).
+    const audit = requestAuditAls.getStore();
+    if (audit) audit.failure = { message, errorCode };
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
