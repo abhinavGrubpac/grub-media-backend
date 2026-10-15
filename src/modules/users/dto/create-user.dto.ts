@@ -73,6 +73,11 @@ export class CreateUserDto {
   @IsDateString()
   joiningDate?: string;
 
+  @ApiPropertyOptional({ description: 'ID of the organisation this employee belongs to' })
+  @IsOptional()
+  @IsString()
+  organizationId?: string;
+
   @ApiPropertyOptional({ enum: UserRole })
   @IsOptional()
   @IsEnum(UserRole)

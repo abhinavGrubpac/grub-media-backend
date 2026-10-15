@@ -75,7 +75,7 @@ export class UploadController {
   ): Promise<{ url: string }> {
     if (dto.type === 'avatar') {
       const updated = await this.users.uploadAvatar(actor.id, file);
-      return { url: updated.logoUrl! };
+      return { url: updated.avatarUrl! };
     }
 
     // org-logo — upload to S3; the org service wires the FK when that module is built.

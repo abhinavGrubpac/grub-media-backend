@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
-import { OtpPurpose, UserRole, UserStatus, type User } from '@prisma/client';
+import { OtpPurpose, Organization, UserRole, UserStatus, type User } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../database/prisma.service';
 import { MailerService } from '../../mailer/mailer.service';
@@ -45,7 +45,7 @@ export class UsersService {
     private readonly storage: StorageService,
   ) {}
 
-  private toDto(user: User): UserResponseDto {
+  private toDto(user: User & { organization?: Organization | null }): UserResponseDto {
     return plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true });
   }
 
@@ -99,9 +99,11 @@ export class UsersService {
         employeeId: dto.employeeId,
         jurisdiction: dto.jurisdiction,
         joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
+        organizationId: dto.organizationId,
         role: dto.role,
         createdBy: actorId,
       },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -122,9 +124,10 @@ export class UsersService {
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
-        logoUrl: dto.logoUrl,
+        avatarUrl: dto.avatarUrl,
         jurisdiction: dto.jurisdiction,
       },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -133,14 +136,15 @@ export class UsersService {
     const user = await this.getOrThrow(userId);
 
     // Delete old avatar from S3 before replacing (fire-and-forget on failure)
-    if (user.logoUrl) {
-      void this.storage.deleteByUrl(user.logoUrl);
+    if (user.avatarUrl) {
+      void this.storage.deleteByUrl(user.avatarUrl);
     }
 
-    const logoUrl = await this.storage.uploadImage('avatars', userId, file);
+    const avatarUrl = await this.storage.uploadImage('avatars', userId, file);
     const updated = await this.prisma.client.user.update({
       where: { id: userId },
-      data: { logoUrl },
+      data: { avatarUrl },
+      include: { organization: true },
     });
     return this.toDto(updated);
   }
@@ -163,9 +167,11 @@ export class UsersService {
         employeeId: dto.employeeId,
         jurisdiction: dto.jurisdiction,
         joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
+        organizationId: dto.organizationId,
         role: dto.role,
         updatedBy: actorId,
       },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -193,6 +199,7 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.SUSPENDED, updatedBy: actorId },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -210,6 +217,7 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.ACTIVE, updatedBy: actorId },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -234,6 +242,7 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.INACTIVE, updatedBy: actorId },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -282,7 +291,13 @@ export class UsersService {
       : 'createdAt';
     const orderBy = { [sortField]: query.sortOrder };
     const [rows, total] = await Promise.all([
-      this.prisma.client.user.findMany({ where, skip, take, orderBy }),
+      this.prisma.client.user.findMany({
+        where,
+        skip,
+        take,
+        orderBy,
+        include: { organization: true },
+      }),
       this.prisma.client.user.count({ where }),
     ]);
     return {
@@ -451,8 +466,11 @@ export class UsersService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async getOrThrow(id: string): Promise<User> {
-    const user = await this.prisma.client.user.findFirst({ where: { id } });
+  private async getOrThrow(id: string): Promise<User & { organization?: Organization | null }> {
+    const user = await this.prisma.client.user.findFirst({
+      where: { id },
+      include: { organization: true },
+    });
     if (!user) throw new UserNotFoundException();
     return user;
   }
