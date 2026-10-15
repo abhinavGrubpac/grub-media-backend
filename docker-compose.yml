@@ -36,7 +36,9 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16-alpine
+    # PostGIS image (not vanilla postgres): advert_control migration creates a
+    # geometry(Point, 4326) column + GiST index, which needs the extension.
+    image: postgis/postgis:16-3.4-alpine
     environment:
       # WARNING: `grub` defaults are for local dev only. Production MUST set
       # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB from secrets.
