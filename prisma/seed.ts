@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, UserStatus } from '@prisma/client';
+import { OrgStatus, PrismaClient, UserRole, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
@@ -76,7 +76,18 @@ async function seedSuperAdmin(): Promise<string> {
   const password = process.env.SEED_SUPER_ADMIN_PASSWORD;
 
   if (!email || !password) {
-    throw new Error('SEED_SUPER_ADMIN_EMAIL and SEED_SUPER_ADMIN_PASSWORD are required');
+    // Env vars not set — find the existing super admin instead of creating one.
+    const existing = await prisma.user.findFirst({
+      where: { role: UserRole.SUPER_ADMIN, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!existing) {
+      throw new Error(
+        'No super admin found. Set SEED_SUPER_ADMIN_EMAIL + SEED_SUPER_ADMIN_PASSWORD to create one.',
+      );
+    }
+    console.log(`  Super admin: ${existing.email} (${existing.id}) [existing — skipped create]`);
+    return existing.id;
   }
 
   const user = await prisma.user.upsert({
@@ -96,7 +107,25 @@ async function seedSuperAdmin(): Promise<string> {
   return user.id;
 }
 
-async function seedAdmins(superAdminId: string): Promise<string[]> {
+async function seedOrganizations(superAdminId: string): Promise<string> {
+  const org = await prisma.organization.upsert({
+    where: { regNumber: 'GRUB-ORG-001' },
+    update: {},
+    create: {
+      name: 'GrubPac Foods Pvt Ltd',
+      regNumber: 'GRUB-ORG-001',
+      logoUrl: null,
+      jurisdiction: 'Maharashtra',
+      status: OrgStatus.ACTIVE,
+      createdBy: superAdminId,
+    },
+  });
+
+  console.log(`  Organisation: ${org.name} (${org.id})`);
+  return org.id;
+}
+
+async function seedAdmins(superAdminId: string, orgId: string): Promise<string[]> {
   const admins = [
     {
       email: 'admin1@grubpac.com',
@@ -104,13 +133,25 @@ async function seedAdmins(superAdminId: string): Promise<string[]> {
       firstName: 'Alice',
       lastName: 'Johnson',
       employeeId: 'EMP-ADM-001',
+      avatarUrl: null,
+      phoneNumber: null,
+      jurisdiction: null,
+      joiningDate: null,
+      organizationId: null,
     },
     {
+      id: 'cmv655inn000titdjtpvb4qlz',
       email: 'admin2@grubpac.com',
       password: 'Admin@123456',
       firstName: 'Bob',
       lastName: 'Williams',
       employeeId: 'EMP-ADM-002',
+      avatarUrl:
+        'https://grub-media.s3.ap-south-1.amazonaws.com/development/avatars/cmv655inn000titdjtpvb4qlz/2026/10/14/b8354fce-db49-4b61-ad46-3471b19f3d47.png',
+      phoneNumber: null,
+      jurisdiction: null,
+      joiningDate: null,
+      organizationId: orgId,
     },
   ];
 
@@ -119,13 +160,19 @@ async function seedAdmins(superAdminId: string): Promise<string[]> {
   for (const admin of admins) {
     const user = await prisma.user.upsert({
       where: { email: admin.email },
-      update: {},
+      update: { organizationId: admin.organizationId },
       create: {
+        ...(admin.id ? { id: admin.id } : {}),
         email: admin.email,
         passwordHash: await hashPassword(admin.password),
         firstName: admin.firstName,
         lastName: admin.lastName,
         employeeId: admin.employeeId,
+        avatarUrl: admin.avatarUrl,
+        phoneNumber: admin.phoneNumber,
+        jurisdiction: admin.jurisdiction,
+        joiningDate: admin.joiningDate,
+        organizationId: admin.organizationId,
         role: UserRole.ADMIN,
         status: UserStatus.ACTIVE,
         createdBy: superAdminId,
@@ -543,9 +590,12 @@ async function main(): Promise<void> {
   console.log('→ Permissions');
   const permMap = await seedPermissions();
 
-  console.log('\n→ Users');
+  console.log('\n→ Organisations');
   const superAdminId = await seedSuperAdmin();
-  const adminIds = await seedAdmins(superAdminId);
+  const orgId = await seedOrganizations(superAdminId);
+
+  console.log('\n→ Users');
+  const adminIds = await seedAdmins(superAdminId, orgId);
   const employeeIds = await seedEmployees(adminIds, superAdminId);
 
   console.log('\n→ Permission Bundles');
@@ -568,7 +618,8 @@ async function main(): Promise<void> {
 
 main()
   .then(() => prisma.$disconnect())
-  .catch((error: unknown) => {
+  .catch(async (error: unknown) => {
     console.error(error);
-    return prisma.$disconnect().finally(() => process.exit(1));
+    await prisma.$disconnect();
+    process.exit(1);
   });

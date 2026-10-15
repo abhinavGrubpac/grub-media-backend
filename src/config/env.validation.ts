@@ -136,6 +136,21 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   SMTP_SECURE?: string;
+
+  // ── S3 / Object Storage ───────────────────────────────────
+  // All optional — app starts without them; uploads return 500 if missing.
+  // storage.config.ts reads AWS_REGION; s3.config.ts reads AWS_S3_REGION.
+  @IsOptional()
+  @IsString()
+  AWS_S3_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_S3_ENDPOINT?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_CLOUDFRONT_URL?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

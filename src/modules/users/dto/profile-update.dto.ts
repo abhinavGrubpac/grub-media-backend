@@ -25,9 +25,9 @@ export class ProfileUpdateDto {
   @MaxLength(2048)
   @IsUrl(
     { protocols: ['https'], require_protocol: true },
-    { message: 'logoUrl must be a valid HTTPS URL' },
+    { message: 'avatarUrl must be a valid HTTPS URL' },
   )
-  logoUrl?: string;
+  avatarUrl?: string;
 
   @ApiPropertyOptional({ maxLength: 100 })
   @IsOptional()

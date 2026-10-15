@@ -35,3 +35,9 @@ export class HelpFaqNotFoundException extends NotFoundException {
     super({ message: 'Help FAQ not found', errorCode: ERROR_CODES.NOT_FOUND });
   }
 }
+
+export class OrgNotFoundException extends NotFoundException {
+  constructor() {
+    super({ message: 'Organisation not found', errorCode: ERROR_CODES.NOT_FOUND });
+  }
+}

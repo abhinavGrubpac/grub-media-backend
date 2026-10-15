@@ -1,0 +1,492 @@
+{
+  "info": {
+    "name": "GrubPac Media API",
+    "_postman_id": "grubpac-media-api-v1",
+    "description": "Complete API reference for GrubPac Media Backend.\n\n**Setup:**\n1. Import this collection\n2. Create an environment with variable `baseUrl` = `http://localhost:3000`\n3. After login, set `accessToken` and `refreshToken` in the environment\n\n**Auth:** All protected routes require `Authorization: Bearer {{accessToken}}`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (email + password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  pm.environment.set('accessToken', json.data.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"superadmin@grubpac.com\",\n  \"password\": \"SuperAdmin@123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","login"] }
+          }
+        },
+        {
+          "name": "Request OTP (email login)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"superadmin@grubpac.com\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-request", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","login","otp-request"] }
+          }
+        },
+        {
+          "name": "Verify OTP (email login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  pm.environment.set('accessToken', json.data.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"superadmin@grubpac.com\",\n  \"code\": \"1234\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-verify", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","login","otp-verify"] }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  pm.environment.set('accessToken', json.data.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","refresh"] }
+          }
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@grubpac.com\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","forgot-password"] }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"<token-from-email>\",\n  \"password\": \"NewPass@123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","reset-password"] }
+          }
+        },
+        {
+          "name": "Me (current user)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","me"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","logout"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile (self-service)",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile", "host": ["{{baseUrl}}"], "path": ["api","v1","users","profile"] }
+          }
+        },
+        {
+          "name": "Update Profile (name / logo / jurisdiction)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"logoUrl\": \"https://example.com/avatar.png\",\n  \"jurisdiction\": \"North India\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile", "host": ["{{baseUrl}}"], "path": ["api","v1","users","profile"] }
+          }
+        },
+        {
+          "name": "Request Email / Phone OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"newemail@example.com\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/otp-request", "host": ["{{baseUrl}}"], "path": ["api","v1","users","profile","otp-request"] },
+            "description": "type: \"email\" or \"phone\". In dev mode, verify with code 1234."
+          }
+        },
+        {
+          "name": "Verify Email / Phone OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"newemail@example.com\",\n  \"code\": \"1234\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/otp-verify", "host": ["{{baseUrl}}"], "path": ["api","v1","users","profile","otp-verify"] },
+            "description": "Use code 1234 in development mode to bypass OTP lookup."
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"OldPass@123\",\n  \"newPassword\": \"NewPass@456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/password", "host": ["{{baseUrl}}"], "path": ["api","v1","users","profile","password"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users — Admin CRUD",
+      "item": [
+        {
+          "name": "Create Employee",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"email\": \"jane.smith@grubpac.com\",\n  \"phoneNumber\": \"+919876543210\",\n  \"employeeId\": \"EMP001\",\n  \"jurisdiction\": \"North India\",\n  \"joiningDate\": \"2026-01-15\",\n  \"role\": \"EMPLOYEE\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": ["{{baseUrl}}"], "path": ["api","v1","users"] },
+            "description": "password is optional — omit it to auto-generate a temporary one. Employee must use Forgot Password to set their own."
+          }
+        },
+        {
+          "name": "List Users (all)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20&sortOrder=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "sortOrder", "value": "desc" },
+                { "key": "role", "value": "", "disabled": true },
+                { "key": "search", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Active Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=ACTIVE&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "ACTIVE" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Suspended Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=SUSPENDED&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "SUSPENDED" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Dismissed Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=INACTIVE&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "INACTIVE" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id"], "variable": [{ "key": "id", "value": "" }] }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phoneNumber\": \"+919876543210\",\n  \"employeeId\": \"EMP001\",\n  \"jurisdiction\": \"South India\",\n  \"joiningDate\": \"2026-02-01\",\n  \"role\": \"EMPLOYEE\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id"], "variable": [{ "key": "id", "value": "" }] },
+            "description": "All fields are optional. Status changes use dedicated endpoints."
+          }
+        },
+        {
+          "name": "Delete User (soft)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id"], "variable": [{ "key": "id", "value": "" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users — Status",
+      "item": [
+        {
+          "name": "Suspend User",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id/suspend", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id","suspend"], "variable": [{ "key": "id", "value": "" }] },
+            "description": "Blocks login. Cannot suspend yourself or a Super Admin (unless you are one)."
+          }
+        },
+        {
+          "name": "Activate User",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id/activate", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id","activate"], "variable": [{ "key": "id", "value": "" }] },
+            "description": "Restores a SUSPENDED or INACTIVE user to ACTIVE."
+          }
+        },
+        {
+          "name": "Dismiss User",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/:id/dismiss", "host": ["{{baseUrl}}"], "path": ["api","v1","users",":id","dismiss"], "variable": [{ "key": "id", "value": "" }] },
+            "description": "Sets status to INACTIVE. Account persists but login is blocked. Cannot dismiss yourself."
+          }
+        },
+        {
+          "name": "Bulk Activate",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\"user-id-1\", \"user-id-2\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/bulk-activate", "host": ["{{baseUrl}}"], "path": ["api","v1","users","bulk-activate"] },
+            "description": "Lifts both SUSPENDED and INACTIVE users to ACTIVE in one call."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload",
+      "item": [
+        {
+          "name": "Upload Avatar (current user)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "JPEG, PNG, or WebP — max 5 MB" },
+                { "key": "type", "value": "avatar", "type": "text" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/upload", "host": ["{{baseUrl}}"], "path": ["api","v1","upload"] },
+            "description": "S3 key: {env}/avatars/{userId}/{yyyy}/{mm}/{dd}/{uuid}.{ext}\n\nReturns: { url }"
+          }
+        },
+        {
+          "name": "Upload Org Logo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "JPEG, PNG, or WebP — max 5 MB" },
+                { "key": "type", "value": "org-logo", "type": "text" },
+                { "key": "targetId", "value": "<org-id>", "type": "text", "description": "Organisation ID" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/upload", "host": ["{{baseUrl}}"], "path": ["api","v1","upload"] },
+            "description": "S3 key: {env}/org-logos/{orgId}/{yyyy}/{mm}/{dd}/{uuid}.{ext}\n\nReturns: { url }"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users — Export",
+      "item": [
+        {
+          "name": "Export All Users",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"all\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] }
+          }
+        },
+        {
+          "name": "Export Active Users",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"active\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] }
+          }
+        },
+        {
+          "name": "Export Suspended Users",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"suspended\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] }
+          }
+        },
+        {
+          "name": "Export Dismissed Users",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"dismissed\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] }
+          }
+        },
+        {
+          "name": "Export Selected Users",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"selected\",\n  \"ids\": [\"user-id-1\", \"user-id-2\", \"user-id-3\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] },
+            "description": "ids array is required when type is \"selected\"."
+          }
+        },
+        {
+          "name": "Export with Search + Role Filter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"all\",\n  \"role\": \"EMPLOYEE\",\n  \"search\": \"john\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/export/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","users","export","csv"] }
+          }
+        }
+      ]
+    }
+  ]
+}

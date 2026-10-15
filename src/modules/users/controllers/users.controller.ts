@@ -18,6 +18,7 @@ import type { Response } from 'express';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { ExportUsersDto } from '../dto/export-users.dto';
 import { UserQueryDto } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { ProfileUpdateDto } from '../dto/profile-update.dto';
@@ -118,11 +119,15 @@ export class UsersController {
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @RequirePermissions('users.read')
-  @Get('export/csv')
-  async exportCsv(@Query() query: UserQueryDto, @Res() res: Response): Promise<void> {
+  @Post('export/csv')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Export users as CSV (all / active / suspended / dismissed / selected IDs)',
+  })
+  async exportCsv(@Body() dto: ExportUsersDto, @Res() res: Response): Promise<void> {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
-    res.send(await this.users.toCsv(query));
+    res.send(await this.users.exportCsv(dto));
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)

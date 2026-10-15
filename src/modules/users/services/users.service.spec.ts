@@ -37,6 +37,11 @@ const configMock = {
   get: jest.fn().mockReturnValue('test'),
 } as never;
 
+const storageMock = {
+  uploadImage: jest.fn().mockResolvedValue('https://cdn.example.com/avatar.jpg'),
+  deleteByUrl: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 function prismaMock(overrides: Record<string, jest.Mock> = {}) {
   return {
     client: {
@@ -108,7 +113,17 @@ function build(
     }),
   } as never;
 
-  return { svc: new UsersService(prisma, mailer, config), prisma, mailer, config };
+  const storage = {
+    uploadImage: jest.fn().mockResolvedValue('https://cdn.example.com/avatar.jpg'),
+    deleteByUrl: jest.fn().mockResolvedValue(undefined),
+  } as never;
+  return {
+    svc: new UsersService(prisma, mailer, config, storage),
+    prisma,
+    mailer,
+    config,
+    storage,
+  };
 }
 
 const newUser = { email: 'a@b.c', password: 'Str0ngPass1', firstName: 'A', lastName: 'B' };
@@ -125,6 +140,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null) }),
       mailerMock,
       configMock,
+      storageMock,
     );
     const result = await svc.create(newUser as never, 'admin-1', 'ADMIN' as never);
     expect(result).not.toHaveProperty('passwordHash');
@@ -138,6 +154,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null), create }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await svc.create(newUser as never, 'admin-1', 'ADMIN' as never);
     const passed = create.mock.calls[0][0].data;
@@ -152,6 +169,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow) }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await expect(svc.create(newUser as never, 'admin-1', 'ADMIN' as never)).rejects.toBeInstanceOf(
       EmailAlreadyExistsException,
@@ -159,7 +177,7 @@ describe('UsersService', () => {
   });
 
   it('list returns paginated DTOs without passwordHash and correct meta', async () => {
-    const svc = new UsersService(prismaMock(), mailerMock, configMock);
+    const svc = new UsersService(prismaMock(), mailerMock, configMock, storageMock);
     const page = await svc.list({ page: 1, limit: 20, sortOrder: 'desc' } as never);
     expect(page.meta).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
     expect(page.data[0]).not.toHaveProperty('passwordHash');
@@ -171,6 +189,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(null) }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await expect(svc.findById('nope')).rejects.toBeInstanceOf(UserNotFoundException);
   });
@@ -181,6 +200,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await svc.softDelete('u1', 'actor-1', 'ADMIN' as never);
     expect(update).toHaveBeenCalledWith(
@@ -189,7 +209,7 @@ describe('UsersService', () => {
   });
 
   it('softDelete throws Forbidden when actor tries to delete themselves', async () => {
-    const svc = new UsersService(prismaMock(), mailerMock, configMock);
+    const svc = new UsersService(prismaMock(), mailerMock, configMock, storageMock);
     await expect(svc.softDelete('u1', 'u1', 'ADMIN' as never)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
@@ -201,6 +221,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow), update }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await svc.update(
       'u1',
@@ -221,6 +242,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(superAdminRow) }),
       mailerMock,
       configMock,
+      storageMock,
     );
     await expect(
       svc.update('u1', { firstName: 'X' } as never, 'admin', 'ADMIN' as never),
@@ -232,6 +254,7 @@ describe('UsersService', () => {
       prismaMock({ findFirst: jest.fn().mockResolvedValue(userRow) }),
       mailerMock,
       configMock,
+      storageMock,
     );
     const row = await svc.findByEmailWithHash('a@b.c');
     expect(row?.passwordHash).toBe('HASH');

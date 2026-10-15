@@ -4,6 +4,7 @@ import jwtConfig from './jwt.config';
 import kafkaConfig from './kafka.config';
 import mailerConfig from './mailer.config';
 import redisConfig from './redis.config';
+import s3Config from './s3.config';
 import storageConfig from './storage.config';
 import throttleConfig from './throttle.config';
 
@@ -14,6 +15,7 @@ export {
   kafkaConfig,
   mailerConfig,
   redisConfig,
+  s3Config,
   storageConfig,
   throttleConfig,
 };
@@ -26,6 +28,7 @@ export const configLoaders = [
   kafkaConfig,
   mailerConfig,
   redisConfig,
+  s3Config,
   storageConfig,
   throttleConfig,
 ];

@@ -23,6 +23,11 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum OtpPurpose {
   LOGIN
   PASSWORD_RESET
@@ -37,15 +42,18 @@ model User {
   firstName           String
   lastName            String
   phoneNumber         String?
-  logoUrl             String?
+  avatarUrl           String?
   employeeId          String               @default("")
-  organizationName    String?
   organizationId      String?
+  organization        Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   jurisdiction        String?
+  joiningDate         DateTime?
   // TEXT (not the UserRole enum): Neon already has an implicit composite type
   // named UserRole from the legacy join table, and PG forbids a same-named
   // enum. Values stay enum-compatible (SUPER_ADMIN/ADMIN/EMPLOYEE); input is
   // still validated by @IsEnum(UserRole) at the DTO boundary.
+  // (origin/dev proposed `role UserRole` but ships no migration for the type
+  // change, so it would fail on Neon — keep TEXT until a tested migration lands.)
   role                String               @default("EMPLOYEE")
   status              UserStatus           @default(ACTIVE)
   tokenVersion        Int                  @default(0)
@@ -60,6 +68,24 @@ model User {
   bundleAssignments  UserBundle[]
   managedEmployees   AdminEmployeeAssignment[] @relation("AdminEmployees")
   adminAssignment    AdminEmployeeAssignment? @relation("EmployeeAdmin")
+
+  @@index([deletedAt])
+  @@index([organizationId])
+}
+
+model Organization {
+  id           String    @id @default(cuid())
+  name         String
+  regNumber    String?   @unique
+  logoUrl      String?
+  jurisdiction String?
+  status       OrgStatus @default(ACTIVE)
+  createdBy    String?
+  updatedBy    String?
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  users        User[]
 
   @@index([deletedAt])
 }
