@@ -43,11 +43,12 @@ function recordFailure(state: RequestAuditState, req: Request, res: Response): v
     res.statusCode >= 500
       ? `A request to ${path} failed because ${reason}`
       : `A request to ${path} was rejected because ${reason}`;
-  // The sentence above stays plain English; the machine details (HTTP method,
-  // status code, IP, raw error message) live in newDetail, which free-text
-  // search covers too. record() swallows its own errors; the extra .catch is
-  // belt-and-braces so a fire-and-forget audit can never become an unhandled
-  // rejection.
+  // The row carries the plain-English sentence only — and the user's id when
+  // they were signed in. newDetail is reserved for before/after business
+  // data, so the machine details (method, status code, IP, raw error
+  // message) stay out of the log entirely. record() swallows its own errors;
+  // the extra .catch is belt-and-braces so a fire-and-forget audit can never
+  // become an unhandled rejection.
   void getAuditSink()
     ?.record({
       typeEnum: LogType.SYSTEM,
@@ -55,15 +56,6 @@ function recordFailure(state: RequestAuditState, req: Request, res: Response): v
       actionName: 'Request Failed',
       actionText,
       userId,
-      target: userId ?? req.ip ?? 'unknown',
-      newDetail: {
-        method: req.method,
-        path,
-        status: res.statusCode,
-        ip: req.ip,
-        message: state.failure?.message,
-        errorCode: state.failure?.errorCode,
-      },
     })
     .catch(() => undefined);
 }

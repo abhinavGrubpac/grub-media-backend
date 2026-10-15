@@ -255,7 +255,11 @@ describe('Logs (e2e)', () => {
         .get('/api/v1/logs/SYSTEM?page=1&limit=100')
         .set('Authorization', `Bearer ${adminTokenValue}`)
         .expect(200);
-      return res.body.data as Array<{ actionName: string | null; actionText: string | null }>;
+      return res.body.data as Array<{
+        actionName: string | null;
+        actionText: string | null;
+        newDetail: string | null;
+      }>;
     }
 
     /**
@@ -275,16 +279,17 @@ describe('Logs (e2e)', () => {
       return rows;
     }
 
-    it('records a SYSTEM row for an unauthenticated 401 (method, path, status, message)', async () => {
+    it('records a SYSTEM row for an unauthenticated 401 (sentence only, no diagnostics)', async () => {
       await request(app.getHttpServer()).get('/api/v1/users').expect(401);
 
       const rows = await eventuallyRows((rs) => rs.some((r) => r.actionName === 'Request Failed'));
       const generic = rows.filter((r) => r.actionName === 'Request Failed');
       expect(generic).toHaveLength(1);
-      // Plain-English sentence; IP/method/status live in newDetail.
+      // Plain-English sentence only; newDetail is for before/after data.
       expect(generic[0].actionText).toBe(
         'A request to /api/v1/users was rejected because no valid sign-in was presented',
       );
+      expect(generic[0].newDetail).toBeNull();
     });
 
     it('does NOT double-log a failure that already produced its own row (dedup)', async () => {

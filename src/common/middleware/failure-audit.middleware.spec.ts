@@ -66,12 +66,14 @@ describe('failureAuditMiddleware', () => {
       categoryName: 'Request Failure',
       actionName: 'Request Failed',
       actionText: 'A request to /api/v1/users was rejected because no valid sign-in was presented',
-      target: '9.9.9.9',
-      newDetail: { method: 'GET', path: '/api/v1/users', status: 401, ip: '9.9.9.9' },
+      userId: undefined,
     });
+    // newDetail is reserved for before/after business data — never the
+    // machine diagnostics of the failed request.
+    expect(rows[0].newDetail).toBeUndefined();
   });
 
-  it('carries the actor and the stashed failure detail', () => {
+  it('carries the actor and keeps technical diagnostics out of the row', () => {
     const rows = fire({
       status: 403,
       user: { id: 'u1' },
@@ -83,11 +85,9 @@ describe('failureAuditMiddleware', () => {
       'A request to /api/v1/users was rejected because the signed-in user does not have permission for this',
     );
     expect(rows[0].userId).toBe('u1');
-    expect(rows[0].target).toBe('u1');
-    expect(rows[0].newDetail).toMatchObject({
-      message: 'Forbidden resource',
-      errorCode: 'FORBIDDEN',
-    });
+    // Neither the stashed failure detail nor any request metadata may leak in.
+    expect(rows[0].newDetail).toBeUndefined();
+    expect(rows[0].target).toBeUndefined();
   });
 
   it('audits 5xx responses too', () => {
