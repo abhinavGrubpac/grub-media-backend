@@ -72,6 +72,42 @@ export class EnvironmentVariables {
   @IsInt()
   THROTTLE_LOGIN_LOCK_MAX?: number;
 
+  // KAFKA (Redpanda-compatible broker). All optional: safe local defaults live
+  // canonically in src/config/kafka.config.ts; SASL enables TLS when present.
+  @IsOptional()
+  @IsString()
+  REDPANDA_BROKERS?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_USERNAME?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_PASSWORD?: string;
+
+  // STORAGE (S3 media bucket). All optional: absent credentials switch the
+  // storage layer to local mock mode (see src/config/storage.config.ts).
+  @IsOptional()
+  @IsString()
+  AWS_S3_BUCKET?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_ACCESS_KEY_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_SECRET_ACCESS_KEY?: string;
+
   // SMTP_* are optional; the app starts without them (emails will fail at send time).
   @IsOptional()
   @IsString()
@@ -102,22 +138,11 @@ export class EnvironmentVariables {
   SMTP_SECURE?: string;
 
   // ── S3 / Object Storage ───────────────────────────────────
-  // All optional — app starts without them; avatar upload will return 500 if missing.
+  // All optional — app starts without them; uploads return 500 if missing.
+  // storage.config.ts reads AWS_REGION; s3.config.ts reads AWS_S3_REGION.
   @IsOptional()
   @IsString()
   AWS_S3_REGION?: string;
-
-  @IsOptional()
-  @IsString()
-  AWS_S3_BUCKET?: string;
-
-  @IsOptional()
-  @IsString()
-  AWS_ACCESS_KEY_ID?: string;
-
-  @IsOptional()
-  @IsString()
-  AWS_SECRET_ACCESS_KEY?: string;
 
   @IsOptional()
   @IsString()

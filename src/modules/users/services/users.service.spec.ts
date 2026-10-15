@@ -424,3 +424,26 @@ describe('UsersService.verifyProfileOtp', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('UsersService.verifyPassword (dual-algorithm)', () => {
+  it('accepts argon2 hashes via the primary check', async () => {
+    const { svc } = build({ verify: true });
+    await expect(svc.verifyPassword('argon2-hash', 'x')).resolves.toBe(true);
+  });
+
+  it('falls back to bcrypt for legacy hashes', async () => {
+    const { svc } = build({ verify: false });
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bcrypt = require('bcrypt') as typeof import('bcrypt');
+    const hash = await bcrypt.hash('secret123', 4);
+    await expect(svc.verifyPassword(hash, 'secret123')).resolves.toBe(true);
+    await expect(svc.verifyPassword(hash, 'nope')).resolves.toBe(false);
+    await expect(svc.verifyPassword('not-a-hash', 'x')).resolves.toBe(false);
+  });
+
+  it('flags legacy bcrypt hashes', () => {
+    const { svc } = build();
+    expect(svc.isLegacyHash('$2b$04$abcdefghijklmnopqrstuu')).toBe(true);
+    expect(svc.isLegacyHash('$argon2id$v=19$m=65536')).toBe(false);
+  });
+});

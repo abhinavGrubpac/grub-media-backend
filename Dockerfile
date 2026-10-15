@@ -28,9 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl \
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
-COPY package.json ./
+COPY package.json package-lock.json* pnpm-lock.yaml* ./
+# Prisma CLI is a devDependency (pruned from node_modules above) but the
+# entrypoint needs it for `prisma migrate deploy` on startup.
+RUN npm install --no-save --omit=dev prisma@6.19.3
+COPY docker-entrypoint.sh ./
 USER appuser
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["sh", "./docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]

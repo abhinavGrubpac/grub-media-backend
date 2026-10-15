@@ -1,0 +1,8 @@
+# Local-dev override (auto-loaded by `docker compose` alongside docker-compose.yml).
+# Publishes DB ports to the host so `npm run start:dev` (host process) can reach
+# the compose network services. Production/CI must use
+# `docker compose -f docker-compose.yml ...` to skip this file (no host ports).
+services:
+  postgres:
+    ports:
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
