@@ -306,8 +306,9 @@ export class AuthService {
       data: { userId: user.id, code, purpose: OtpPurpose.LOGIN, expiresAt },
     });
 
-    await this.mailer.sendOtp(user.email, code);
-
+    // The code exists the moment it is stored — audit the request BEFORE the
+    // email send, so an SMTP failure still leaves the trace of the attempt
+    // (the 5xx row from the failure audit covers the delivery error itself).
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'OTP Requested',
@@ -315,6 +316,8 @@ export class AuthService {
       userId: user.id,
       target: logRefOf(user),
     });
+
+    await this.mailer.sendOtp(user.email, code);
   }
 
   async verifyOtpLogin(dto: OtpVerifyDto, ctx: RequestCtx): Promise<AuthResponseDto> {
@@ -403,7 +406,8 @@ export class AuthService {
 
     // Token format: `${id}.${rawSecret}` — id is the O(1) lookup key.
     const token = `${row.id}.${rawSecret}`;
-    await this.mailer.sendPasswordResetLink(user.email, token);
+    // Audit before delivery, same as the OTP request: the token exists the
+    // moment it is stored, so an SMTP failure must not erase the trace.
     await this.logs.record({
       ...AUTH_LOG,
       actionName: 'Password Reset',
@@ -411,6 +415,7 @@ export class AuthService {
       userId: user.id,
       target: logRefOf(user),
     });
+    await this.mailer.sendPasswordResetLink(user.email, token);
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {

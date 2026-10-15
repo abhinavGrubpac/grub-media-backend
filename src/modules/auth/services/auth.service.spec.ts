@@ -269,6 +269,22 @@ describe('AuthService.requestOtpLogin', () => {
     );
     expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
   });
+
+  it('still records the OTP Requested row when email delivery fails', async () => {
+    const { svc, mailer, logs } = build({});
+    (mailer as never as { sendOtp: jest.Mock }).sendOtp.mockRejectedValue(new Error('SMTP down'));
+
+    await expect(svc.requestOtpLogin({ email: 'a@b.c' }, { ip: '1.1.1.1' })).rejects.toThrow();
+
+    // The code was created before the send — the attempt must be audited even
+    // though delivery threw (the 5xx failure row covers the delivery error).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('OTP Requested');
+    expect(arg.userId).toBe('u1');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -367,6 +383,22 @@ describe('AuthService.forgotPassword', () => {
     expect(
       (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
     ).not.toHaveBeenCalled();
+  });
+
+  it('still records the request row when the reset email fails', async () => {
+    const { svc, mailer, logs } = build({});
+    (
+      mailer as never as { sendPasswordResetLink: jest.Mock }
+    ).sendPasswordResetLink.mockRejectedValue(new Error('SMTP down'));
+
+    await expect(svc.forgotPassword({ email: 'a@b.c' })).rejects.toThrow();
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.userId).toBe('u1');
   });
 });
 
