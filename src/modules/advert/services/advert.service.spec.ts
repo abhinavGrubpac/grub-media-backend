@@ -556,6 +556,42 @@ describe('AdvertService.transitionFromUpstream', () => {
     );
   });
 
+  it('maps upstream COMPLETED/CANCELLED aliases to EXPIRED', async () => {
+    const { service, advert } = makeDeps();
+    advert.findUnique
+      .mockResolvedValueOnce({ ...advertRow, status: 'LIVE' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'EXPIRED' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'LIVE' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'EXPIRED' });
+
+    await service.transitionFromUpstream('a1', { status: 'COMPLETED' });
+    expect(advert.updateMany).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'EXPIRED' },
+    });
+    await service.transitionFromUpstream('a1', { status: 'CANCELLED' });
+    expect(advert.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'EXPIRED' },
+    });
+  });
+
+  it('blocks SCHEDULED going LIVE before its start date', async () => {
+    const { service, advert } = makeDeps();
+    advert.findUnique.mockResolvedValue({
+      ...advertRow,
+      status: 'SCHEDULED',
+      startDate: new Date('2026-12-01T00:00:00Z'),
+    });
+
+    await expect(
+      service.transitionFromUpstream('a1', {
+        status: 'LIVE',
+        occurred_at: '2026-10-01T00:00:00Z',
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it('applies legal upstream transitions with the event', async () => {
     const { service, advert, outbox } = makeDeps();
     advert.findUnique
@@ -624,6 +660,37 @@ describe('AdvertService.searchByImage', () => {
         data: expect.objectContaining({ userId: 'manager1', resultCount: 2 }),
       }),
     );
+  });
+});
+
+describe('AdvertService.searchByHash', () => {
+  it('requires image_hash or advert_id', async () => {
+    const { service } = makeDeps();
+    await expect(service.searchByHash({})).rejects.toThrow(BadRequestException);
+  });
+
+  it('resolves advert_id to its stored hash and ranks nearest-first', async () => {
+    const { service, advert } = makeDeps();
+    advert.findUnique.mockResolvedValue({ ...advertRow, id: 'ref', imageHash: '0000000000000000' });
+    advert.findMany.mockResolvedValue([
+      { ...advertRow, id: 'near', imageHash: '0000000000000001' },
+      { ...advertRow, id: 'exact', imageHash: '0000000000000000' },
+      { ...advertRow, id: 'unhashed', imageHash: null },
+    ]);
+
+    const result = await service.searchByHash({ advert_id: 'ref', max_distance: 10 });
+
+    expect(result.items.map((row) => (row as { id: string }).id)).toEqual(['exact', 'near']);
+    expect(result.search.query_hash).toBe('0000000000000000');
+  });
+
+  it('rejects unknown reference adverts and hash-less rows', async () => {
+    const { service, advert } = makeDeps();
+    advert.findUnique.mockResolvedValue(null);
+    await expect(service.searchByHash({ advert_id: 'missing' })).rejects.toThrow(NotFoundException);
+
+    advert.findUnique.mockResolvedValue({ ...advertRow, imageHash: null });
+    await expect(service.searchByHash({ advert_id: 'ref' })).rejects.toThrow(BadRequestException);
   });
 });
 

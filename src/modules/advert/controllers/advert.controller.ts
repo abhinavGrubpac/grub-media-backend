@@ -21,6 +21,7 @@ import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { AdvertExportQueryDto } from '../dto/advert-export-query.dto';
+import { AdvertImageSearchQueryDto } from '../dto/advert-image-search-query.dto';
 import { AdvertListQueryDto } from '../dto/advert-list-query.dto';
 import { AdvertBrandGroupDto, AdvertResponseDto } from '../dto/advert-response.dto';
 import { AdvertSearchQueryDto } from '../dto/advert-search-query.dto';
@@ -56,6 +57,20 @@ export class AdvertController {
   @Get('searches/recent')
   recentSearches(@CurrentUser() user: AuthUser): Promise<RecentAdvertSearch[]> {
     return this.advertService.listRecentSearches(user.id);
+  }
+
+  /**
+   * Upstream-compatible hash search: ?image_hash= or ?advert_id= with optional
+   * max_distance/status/brand_id/limit. Same ranking as the file-upload search.
+   */
+  // Future permission: 'advert:geo_search'.
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Get('search/by-image')
+  searchByHash(
+    @Query() query: AdvertImageSearchQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<AdvertImageSearchResult> {
+    return this.advertService.searchByHash({ ...query, actor_id: user.id });
   }
 
   /**

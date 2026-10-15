@@ -24,6 +24,7 @@ import {
   availableGovtActions,
   isAdvertStatus,
   isSchedulableVersionStatus,
+  normalizeUpstreamAdvertStatus,
 } from '../validators';
 import {
   IMAGE_SEARCH_CANDIDATE_LIMIT,
@@ -570,6 +571,89 @@ export class AdvertService {
     return { items: rows, meta: standardMeta(total, page, limit, rows.length), search: echo };
   }
 
+  /**
+   * Upstream-compatible hash search: rank by Hamming distance from an explicit
+   * image_hash (or the stored hash of advert_id). Same in-memory ranking as
+   * the file-upload search; status/brand narrow the candidate pool first.
+   */
+  async searchByHash(opts: {
+    image_hash?: string;
+    advert_id?: string;
+    max_distance?: number;
+    status?: string;
+    brand_id?: string;
+    page?: number;
+    limit?: number;
+    actor_id?: string;
+  }): Promise<AdvertImageSearchResult> {
+    let reference = opts.image_hash;
+    if (opts.advert_id) {
+      const ref = await this.prisma.client.advert.findUnique({ where: { id: opts.advert_id } });
+      if (!ref) throw new NotFoundException('Reference advert not found');
+      if (!ref.imageHash) {
+        throw new BadRequestException('Reference advert has no image_hash to search by.');
+      }
+      reference = ref.imageHash;
+    }
+    if (!reference) throw new BadRequestException('Either image_hash or advert_id is required.');
+    assertImageHash(reference);
+    if (opts.status !== undefined && !isAdvertStatus(opts.status)) {
+      throw new BadRequestException('Invalid advert status');
+    }
+    const maxDistance = Math.min(
+      Math.max(opts.max_distance ?? IMAGE_SEARCH_DEFAULT_MAX_DISTANCE, 0),
+      IMAGE_SEARCH_MAX_DISTANCE,
+    );
+    const page = opts.page ?? 1;
+    const limit = Math.min(opts.limit ?? 20, 100);
+    const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
+
+    const candidates = await this.prisma.client.advert.findMany({
+      where: {
+        ...(opts.status ? { status: opts.status as AdvertStatus } : {}),
+        ...(opts.brand_id ? { version: { creative: { brandId: opts.brand_id } } } : {}),
+      },
+      take: IMAGE_SEARCH_CANDIDATE_LIMIT,
+      orderBy: { createdAt: 'desc' },
+      include: { version: { include: { creative: { include: { brand: true } } } } },
+    });
+    const locations = await this.fetchLocationWkt(candidates.map((advert) => advert.id));
+    const ranked = candidates
+      .filter(
+        (advert): advert is typeof advert & { imageHash: string } =>
+          typeof advert.imageHash === 'string' &&
+          advert.imageHash.length === reference.length &&
+          advert.imageHash.length > 0,
+      )
+      .map((advert) => ({
+        advert,
+        distance: hammingDistanceHex(reference as string, advert.imageHash),
+      }))
+      .filter((entry) => entry.distance <= maxDistance)
+      .sort((a, b) => a.distance - b.distance);
+    const total = ranked.length;
+    const rows = ranked.slice(skip, skip + take).map((entry) =>
+      this.toResponse(entry.advert, undefined, {
+        location: locations.get(entry.advert.id) ?? null,
+        hashDistance: entry.distance,
+      }),
+    );
+    const echo: AdvertSearchEcho = {
+      lat: null,
+      lng: null,
+      radius_km: null,
+      industry: null,
+      brand_id: opts.brand_id ?? null,
+      start: null,
+      end: null,
+      sort: 'distance_asc',
+      query_hash: reference,
+      max_distance: maxDistance,
+    };
+    await this.recordSearch(opts.actor_id, echo, total, rows);
+    return { items: rows, meta: standardMeta(total, page, limit, rows.length), search: echo };
+  }
+
   private async geoSearch(
     filters: {
       lat?: number;
@@ -954,17 +1038,28 @@ export class AdvertService {
       current = await this.prisma.client.advert.findUnique({ where: { upstreamAdvertId: id } });
     }
     if (!current) throw new NotFoundException(`Advert with ID ${id} not found`);
-    if (!isAdvertStatus(input.status)) {
+    // Upstream portal uses COMPLETED/CANCELLED where govt uses EXPIRED.
+    const normalized = normalizeUpstreamAdvertStatus(input.status);
+    if (!isAdvertStatus(normalized)) {
       throw new BadRequestException(
         `status must be one of: SCHEDULED, LIVE, PAUSED, EXPIRED, REVOKED`,
       );
     }
     // REVOKED is government-origin only — upstream attempts are conflicts (UPSTREAM_INTEGRATION_API.md §6.2).
-    if ((input.status as AdvertStatus) === AdvertStatus.REVOKED) {
+    if ((normalized as AdvertStatus) === AdvertStatus.REVOKED) {
       throw new ConflictException('REVOKED is government-only; upstream cannot revoke adverts');
     }
-    assertAdvertTransition(current.status, input.status, 'upstream');
-    const nextStatus: AdvertStatus = input.status;
+    // WORKFLOWS.md §2.2: SCHEDULED goes LIVE only once the start date is reached.
+    if (current.status === AdvertStatus.SCHEDULED && normalized === AdvertStatus.LIVE) {
+      const now = input.occurred_at ? new Date(input.occurred_at) : new Date();
+      if (!Number.isNaN(now.getTime()) && current.startDate > now) {
+        throw new ConflictException(
+          `Advert is scheduled to go live on ${current.startDate.toISOString()}; it cannot go LIVE before its start date`,
+        );
+      }
+    }
+    assertAdvertTransition(current.status, normalized, 'upstream');
+    const nextStatus: AdvertStatus = normalized as AdvertStatus;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.advert.updateMany({

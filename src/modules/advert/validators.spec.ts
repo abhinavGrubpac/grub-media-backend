@@ -7,6 +7,7 @@ import {
   assertSchedulableVersionStatus,
   availableGovtActions,
   isSchedulableVersionStatus,
+  normalizeUpstreamAdvertStatus,
   validateAdvertTransition,
 } from './validators';
 
@@ -113,6 +114,19 @@ describe('assertCoordinates', () => {
     expect(() => assertCoordinates(95, 77)).toThrow(BadRequestException);
     expect(() => assertCoordinates(12, 200)).toThrow(BadRequestException);
     expect(() => assertCoordinates(Number.NaN, 77)).toThrow(BadRequestException);
+  });
+});
+
+describe('normalizeUpstreamAdvertStatus', () => {
+  it('maps upstream terminal aliases to EXPIRED', () => {
+    expect(normalizeUpstreamAdvertStatus('COMPLETED')).toBe('EXPIRED');
+    expect(normalizeUpstreamAdvertStatus('CANCELLED')).toBe('EXPIRED');
+  });
+
+  it('passes government statuses through untouched', () => {
+    for (const status of ['SCHEDULED', 'LIVE', 'PAUSED', 'EXPIRED', 'REVOKED']) {
+      expect(normalizeUpstreamAdvertStatus(status)).toBe(status);
+    }
   });
 });
 

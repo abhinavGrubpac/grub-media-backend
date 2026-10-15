@@ -1,4 +1,19 @@
 services:
+  # One-shot migration gate: applies pending Prisma migrations, then exits.
+  # `app` waits for it, so the API never boots against a stale schema.
+  migrate:
+    build:
+      context: .
+      target: runtime
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-grub}:${POSTGRES_PASSWORD:-grub}@postgres:5432/${POSTGRES_DB:-grubmedia}?schema=public}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+
   app:
     build:
       context: .
@@ -6,15 +21,16 @@ services:
     env_file:
       - .env
     environment:
-      # Override hosts to the compose network service names.
-      DATABASE_URL: postgresql://grub:grub@postgres:5432/grubmedia?schema=public
+      # Compose-network defaults. In production set DATABASE_URL (and the
+      # POSTGRES_* vars below) from secrets — never rely on these fallbacks.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-grub}:${POSTGRES_PASSWORD:-grub}@postgres:5432/${POSTGRES_DB:-grubmedia}?schema=public}
       REDIS_HOST: redis
       REDIS_PORT: '6379'
     ports:
-      - '3000:3000'
+      - '${APP_PORT:-3000}:3000'
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -22,23 +38,25 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: grub
-      POSTGRES_PASSWORD: grub
-      POSTGRES_DB: grubmedia
-    ports:
-      - '5432:5432'
+      # WARNING: `grub` defaults are for local dev only. Production MUST set
+      # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB from secrets.
+      POSTGRES_USER: ${POSTGRES_USER:-grub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grub}
+      POSTGRES_DB: ${POSTGRES_DB:-grubmedia}
+    # No host port published: the database is reachable only inside the
+    # compose network. For local debugging add a ports override file.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U grub -d grubmedia']
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-grub} -d $${POSTGRES_DB:-grubmedia}']
       interval: 10s
       timeout: 3s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports:
-      - '6379:6379'
+    # No host port published (see postgres note above). Set REDIS_PASSWORD in
+    # .env for production; the app reads it via REDIS_PASSWORD (empty = no auth).
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s

@@ -657,11 +657,14 @@ export class CreativeService {
     },
     actorId: string,
   ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
-    this.storage.assertFileUrlAllowed(dto.s3_key);
+    // Normalize once: bare keys become full bucket URLs (directly renderable),
+    // foreign hosts and malformed keys fail here instead of downstream.
+    const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
+    this.storage.assertFileUrlAllowed(fileUrl);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
         dto.creative_id,
-        { media_url: dto.s3_key, media_type: dto.media_type },
+        { media_url: fileUrl, media_type: dto.media_type },
         actorId,
       );
       return version;
@@ -673,7 +676,81 @@ export class CreativeService {
       {
         brand_id: dto.brand_id,
         creative_name: dto.name,
-        initial_version: { media_url: dto.s3_key, media_type: dto.media_type },
+        initial_version: { media_url: fileUrl, media_type: dto.media_type },
+      },
+      actorId,
+    );
+  }
+
+  /**
+   * Upstream-compatible single-call upload: multipart file + fields, streamed
+   * to S3 and bound to a thread in one request. With creative_id it appends a
+   * version; otherwise brand_id + name start a new thread with v1.
+   */
+  async uploadMedia(
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    data: {
+      creative_id?: string;
+      brand_id?: string;
+      name?: string;
+      external_ref_id?: string;
+      media_type?: string;
+      notes?: string;
+    },
+    actorId: string,
+  ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
+    if (!file?.buffer?.length) throw new BadRequestException('file is required');
+    const mediaType = data.media_type || 'Image';
+    assertValidMediaType(mediaType);
+    const ext = file.mimetype === 'image/jpeg' ? 'jpg' : 'png';
+    const keyName = data.name?.trim() || file.originalname || 'upload';
+    if (!data.creative_id && (!data.brand_id?.trim() || !keyName.trim())) {
+      throw new BadRequestException('Provide creative_id or brand_id + name');
+    }
+    if (data.creative_id) {
+      const creative = await this.prisma.client.creative.findUnique({
+        where: { id: data.creative_id },
+        include: { brand: true },
+      });
+      if (!creative) throw new NotFoundException(`Creative with ID ${data.creative_id} not found`);
+      assertBrandActive(creative.brand.isActive, creative.brand.id);
+    } else {
+      const brand = await this.prisma.client.brand.findUnique({
+        where: { id: data.brand_id as string },
+      });
+      if (!brand) throw new NotFoundException(`Brand with ID ${data.brand_id} not found`);
+      assertBrandActive(brand.isActive, brand.id);
+    }
+    await this.outbox.emit({
+      eventType: 'creative.upload_intent',
+      entityType: 'Creative',
+      entityId: 'pending',
+      actorId,
+      key: data.creative_id ?? data.brand_id ?? 'unknown',
+      payload: {
+        creative_id: data.creative_id ?? null,
+        brand_id: data.brand_id ?? null,
+        name: file.originalname,
+        media_type: mediaType,
+        bytes: file.size,
+      },
+    });
+    const s3Key = this.storage.buildKey('agency', keyName, ext);
+    const { fileUrl } = await this.storage.putObject(s3Key, file.buffer, file.mimetype);
+    if (data.creative_id) {
+      const { version } = await this.uploadVersion(
+        data.creative_id,
+        { media_url: fileUrl, media_type: mediaType, notes: data.notes },
+        actorId,
+      );
+      return version;
+    }
+    return this.createCreative(
+      {
+        brand_id: data.brand_id as string,
+        creative_name: (data.name as string).trim(),
+        external_ref_id: data.external_ref_id,
+        initial_version: { media_url: fileUrl, media_type: mediaType, notes: data.notes },
       },
       actorId,
     );
@@ -803,6 +880,65 @@ export class CreativeService {
     return {
       creative: this.toCreativeResponse(creative, actorNames),
       versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
+    };
+  }
+
+  /**
+   * Filter-modal support data (single call, view roles only so every
+   * reviewer role can use it without extra permissions):
+   * - `locations`: distinct hoarding addresses across all adverts.
+   * - `actioners`: distinct reviewer display names from review history.
+   * - `geo`: creativeId -> addresses, so the UI can match rows to a region.
+   */
+  async filterOptions(): Promise<{
+    locations: string[];
+    actioners: string[];
+    geo: Record<string, string[]>;
+  }> {
+    const [adverts, actorRows, users] = await Promise.all([
+      this.prisma.client.advert.findMany({
+        select: { addressText: true, version: { select: { creativeId: true } } },
+      }),
+      this.prisma.client.reviewAction.findMany({
+        select: { actorId: true },
+        distinct: ['actorId'],
+      }),
+      this.prisma.client.user.findMany({
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    ]);
+
+    const geo: Record<string, string[]> = {};
+    const locationSet = new Set<string>();
+    for (const ad of adverts) {
+      const addr = ad.addressText?.trim();
+      const creativeId = ad.version?.creativeId;
+      if (!addr || !creativeId) continue;
+      locationSet.add(addr);
+      if (!geo[creativeId]) geo[creativeId] = [];
+      if (!geo[creativeId].includes(addr)) geo[creativeId].push(addr);
+    }
+
+    const namesById = new Map(
+      users.map((u) => [u.id, `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim()]),
+    );
+    const actionerSet = new Set<string>();
+    for (const row of actorRows) {
+      const raw = row.actorId?.trim();
+      if (!raw) continue;
+      const named = namesById.get(raw);
+      if (named) {
+        actionerSet.add(named);
+      } else if (!/^[0-9a-f-]{36}$/i.test(raw)) {
+        // Human-readable non-UUID actor tags pass through.
+        actionerSet.add(raw);
+      }
+    }
+
+    return {
+      locations: Array.from(locationSet).sort((a, b) => a.localeCompare(b)),
+      actioners: Array.from(actionerSet).sort((a, b) => a.localeCompare(b)),
+      geo,
     };
   }
 

@@ -180,6 +180,8 @@ model Brand {
   brandName        String      @unique @map("brand_name")
   industryCategory String?     @map("industry_category")
   contactEmail     String?     @map("contact_email")
+  logoUrl          String?     @map("logo_url")
+  address          String?
   isActive         Boolean     @default(true) @map("is_active")
   autoApprove      Boolean     @default(false) @map("auto_approve")
   isFlagged        Boolean     @default(false) @map("is_flagged")
@@ -192,6 +194,10 @@ model Brand {
   creatives        Creative[]
 
   @@index([upstreamAgencyId])
+  @@index([isFlagged])
+  @@index([isActive])
+  @@index([autoApprove])
+  @@index([industryCategory])
 }
 
 model AgencyRef {
@@ -287,6 +293,8 @@ model ReferenceDoc {
   id            String             @id @default(cuid())
   title         String
   fileUrl       String             @map("file_url")
+  thumbnailUrl  String?            @map("thumbnail_url")
+  fileSizeBytes Int?               @map("file_size_bytes")
   category      String
   description   String?
   publishedOn   DateTime?          @map("published_on")
@@ -297,6 +305,8 @@ model ReferenceDoc {
   creativeLinks CreativeReference[]
 
   @@index([category])
+  @@index([title])
+  @@index([isArchived, archivedOn])
 }
 
 model CreativeReference {

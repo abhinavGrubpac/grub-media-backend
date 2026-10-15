@@ -1,7 +1,14 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  RequestMethod,
+} from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ReviewStatus } from '@prisma/client';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { CreativeService } from './review.service';
+import { ReviewController } from '../controllers/review.controller';
 import { normalizeCreativeStatusFilter, CREATIVE_STATUS_FILTERS } from '../transitions';
 
 const brandRow = {
@@ -58,7 +65,10 @@ function makeDeps() {
     create: jest.fn(),
     update: jest.fn(),
   };
-  const reviewAction = { create: jest.fn().mockResolvedValue(undefined) };
+  const reviewAction = {
+    create: jest.fn().mockResolvedValue(undefined),
+    findMany: jest.fn().mockResolvedValue([]),
+  };
   const brand = { findUnique: jest.fn().mockResolvedValue(null) };
   const agencyRef = { findUnique: jest.fn().mockResolvedValue(null) };
   const advert = {
@@ -91,9 +101,14 @@ function makeDeps() {
     scheduleVersion: jest.fn().mockResolvedValue({ id: 'a1', status: 'SCHEDULED' }),
   };
   const storage = {
-    buildKey: jest.fn().mockReturnValue('creatives/1-a.png'),
+    buildKey: jest.fn().mockImplementation((prefix: string) => `${prefix}/1-a.png`),
     presignedUploadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/uploads/x?mock=1'),
     assertFileUrlAllowed: jest.fn(),
+    resolveCreativeFileUrl: jest.fn((s: string) => s),
+    putObject: jest.fn().mockResolvedValue({
+      fileUrl: 'https://mock-storage.local/uploads/agency/1-a.png?mock=1',
+      key: 'agency/1-a.png',
+    }),
   };
   const service = new CreativeService(
     prisma as never,
@@ -920,5 +935,132 @@ describe('CreativeService.finalizeUpload', () => {
       }),
     );
     expect(result.id).toBe('v2');
+  });
+
+  it('stores the normalized bucket URL returned by the storage layer', async () => {
+    const { service, creative, creativeVersion, storage } = makeDeps();
+    (storage.resolveCreativeFileUrl as jest.Mock).mockReturnValue(
+      'https://grub-media.s3.ap-south-1.amazonaws.com/creatives/2-b.png',
+    );
+    creative.findUnique.mockResolvedValue({ ...creativeRow, brand: brandRow });
+    creativeVersion.findFirst.mockResolvedValue(null);
+    creativeVersion.create.mockResolvedValue({ ...versionRow, id: 'v2', versionNumber: 2 });
+    creative.update.mockResolvedValue(creativeRow);
+
+    await service.finalizeUpload(
+      { creative_id: 'c1', s3_key: 'creatives/2-b.png', media_type: 'Image' },
+      'u1',
+    );
+
+    expect(creativeVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mediaUrl: 'https://grub-media.s3.ap-south-1.amazonaws.com/creatives/2-b.png',
+        }),
+      }),
+    );
+  });
+});
+
+describe('CreativeService.uploadMedia', () => {
+  const png = {
+    buffer: Buffer.from('png-bytes'),
+    originalname: 'a.png',
+    mimetype: 'image/png',
+    size: 9,
+  };
+
+  it('requires a file and a target', async () => {
+    const { service } = makeDeps();
+    await expect(
+      service.uploadMedia(
+        { buffer: Buffer.alloc(0), originalname: 'a.png', mimetype: 'image/png', size: 0 },
+        { brand_id: 'b1', name: 'Ad' },
+        'u1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+    await expect(service.uploadMedia(png, {}, 'u1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('streams to S3 then creates a new thread with v1', async () => {
+    const { service, brand, creative, creativeVersion, storage } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockResolvedValue(creativeRow);
+    creativeVersion.create.mockResolvedValue(versionRow);
+    creative.update.mockResolvedValue(creativeRow);
+
+    await service.uploadMedia(png, { brand_id: 'brand1', name: 'Festive Ad' }, 'u1');
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('agency/'),
+      png.buffer,
+      'image/png',
+    );
+    expect(creative.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ creativeName: 'Festive Ad' }) }),
+    );
+  });
+});
+
+describe('filterOptions', () => {
+  it('returns distinct locations, actioner names, and per-creative geo', async () => {
+    const { service, client } = makeDeps();
+    client.advert.findMany.mockResolvedValue([
+      { addressText: ' MG Road ', version: { creativeId: 'c1' } },
+      { addressText: 'MG Road', version: { creativeId: 'c1' } },
+      { addressText: 'Brigade Road', version: { creativeId: 'c2' } },
+      { addressText: null, version: { creativeId: 'c2' } },
+      { addressText: 'No Creative', version: null },
+    ]);
+    client.reviewAction.findMany.mockResolvedValue([
+      { actorId: 'u1' },
+      { actorId: '  ' },
+      { actorId: 'agency-operator' },
+    ]);
+    client.user.findMany.mockResolvedValue([{ id: 'u1', firstName: 'Ishani', lastName: 'Reddy' }]);
+
+    const result = await service.filterOptions();
+
+    expect(result.locations).toEqual(['Brigade Road', 'MG Road']);
+    expect(result.actioners).toEqual(['agency-operator', 'Ishani Reddy']);
+    expect(result.geo).toEqual({ c1: ['MG Road'], c2: ['Brigade Road'] });
+    expect(client.advert.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ addressText: true }) }),
+    );
+  });
+
+  it('returns empty collections when there is no data', async () => {
+    const { service } = makeDeps();
+    const result = await service.filterOptions();
+    expect(result).toEqual({ locations: [], actioners: [], geo: {} });
+  });
+});
+
+describe('ReviewController route order', () => {
+  it('declares static GET routes before parameterized GET routes', () => {
+    const getMetadata = (
+      Reflect as unknown as {
+        getMetadata: (key: string, target: object) => unknown;
+      }
+    ).getMetadata;
+    const proto = ReviewController.prototype;
+    const getRoutes = Object.getOwnPropertyNames(proto)
+      .filter((name) => {
+        const fn = (proto as unknown as Record<string, unknown>)[name];
+        if (typeof fn !== 'function') return false;
+        return getMetadata(METHOD_METADATA, fn) === RequestMethod.GET;
+      })
+      .map((name) => {
+        const fn = (proto as unknown as Record<string, unknown>)[name] as object;
+        const path = getMetadata(PATH_METADATA, fn);
+        return Array.isArray(path) ? path.join(',') : String(path);
+      });
+
+    expect(getRoutes).toContain('filter-options');
+    expect(getRoutes).toContain('export');
+    const staticIdx = Math.max(getRoutes.indexOf('filter-options'), getRoutes.indexOf('export'));
+    const paramIdx = getRoutes.findIndex((p) => p.includes(':'));
+    expect(paramIdx).toBeGreaterThan(-1);
+    expect(staticIdx).toBeLessThan(paramIdx);
   });
 });

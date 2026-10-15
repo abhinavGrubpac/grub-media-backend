@@ -45,6 +45,18 @@ export function isAdvertStatus(value: string): value is AdvertStatusType {
   return (ADVERT_STATUSES as readonly string[]).includes(value);
 }
 
+/**
+ * Upstream (agency portal) status aliases. The upstream enum uses
+ * COMPLETED/CANCELLED where the government portal uses EXPIRED:
+ * a finished flight maps to EXPIRED (neutral end-of-window), never to
+ * REVOKED (compliance weight). Unknown values pass through so the caller
+ * still gets the standard "must be one of" validation error.
+ */
+export function normalizeUpstreamAdvertStatus(value: string): string {
+  if (value === 'COMPLETED' || value === 'CANCELLED') return AdvertStatus.EXPIRED;
+  return value;
+}
+
 export function validateAdvertTransition(
   from: string,
   to: string,
