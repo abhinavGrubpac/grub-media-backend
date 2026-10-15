@@ -15,6 +15,9 @@ import { Public } from '../decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
+import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
+import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 
 function ctxOf(req: Request): { ip?: string; userAgent?: string } {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
@@ -110,5 +113,33 @@ export class AuthController {
       target: user.id,
     });
     return profile;
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/otp-request')
+  requestProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpRequestDto,
+  ): Promise<null> {
+    return this.auth.requestProfileOtp(user.id, dto).then(() => null);
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/otp-verify')
+  verifyProfileOtp(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileOtpVerifyDto,
+  ): Promise<UserResponseDto> {
+    return this.auth.verifyProfileOtp(user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @Post('profile/password')
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<null> {
+    await this.auth.changePassword(user.id, dto);
+    return null;
   }
 }
