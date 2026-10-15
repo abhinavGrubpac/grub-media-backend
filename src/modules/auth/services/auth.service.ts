@@ -173,6 +173,10 @@ export class AuthService {
     if (!user) throw new InvalidCredentialsException();
     if (dto.type === 'email' && !/^\S+@\S+\.\S+$/.test(dto.value))
       throw new BadRequestException('Invalid email');
+    // The DTO's per-type @ValidateIf conditions cancel each other out for
+    // phone values, so enforce the same rule here where it can't be skipped.
+    if (dto.type === 'phone' && !/^\+[1-9]\d{7,14}$/.test(dto.value))
+      throw new BadRequestException('Invalid phone number');
     const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
     const code = String(Math.floor(1000 + Math.random() * 9000));
     await this.prisma.client.otpCode.create({
