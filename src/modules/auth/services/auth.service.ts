@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpPurpose, UserStatus, LogType } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
@@ -49,6 +55,7 @@ const DEV_OTP_BYPASS = '1234';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     private readonly users: UsersService,
     private readonly tokens: TokenService,

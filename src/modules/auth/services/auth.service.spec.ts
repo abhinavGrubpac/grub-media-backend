@@ -88,7 +88,6 @@ function build(opts: {
     },
     user: {
       update: jest.fn().mockResolvedValue({}),
-      findFirst: jest.fn().mockResolvedValue(null),
     },
   } as never;
 

@@ -2,20 +2,18 @@ import { UsersController } from './users.controller';
 import { AuthUser } from '../../auth/decorators/current-user.decorator';
 
 const actor: AuthUser = { id: 'admin-1', role: 'ADMIN' as never, tokenVersion: 0 };
-const superActor: AuthUser = { id: 'sa-1', role: 'SUPER_ADMIN' as never, tokenVersion: 0 };
 
 /** Read endpoints also write an audit row — a no-op LogsService double. */
 const logs = { record: jest.fn().mockResolvedValue(undefined) } as never;
 
 describe('UsersController (thin delegation)', () => {
-  it('create delegates to the service with actor id and role', async () => {
+  it('create delegates to the service with the actor id', async () => {
     const service = { create: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
     const ctrl = new UsersController(service, logs);
     await ctrl.create({ email: 'a@b.c' } as never, actor);
     expect((service as { create: jest.Mock }).create).toHaveBeenCalledWith(
       { email: 'a@b.c' },
       'admin-1',
-      'ADMIN',
     );
   });
 
@@ -32,11 +30,7 @@ describe('UsersController (thin delegation)', () => {
     const ctrl = new UsersController(service, logs);
     const result = await ctrl.remove('u1', actor);
     expect(result).toBeNull();
-    expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith(
-      'u1',
-      'admin-1',
-      'ADMIN',
-    );
+    expect((service as { softDelete: jest.Mock }).softDelete).toHaveBeenCalledWith('u1', 'admin-1');
   });
 
   it('findOne delegates to findById', async () => {
@@ -46,7 +40,7 @@ describe('UsersController (thin delegation)', () => {
     expect((service as { findById: jest.Mock }).findById).toHaveBeenCalledWith('u1');
   });
 
-  it('update forwards id, dto, actor id and role', async () => {
+  it('update forwards id, dto and actor id', async () => {
     const service = { update: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
     const ctrl = new UsersController(service, logs);
     await ctrl.update('u1', { firstName: 'X' } as never, actor);
@@ -54,40 +48,6 @@ describe('UsersController (thin delegation)', () => {
       'u1',
       { firstName: 'X' },
       'admin-1',
-      'ADMIN',
-    );
-  });
-
-  it('suspend forwards id, actor id and role', async () => {
-    const service = { suspend: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
-    await ctrl.suspend('u1', actor);
-    expect((service as { suspend: jest.Mock }).suspend).toHaveBeenCalledWith(
-      'u1',
-      'admin-1',
-      'ADMIN',
-    );
-  });
-
-  it('activate forwards id, actor id and role', async () => {
-    const service = { activate: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
-    await ctrl.activate('u1', actor);
-    expect((service as { activate: jest.Mock }).activate).toHaveBeenCalledWith(
-      'u1',
-      'admin-1',
-      'ADMIN',
-    );
-  });
-
-  it('dismiss forwards id, actor id and role', async () => {
-    const service = { dismiss: jest.fn().mockResolvedValue({ id: 'u1' }) } as never;
-    const ctrl = new UsersController(service);
-    await ctrl.dismiss('u1', superActor);
-    expect((service as { dismiss: jest.Mock }).dismiss).toHaveBeenCalledWith(
-      'u1',
-      'sa-1',
-      'SUPER_ADMIN',
     );
   });
 });
