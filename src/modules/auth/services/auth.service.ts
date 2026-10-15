@@ -282,7 +282,15 @@ export class AuthService {
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user) {
       // No enumeration: unknown emails receive the same silent 200 as known
-      // ones, so an attacker can't probe which addresses have accounts.
+      // ones, so an attacker can't probe which addresses have accounts. The
+      // LOG still records the attempt (admins only): a request aimed at an
+      // unregistered address is a probing signal worth keeping — the row
+      // simply has no userId, because no account matches it.
+      await this.logs.record({
+        ...AUTH_LOG,
+        actionName: 'OTP Requested',
+        actionText: `A one-time sign-in code was requested for ${dto.email} from ${ctx.ip ?? 'an unknown location'}, but no account uses that address`,
+      });
       return;
     }
     if (user.status !== UserStatus.ACTIVE) {
@@ -380,7 +388,14 @@ export class AuthService {
     const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
     if (!user) {
       // No enumeration: unknown emails receive the same silent 200 as known
-      // ones, so an attacker can't probe which addresses have accounts.
+      // ones, so an attacker can't probe which addresses have accounts. The
+      // admin-only log still records the probe — with no userId, since no
+      // account matches the address.
+      await this.logs.record({
+        ...AUTH_LOG,
+        actionName: 'Password Reset',
+        actionText: `A password reset was requested for ${dto.email}, but no account uses that address`,
+      });
       return;
     }
     if (user.status !== UserStatus.ACTIVE) {

@@ -249,9 +249,17 @@ describe('AuthService.requestOtpLogin', () => {
   });
 
   it('resolves silently without sending an OTP when the email is not registered (no enumeration)', async () => {
-    const { svc, mailer } = build({ prismaUser: null });
+    const { svc, mailer, logs } = build({ prismaUser: null });
     await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).resolves.toBeUndefined();
     expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
+    // The probe is still audited for admins — with no userId (no account).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('OTP Requested');
+    expect(arg.userId).toBeUndefined();
+    expect(arg.actionText).toContain('ghost@b.c');
   });
 
   it('throws Forbidden when account is inactive (does not send OTP)', async () => {
@@ -370,11 +378,19 @@ describe('AuthService.forgotPassword', () => {
   });
 
   it('resolves silently without sending a reset link when email is not registered (no enumeration)', async () => {
-    const { svc, mailer } = build({ prismaUser: null });
+    const { svc, mailer, logs } = build({ prismaUser: null });
     await expect(svc.forgotPassword({ email: 'ghost@b.c' })).resolves.toBeUndefined();
     expect(
       (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
     ).not.toHaveBeenCalled();
+    // The probe is still audited for admins — with no userId (no account).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.userId).toBeUndefined();
+    expect(arg.actionText).toContain('ghost@b.c');
   });
 
   it('throws Forbidden when account is inactive (does not send reset link)', async () => {
