@@ -25,6 +25,8 @@ import { HelpModule } from './modules/help/help.module';
 // Advert control + test intake (three-portal monorepo intake pending).
 import { AdvertModule } from './modules/advert/advert.module';
 import { IntakeModule } from './modules/intake/intake.module';
+import { BrandModule } from './modules/brand/brand.module';
+import { ReferenceModule } from './modules/reference/reference.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
@@ -39,6 +41,11 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
       isGlobal: true,
       load: configLoaders,
       validate,
+      // NOTE: @nestjs/config v4 merges files so the FIRST listed file wins
+      // (verified against node_modules/@nestjs/config v4.0.4 loadEnvFile).
+      // .env.local therefore overrides .env for local runs. Where .env.local
+      // is absent (CI/prod — it is gitignored and never deployed) behavior is
+      // identical to a single .env.
       envFilePath: ['.env.local', '.env'],
     }),
     LoggerModule.forRootAsync({
@@ -103,6 +110,8 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     HelpModule,
     AdvertModule,
     IntakeModule,
+    BrandModule,
+    ReferenceModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.
