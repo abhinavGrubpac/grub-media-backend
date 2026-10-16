@@ -4,13 +4,18 @@ import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-va
 import { ADVERT_STATUSES } from '../validators';
 
 export class AdvertImageSearchQueryDto {
-  @ApiPropertyOptional({ description: 'Reference dHash (even-length hex, 8-64 chars)' })
+  @ApiPropertyOptional({
+    description: 'Reference dHash (even-length hex, 8-64 chars). Optional when a file is uploaded.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
   image_hash?: string;
 
-  @ApiPropertyOptional({ description: 'Reference advert id (uses its stored image_hash)' })
+  @ApiPropertyOptional({
+    description:
+      'Reference advert id (uses its stored image_hash). Optional when a file is uploaded.',
+  })
   @IsOptional()
   @IsString()
   advert_id?: string;

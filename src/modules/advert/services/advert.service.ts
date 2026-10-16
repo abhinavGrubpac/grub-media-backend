@@ -500,103 +500,56 @@ export class AdvertService {
   }
 
   /**
-   * Reverse-image search: hash the upload with dHash and rank adverts by
-   * Hamming distance (nearest first). Only adverts with a stored image_hash
+   * Reverse-image search (single endpoint): rank adverts by Hamming distance
+   * (nearest first) from a query hash that comes either from an uploaded
+   * PNG/JPEG file or from explicit image_hash/advert_id params. A present file
+   * always wins over params. Only adverts with a stored image_hash
    * participate; the search is recorded in history like radius search.
    */
   async searchByImage(
-    buffer: Buffer,
-    opts: { max_distance?: number; page?: number; limit?: number; actor_id?: string },
+    buffer: Buffer | undefined,
+    opts: {
+      image_hash?: string;
+      advert_id?: string;
+      max_distance?: number;
+      status?: string;
+      brand_id?: string;
+      page?: number;
+      limit?: number;
+      actor_id?: string;
+    },
   ): Promise<AdvertImageSearchResult> {
-    if (!buffer || buffer.length === 0) {
-      throw new BadRequestException('image file is required');
-    }
-    if (buffer.length > IMAGE_UPLOAD_MAX_BYTES) {
-      throw new BadRequestException(`image must be smaller than ${IMAGE_UPLOAD_MAX_BYTES} bytes`);
-    }
-    const maxDistance = Math.min(
-      Math.max(opts.max_distance ?? IMAGE_SEARCH_DEFAULT_MAX_DISTANCE, 0),
-      IMAGE_SEARCH_MAX_DISTANCE,
-    );
-    const page = opts.page ?? 1;
-    const limit = opts.limit ?? 50;
-    const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
-
-    let queryHash: string;
-    try {
-      const sharp = (await import('sharp')).default;
-      const pixels = await sharp(buffer).greyscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer();
-      queryHash = dHashFromGrayscale(pixels, 9, 8);
-    } catch {
-      throw new BadRequestException('image must be a PNG or JPEG file');
-    }
-
-    const candidates = await this.prisma.client.advert.findMany({
-      take: IMAGE_SEARCH_CANDIDATE_LIMIT,
-      orderBy: { createdAt: 'desc' },
-      include: { version: { include: { creative: { include: { brand: true } } } } },
-    });
-    const locations = await this.fetchLocationWkt(candidates.map((advert) => advert.id));
-    const ranked = candidates
-      .filter(
-        (advert): advert is typeof advert & { imageHash: string } =>
-          typeof advert.imageHash === 'string' && advert.imageHash.length > 0,
-      )
-      .map((advert) => ({
-        advert,
-        distance: hammingDistanceHex(queryHash, advert.imageHash),
-      }))
-      .filter((entry) => entry.distance <= maxDistance)
-      .sort((a, b) => a.distance - b.distance);
-    const total = ranked.length;
-    const rows = ranked.slice(skip, skip + take).map((entry) =>
-      this.toResponse(entry.advert, undefined, {
-        location: locations.get(entry.advert.id) ?? null,
-        hashDistance: entry.distance,
-      }),
-    );
-    const echo: AdvertSearchEcho = {
-      lat: null,
-      lng: null,
-      radius_km: null,
-      industry: null,
-      brand_id: null,
-      start: null,
-      end: null,
-      sort: 'distance_asc',
-      query_hash: queryHash,
-      max_distance: maxDistance,
-    };
-    await this.recordSearch(opts.actor_id, echo, total, rows);
-    return { items: rows, meta: standardMeta(total, page, limit, rows.length), search: echo };
-  }
-
-  /**
-   * Upstream-compatible hash search: rank by Hamming distance from an explicit
-   * image_hash (or the stored hash of advert_id). Same in-memory ranking as
-   * the file-upload search; status/brand narrow the candidate pool first.
-   */
-  async searchByHash(opts: {
-    image_hash?: string;
-    advert_id?: string;
-    max_distance?: number;
-    status?: string;
-    brand_id?: string;
-    page?: number;
-    limit?: number;
-    actor_id?: string;
-  }): Promise<AdvertImageSearchResult> {
-    let reference = opts.image_hash;
-    if (opts.advert_id) {
-      const ref = await this.prisma.client.advert.findUnique({ where: { id: opts.advert_id } });
-      if (!ref) throw new NotFoundException('Reference advert not found');
-      if (!ref.imageHash) {
-        throw new BadRequestException('Reference advert has no image_hash to search by.');
+    let queryHash: string | undefined;
+    if (buffer && buffer.length > 0) {
+      if (buffer.length > IMAGE_UPLOAD_MAX_BYTES) {
+        throw new BadRequestException(`image must be smaller than ${IMAGE_UPLOAD_MAX_BYTES} bytes`);
       }
-      reference = ref.imageHash;
+      try {
+        const sharp = (await import('sharp')).default;
+        const pixels = await sharp(buffer)
+          .greyscale()
+          .resize(9, 8, { fit: 'fill' })
+          .raw()
+          .toBuffer();
+        queryHash = dHashFromGrayscale(pixels, 9, 8);
+      } catch {
+        throw new BadRequestException('image must be a PNG or JPEG file');
+      }
+    } else {
+      queryHash = opts.image_hash;
+      if (opts.advert_id) {
+        const ref = await this.prisma.client.advert.findUnique({ where: { id: opts.advert_id } });
+        if (!ref) throw new NotFoundException('Reference advert not found');
+        if (!ref.imageHash) {
+          throw new BadRequestException('Reference advert has no image_hash to search by.');
+        }
+        queryHash = ref.imageHash;
+      }
+      if (!queryHash) {
+        throw new BadRequestException('Provide an image file or image_hash/advert_id');
+      }
+      assertImageHash(queryHash);
     }
-    if (!reference) throw new BadRequestException('Either image_hash or advert_id is required.');
-    assertImageHash(reference);
     if (opts.status !== undefined && !isAdvertStatus(opts.status)) {
       throw new BadRequestException('Invalid advert status');
     }
@@ -605,7 +558,7 @@ export class AdvertService {
       IMAGE_SEARCH_MAX_DISTANCE,
     );
     const page = opts.page ?? 1;
-    const limit = Math.min(opts.limit ?? 20, 100);
+    const limit = Math.min(opts.limit ?? 50, 100);
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
 
     const candidates = await this.prisma.client.advert.findMany({
@@ -622,12 +575,12 @@ export class AdvertService {
       .filter(
         (advert): advert is typeof advert & { imageHash: string } =>
           typeof advert.imageHash === 'string' &&
-          advert.imageHash.length === reference.length &&
+          advert.imageHash.length === (queryHash as string).length &&
           advert.imageHash.length > 0,
       )
       .map((advert) => ({
         advert,
-        distance: hammingDistanceHex(reference as string, advert.imageHash),
+        distance: hammingDistanceHex(queryHash as string, advert.imageHash),
       }))
       .filter((entry) => entry.distance <= maxDistance)
       .sort((a, b) => a.distance - b.distance);
@@ -647,7 +600,7 @@ export class AdvertService {
       start: null,
       end: null,
       sort: 'distance_asc',
-      query_hash: reference,
+      query_hash: queryHash,
       max_distance: maxDistance,
     };
     await this.recordSearch(opts.actor_id, echo, total, rows);
@@ -868,6 +821,37 @@ export class AdvertService {
       throw new ConflictException(
         'This advert has been updated by another user; refresh and retry',
       );
+    }
+    // Resume restores the pre-pause state from the schedule window: before
+    // startDate the advert must go back to SCHEDULED (the system sweeper
+    // promotes it to LIVE when due); inside the window it resumes to LIVE.
+    // Forcing LIVE early or SCHEDULED late would desync the flight.
+    if (current.status === AdvertStatus.PAUSED && (status as AdvertStatus) === AdvertStatus.LIVE) {
+      const now = new Date();
+      if (current.startDate > now) {
+        throw new ConflictException(
+          `Advert is scheduled to go live on ${current.startDate.toISOString()}; resume to SCHEDULED until its start date`,
+        );
+      }
+      if (current.endDate < now) {
+        throw new ConflictException('Advert flight window has ended; it cannot resume to LIVE');
+      }
+    }
+    if (
+      current.status === AdvertStatus.PAUSED &&
+      (status as AdvertStatus) === AdvertStatus.SCHEDULED
+    ) {
+      const now = new Date();
+      if (current.endDate < now) {
+        throw new ConflictException(
+          'Advert flight window has ended; it cannot resume to SCHEDULED',
+        );
+      }
+      if (current.startDate <= now) {
+        throw new ConflictException(
+          'Advert start date has arrived; resume to LIVE instead of SCHEDULED',
+        );
+      }
     }
     assertAdvertTransition(current.status, status, 'govt');
 

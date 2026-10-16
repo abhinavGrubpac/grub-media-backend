@@ -846,45 +846,6 @@
           "response": []
         },
         {
-          "name": "Reverse-Image Search",
-          "request": {
-            "method": "POST",
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/adverts/search/by-image?max_distance=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "adverts",
-                "search",
-                "by-image"
-              ],
-              "query": [
-                {
-                  "key": "max_distance",
-                  "value": "10"
-                }
-              ]
-            },
-            "header": [],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "image",
-                  "type": "file",
-                  "src": "",
-                  "description": "Select an image file (PNG/JPEG)"
-                }
-              ]
-            },
-            "description": "Upload PNG/JPEG; matches by dHash Hamming distance, nearest first. Exact duplicates land at distance 0. Query: ?max_distance= (0-64) &page= &limit=. File limit 5MB."
-          },
-          "response": []
-        },
-        {
           "name": "List Adverts",
           "request": {
             "method": "GET",
@@ -999,41 +960,6 @@
           "response": []
         },
         {
-          "name": "Hash Search (GET by-image)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/adverts/search/by-image?advert_id={{advertId}}&max_distance=10&limit=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "adverts",
-                "search",
-                "by-image"
-              ],
-              "query": [
-                {
-                  "key": "advert_id",
-                  "value": "{{advertId}}"
-                },
-                {
-                  "key": "max_distance",
-                  "value": "10"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                }
-              ]
-            },
-            "description": "upstream-compatible: image_hash|advert_id + max_distance/status/brand_id/limit"
-          }
-        },
-        {
           "name": "Update Status (alias)",
           "request": {
             "method": "PATCH",
@@ -1064,6 +990,44 @@
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "Search by Image (file or hash)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/search/by-image?max_distance=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "search",
+                "by-image"
+              ],
+              "query": [
+                {
+                  "key": "max_distance",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Single image-search endpoint. EITHER attach a file (multipart form-data, field name MUST be \"image\", PNG/JPEG, 5MB max — a present file always wins) OR send query params only: image_hash (16 hex chars) / advert_id plus optional max_distance/status/brand_id/page/limit. Needs one of the two, never a binary/raw body.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": "",
+                  "description": "Attach file here, or leave empty and use query params"
+                }
+              ]
             }
           }
         }

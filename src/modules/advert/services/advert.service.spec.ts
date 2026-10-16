@@ -294,6 +294,92 @@ describe('AdvertService.updateStatus (govt origin)', () => {
       }),
     );
   });
+
+  it('resumes PAUSED to SCHEDULED before the start date', async () => {
+    const { service, advert } = makeDeps();
+    const now = Date.now();
+    const paused = {
+      ...advertRow,
+      status: 'PAUSED',
+      startDate: new Date(now + 7 * 86400000),
+      endDate: new Date(now + 14 * 86400000),
+    };
+    advert.findUnique
+      .mockResolvedValueOnce(paused)
+      .mockResolvedValueOnce({ ...paused, status: 'SCHEDULED' })
+      .mockResolvedValueOnce({
+        ...paused,
+        status: 'SCHEDULED',
+        version: { creative: { brand: {} } },
+      });
+
+    const response = await service.updateStatus('a1', 'SCHEDULED', 'manager1');
+
+    expect(advert.updateMany).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'SCHEDULED' },
+    });
+    expect(response.status).toBe('SCHEDULED');
+  });
+
+  it('resumes PAUSED to LIVE inside the flight window', async () => {
+    const { service, advert } = makeDeps();
+    const now = Date.now();
+    const paused = {
+      ...advertRow,
+      status: 'PAUSED',
+      startDate: new Date(now - 86400000),
+      endDate: new Date(now + 7 * 86400000),
+    };
+    advert.findUnique
+      .mockResolvedValueOnce(paused)
+      .mockResolvedValueOnce({ ...paused, status: 'LIVE' })
+      .mockResolvedValueOnce({
+        ...paused,
+        status: 'LIVE',
+        version: { creative: { brand: {} } },
+      });
+
+    const response = await service.updateStatus('a1', 'LIVE', 'manager1');
+
+    expect(advert.updateMany).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'LIVE' },
+    });
+    expect(response.status).toBe('LIVE');
+  });
+
+  it('blocks PAUSED going LIVE before its start date (resume to SCHEDULED)', async () => {
+    const { service, advert } = makeDeps();
+    const now = Date.now();
+    advert.findUnique.mockResolvedValue({
+      ...advertRow,
+      status: 'PAUSED',
+      startDate: new Date(now + 7 * 86400000),
+      endDate: new Date(now + 14 * 86400000),
+    });
+
+    await expect(service.updateStatus('a1', 'LIVE', 'manager1')).rejects.toThrow(
+      /resume to SCHEDULED/,
+    );
+    expect(advert.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks PAUSED going SCHEDULED after the start date (resume to LIVE)', async () => {
+    const { service, advert } = makeDeps();
+    const now = Date.now();
+    advert.findUnique.mockResolvedValue({
+      ...advertRow,
+      status: 'PAUSED',
+      startDate: new Date(now - 86400000),
+      endDate: new Date(now + 7 * 86400000),
+    });
+
+    await expect(service.updateStatus('a1', 'SCHEDULED', 'manager1')).rejects.toThrow(
+      /resume to LIVE/,
+    );
+    expect(advert.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('AdvertService.upsertFromUpstream', () => {
@@ -612,7 +698,7 @@ describe('AdvertService.transitionFromUpstream', () => {
   });
 });
 
-describe('AdvertService.searchByImage', () => {
+describe('AdvertService.searchByImage (single endpoint)', () => {
   async function blackPng(): Promise<Buffer> {
     const sharp = (await import('sharp')).default;
     return sharp({
@@ -622,9 +708,13 @@ describe('AdvertService.searchByImage', () => {
       .toBuffer();
   }
 
-  it('rejects empty, oversized, and non-image uploads', async () => {
+  it('requires either a file or image_hash/advert_id', async () => {
     const { service } = makeDeps();
-    await expect(service.searchByImage(Buffer.alloc(0), {})).rejects.toThrow(BadRequestException);
+    await expect(service.searchByImage(undefined, {})).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects oversized and non-image uploads', async () => {
+    const { service } = makeDeps();
     await expect(service.searchByImage(Buffer.alloc(6 * 1024 * 1024), {})).rejects.toThrow(
       BadRequestException,
     );
@@ -661,13 +751,6 @@ describe('AdvertService.searchByImage', () => {
       }),
     );
   });
-});
-
-describe('AdvertService.searchByHash', () => {
-  it('requires image_hash or advert_id', async () => {
-    const { service } = makeDeps();
-    await expect(service.searchByHash({})).rejects.toThrow(BadRequestException);
-  });
 
   it('resolves advert_id to its stored hash and ranks nearest-first', async () => {
     const { service, advert } = makeDeps();
@@ -678,7 +761,7 @@ describe('AdvertService.searchByHash', () => {
       { ...advertRow, id: 'unhashed', imageHash: null },
     ]);
 
-    const result = await service.searchByHash({ advert_id: 'ref', max_distance: 10 });
+    const result = await service.searchByImage(undefined, { advert_id: 'ref', max_distance: 10 });
 
     expect(result.items.map((row) => (row as { id: string }).id)).toEqual(['exact', 'near']);
     expect(result.search.query_hash).toBe('0000000000000000');
@@ -687,10 +770,29 @@ describe('AdvertService.searchByHash', () => {
   it('rejects unknown reference adverts and hash-less rows', async () => {
     const { service, advert } = makeDeps();
     advert.findUnique.mockResolvedValue(null);
-    await expect(service.searchByHash({ advert_id: 'missing' })).rejects.toThrow(NotFoundException);
+    await expect(service.searchByImage(undefined, { advert_id: 'missing' })).rejects.toThrow(
+      NotFoundException,
+    );
 
     advert.findUnique.mockResolvedValue({ ...advertRow, imageHash: null });
-    await expect(service.searchByHash({ advert_id: 'ref' })).rejects.toThrow(BadRequestException);
+    await expect(service.searchByImage(undefined, { advert_id: 'ref' })).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('prefers an uploaded file over hash params', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([
+      { ...advertRow, id: 'exact', imageHash: '0000000000000000' },
+    ]);
+
+    const result = await service.searchByImage(await blackPng(), {
+      image_hash: 'ffffffffffffffff',
+      max_distance: 10,
+    });
+
+    // File (black = 0x0) wins, so the unrelated explicit hash is ignored.
+    expect(result.items.map((row) => (row as { id: string }).id)).toEqual(['exact']);
   });
 });
 

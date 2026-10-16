@@ -60,23 +60,11 @@ export class AdvertController {
   }
 
   /**
-   * Upstream-compatible hash search: ?image_hash= or ?advert_id= with optional
-   * max_distance/status/brand_id/limit. Same ranking as the file-upload search.
-   */
-  // Future permission: 'advert:geo_search'.
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Get('search/by-image')
-  searchByHash(
-    @Query() query: AdvertImageSearchQueryDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<AdvertImageSearchResult> {
-    return this.advertService.searchByHash({ ...query, actor_id: user.id });
-  }
-
-  /**
-   * Reverse-image search: upload a PNG/JPEG and match adverts by visual
-   * similarity (dHash Hamming distance, nearest first). Exact duplicates
-   * land at distance 0. Only adverts with a stored image_hash participate.
+   * Reverse-image search (single endpoint): EITHER upload a PNG/JPEG file
+   * (multipart field `image`, hashed server-side) OR pass ?image_hash= /
+   * ?advert_id= with optional max_distance/status/brand_id/page/limit.
+   * A present file always wins over params. Exact duplicates land at
+   * distance 0; only adverts with a stored image_hash participate.
    */
   // Future permission: 'advert:geo_search'.
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
@@ -96,19 +84,9 @@ export class AdvertController {
   searchByImage(
     @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthUser,
-    @Query('max_distance') maxDistance?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query() query: AdvertImageSearchQueryDto,
   ): Promise<AdvertImageSearchResult> {
-    if (!file) {
-      throw new BadRequestException('image file is required');
-    }
-    return this.advertService.searchByImage(file.buffer, {
-      max_distance: maxDistance !== undefined ? Number(maxDistance) : undefined,
-      page: page !== undefined ? Number(page) : undefined,
-      limit: limit !== undefined ? Number(limit) : undefined,
-      actor_id: user.id,
-    });
+    return this.advertService.searchByImage(file?.buffer, { ...query, actor_id: user.id });
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
