@@ -772,6 +772,36 @@
               }
             }
           }
+        },
+        {
+          "name": "Get Brand Options (for creative)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/options?search=Acme&activity=active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "options"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Acme"
+                },
+                {
+                  "key": "activity",
+                  "value": "active"
+                }
+              ]
+            },
+            "description": "Minimal unpaginated brand list for creative create/filter dropdowns: id, brand_name, industry_category, is_active. Optional ?search= (name) &activity=active|stopped. Full detail lives under Brands."
+          }
         }
       ]
     },

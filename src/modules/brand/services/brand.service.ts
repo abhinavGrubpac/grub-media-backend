@@ -12,6 +12,7 @@ import { EventOutboxService } from '../../events/event.outbox';
 import { EventTypes } from '../../events/events.constants';
 import { PrismaService } from '../../../database/prisma.service';
 import { BRAND_SORT_KEYS, BrandQueryDto } from '../dto/brand-query.dto';
+import { BrandOptionDto, BrandOptionsQueryDto } from '../dto/brand-options.dto';
 import { BrandResponseDto } from '../dto/brand-response.dto';
 import { CreateBrandDto } from '../dto/create-brand.dto';
 import { UpdateBrandDto } from '../dto/update-brand.dto';
@@ -161,6 +162,30 @@ export class BrandService {
     return rows.map((row) => row.industryCategory as string).filter(Boolean);
   }
 
+  /**
+   * Minimal unpaginated brand list for dropdowns (creative create/filter).
+   * Heavier needs (filters, pagination, agency enrichment) belong to findAll.
+   */
+  async brandOptions(query: BrandOptionsQueryDto): Promise<BrandOptionDto[]> {
+    const brands = await this.prisma.client.brand.findMany({
+      where: buildBrandWhere(query),
+      orderBy: { brandName: 'asc' },
+      select: { id: true, brandName: true, industryCategory: true, isActive: true },
+    });
+    return brands.map((brand) =>
+      plainToInstance(
+        BrandOptionDto,
+        {
+          id: brand.id,
+          brand_name: brand.brandName,
+          industry_category: brand.industryCategory,
+          is_active: brand.isActive,
+        },
+        { excludeExtraneousValues: true },
+      ),
+    );
+  }
+
   /** Flat projection used by the CSV export (same filter set as list). */
   async exportBrands(filters: BrandListFilters): Promise<BrandExportRow[]> {
     const where = buildBrandWhere(filters);
@@ -216,6 +241,20 @@ export class BrandService {
     const brand = await this.prisma.$transaction(async (tx) => {
       const previous = await tx.brand.findUnique({ where: { id } });
       if (!previous) throw new NotFoundException(`Brand with ID ${id} not found`);
+      // Activity must only change via the kill-switch (it cascades advert
+      // revocations). PATCH flipping is_active would silently bypass that.
+      if (dto.is_active !== undefined) {
+        throw new BadRequestException(
+          'Use POST /brands/:id/kill to change activity; PATCH cannot toggle is_active',
+        );
+      }
+      // Stopped brands are frozen for compliance edits — reactivate first so
+      // flag/auto-approve changes cannot slip in while killed.
+      if (!previous.isActive) {
+        throw new ConflictException(
+          `Brand with ID ${id} is stopped (deactivated); reactivate before editing`,
+        );
+      }
       const updated = await tx.brand.update({
         where: { id },
         data: {
@@ -265,6 +304,20 @@ export class BrandService {
     const brand = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.brand.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Brand with ID ${id} not found`);
+      // Flag is a compliance edit — frozen while the kill-switch is active so
+      // a stopped brand cannot be unflagged (or flagged) behind the backstop.
+      if (!existing.isActive) {
+        throw new ConflictException(
+          `Brand with ID ${id} is stopped (deactivated); reactivate before changing flag`,
+        );
+      }
+      if (existing.isFlagged === isFlagged) {
+        throw new ConflictException(
+          isFlagged
+            ? `Brand with ID ${id} is already flagged`
+            : `Brand with ID ${id} is not flagged`,
+        );
+      }
       const updated = await tx.brand.update({
         where: { id },
         data: {
@@ -300,6 +353,13 @@ export class BrandService {
     const result = await this.prisma.$transaction(async (tx): Promise<KillSwitchResult> => {
       const existing = await tx.brand.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Brand with ID ${id} not found`);
+      if (existing.isActive === isActive) {
+        throw new ConflictException(
+          isActive
+            ? `Brand with ID ${id} is already active`
+            : `Brand with ID ${id} is already deactivated`,
+        );
+      }
 
       let revokedIds: string[] = [];
       if (!isActive) {

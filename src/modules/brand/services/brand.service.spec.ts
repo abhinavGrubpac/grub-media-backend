@@ -150,6 +150,27 @@ describe('BrandService', () => {
     expect(rows).toEqual([expect.objectContaining({ brand_name: 'Acme', agency_name: 'Dentsu' })]);
   });
 
+  it('brandOptions returns the minimal dropdown shape, unpaginated', async () => {
+    const { service, brand } = makeDeps();
+    brand.findMany.mockResolvedValue([fullBrand]);
+
+    const rows = await service.brandOptions({ search: 'Acme', activity: 'active' });
+
+    expect(brand.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          brandName: { contains: 'Acme', mode: 'insensitive' },
+          isActive: true,
+        }),
+        orderBy: { brandName: 'asc' },
+      }),
+    );
+    expect(rows).toEqual([
+      { id: 'b1', brand_name: 'Acme', industry_category: 'Food', is_active: true },
+    ]);
+    expect(rows[0]).not.toHaveProperty('contact_email');
+  });
+
   it('findOne throws NotFound for an unknown id', async () => {
     const { service, brand } = makeDeps();
     brand.findUnique.mockResolvedValue(null);
@@ -219,6 +240,12 @@ describe('BrandService', () => {
     );
     expect(flagged).toMatchObject({ flagged_by: 'manager1' });
 
+    brand.findUnique.mockResolvedValue({
+      ...fullBrand,
+      isFlagged: true,
+      flaggedBy: 'manager1',
+      flaggedOn: new Date('2026-10-14T00:00:00Z'),
+    });
     brand.update.mockResolvedValue({ ...fullBrand, isFlagged: false, flaggedBy: null });
     await service.setFlag('b1', false, 'manager1');
     expect(brand.update).toHaveBeenLastCalledWith(
@@ -226,6 +253,46 @@ describe('BrandService', () => {
         data: expect.objectContaining({ isFlagged: false, flaggedBy: null, flaggedOn: null }),
       }),
     );
+  });
+
+  it('setFlag rejects flagging an already-flagged brand', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue({ ...fullBrand, isFlagged: true });
+
+    await expect(service.setFlag('b1', true, 'manager1')).rejects.toThrow(/already flagged/);
+    expect(brand.update).not.toHaveBeenCalled();
+  });
+
+  it('setFlag rejects unflagging a brand that is not flagged', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(fullBrand);
+
+    await expect(service.setFlag('b1', false, 'manager1')).rejects.toThrow(/not flagged/);
+    expect(brand.update).not.toHaveBeenCalled();
+  });
+
+  it('setFlag rejects flag changes while the brand is stopped', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue({ ...fullBrand, isActive: false, isFlagged: true });
+
+    await expect(service.setFlag('b1', false, 'manager1')).rejects.toThrow(/stopped/);
+    expect(brand.update).not.toHaveBeenCalled();
+  });
+
+  it('update rejects is_active toggles via PATCH (use kill-switch)', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(fullBrand);
+
+    await expect(service.update('b1', { is_active: false })).rejects.toThrow(/kill/);
+    expect(brand.update).not.toHaveBeenCalled();
+  });
+
+  it('update rejects edits while the brand is stopped', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue({ ...fullBrand, isActive: false });
+
+    await expect(service.update('b1', { brand_name: 'New' })).rejects.toThrow(/stopped/);
+    expect(brand.update).not.toHaveBeenCalled();
   });
 
   it('killSwitch deactivation revokes non-revoked adverts and emits both events', async () => {
@@ -278,6 +345,23 @@ describe('BrandService', () => {
       expect.anything(),
       expect.objectContaining({ eventType: 'brand.reactivated' }),
     );
+  });
+
+  it('killSwitch rejects deactivating an already-deactivated brand', async () => {
+    const { service, brand, advert } = makeDeps();
+    brand.findUnique.mockResolvedValue({ ...fullBrand, isActive: false });
+
+    await expect(service.killSwitch('b1', false)).rejects.toThrow(/already deactivated/);
+    expect(advert.findMany).not.toHaveBeenCalled();
+    expect(brand.update).not.toHaveBeenCalled();
+  });
+
+  it('killSwitch rejects reactivating an already-active brand', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(fullBrand);
+
+    await expect(service.killSwitch('b1', true)).rejects.toThrow(/already active/);
+    expect(brand.update).not.toHaveBeenCalled();
   });
 
   describe('upsertFromUpstream', () => {

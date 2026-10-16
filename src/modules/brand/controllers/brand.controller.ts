@@ -10,6 +10,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { BrandFlagDto } from '../dto/brand-flag.dto';
 import { BrandKillDto } from '../dto/brand-kill.dto';
+import { BrandOptionDto, BrandOptionsQueryDto } from '../dto/brand-options.dto';
 import { BrandQueryDto } from '../dto/brand-query.dto';
 import { BrandResponseDto } from '../dto/brand-response.dto';
 import { CreateBrandDto } from '../dto/create-brand.dto';
@@ -71,6 +72,16 @@ export class BrandController {
   @Get('industries')
   industries(): Promise<string[]> {
     return this.brandService.industries();
+  }
+
+  /**
+   * Minimal unpaginated brand list for creative-review dropdowns.
+   * Static route stays before `:id` so `options` is never captured as an id.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Get('options')
+  brandOptions(@Query() query: BrandOptionsQueryDto): Promise<BrandOptionDto[]> {
+    return this.brandService.brandOptions(query);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
