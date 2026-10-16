@@ -81,13 +81,15 @@ model Organization {
 }
 
 model Permission {
-  id String @id @default(cuid())
-  module String
-  page String
-  action String
-  custom Boolean @default(false)
-  createdAt DateTime @default(now())
+  id                String             @id @default(cuid())
+  module            String
+  page              String
+  action            String
+  label             String?
+  custom            Boolean            @default(false)
+  createdAt         DateTime           @default(now())
   bundlePermissions BundlePermission[]
+
   @@unique([module, page, action])
 }
 model PermissionBundle {
