@@ -38,8 +38,35 @@ export class AccessService {
   }
   bundles() {
     return this.prisma.client.permissionBundle.findMany({
-      include: { permissions: { include: { permission: true } } },
+      include: {
+        permissions: { include: { permission: true } },
+        _count: { select: { users: true } },
+      },
       orderBy: { name: 'asc' },
+    });
+  }
+
+  bundleUsers(bundleId: string) {
+    return this.prisma.client.userBundle.findMany({
+      where: {
+        bundleId,
+        user: { deletedAt: null },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+            employeeId: true,
+            jurisdiction: true,
+            joiningDate: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
     });
   }
   async createBundle(actorId: string, dto: BundleDto) {

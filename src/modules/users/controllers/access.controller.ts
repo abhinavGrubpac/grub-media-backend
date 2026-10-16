@@ -45,6 +45,13 @@ export class AccessController {
   @Post('bundles') bundle(@CurrentUser() u: AuthUser, @Body() dto: BundleDto) {
     return this.access.createBundle(u.id, dto);
   }
+
+  @Get('bundles/:id/users')
+  async bundleUsers(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    const rows = await this.access.bundleUsers(id);
+    await this.logView(u, 'View Bundle Users', `Viewed users in bundle ${id}`);
+    return rows;
+  }
   @Post('employees/:employeeId/bundles') assign(
     @CurrentUser() u: AuthUser,
     @Param('employeeId') e: string,
