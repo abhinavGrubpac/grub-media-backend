@@ -86,6 +86,17 @@ export class UsersService {
       where: { id: userId },
       data: { avatarUrl },
     });
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'Upload Avatar',
+      actionText: `The avatar of ${user.email} was uploaded`,
+      userId,
+      empId: user.id,
+      target: logRefOf(user),
+      oldDetail: { avatarUrl: user.avatarUrl },
+      newDetail: { avatarUrl: updated.avatarUrl },
+    });
     return this.toDto(updated);
   }
 
