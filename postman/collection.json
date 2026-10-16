@@ -104,10 +104,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('login returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
                   "const data = pm.response.json().data;",
-                  "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);",
-                  "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
                 ]
               }
             }
@@ -149,10 +149,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('refresh returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
                   "const data = pm.response.json().data;",
-                  "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);",
-                  "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
                 ]
               }
             }
@@ -189,7 +189,21 @@
               "raw": "{\n  \"email\": \"user@grubpac.com\"\n}"
             },
             "description": "Requests a 4-digit login code by email. The response is the same whether or not the account exists."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login — Verify OTP",
@@ -228,10 +242,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('OTP login returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
                   "const data = pm.response.json().data;",
-                  "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);",
-                  "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
                 ]
               }
             }
@@ -566,7 +580,20 @@
             },
             "description": "brand_id*, name*, media_type* (always Image)"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.file_key ?? data.s3_key !== undefined) pm.collectionVariables.set('fileKey', data.file_key ?? data.s3_key);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Finalize Upload",
@@ -592,7 +619,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"brand_id\": \"{{brandId}}\",\n  \"name\": \"Festive Ad\",\n  \"s3_key\": \"creatives/123-Festive-Ad.png\",\n  \"media_type\": \"Image\"\n}",
+              "raw": "{\n  \"brand_id\": \"{{brandId}}\",\n  \"name\": \"Festive Ad\",\n  \"s3_key\": \"{{fileKey}}\",\n  \"media_type\": \"Image\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -601,7 +628,20 @@
             },
             "description": "creative_id OR brand_id+name, plus s3_key*, media_type*"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.version ?? data).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? data).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Create Creative",
@@ -635,7 +675,21 @@
             },
             "description": "brand_id*, creative_name*, external_ref_id, initial_version{media_url, media_type, notes}"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.creative ?? data).id !== undefined) pm.collectionVariables.set('creativeId', (data.creative ?? data).id);",
+                  "if ((data.version ?? {}).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? {}).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Upload Version",
@@ -671,7 +725,20 @@
             },
             "description": "media_url*, media_type*, notes"
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.version ?? data).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? data).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Take Action",
@@ -1112,7 +1179,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.file_key ?? data.s3_key !== undefined) pm.collectionVariables.set('fileKey', data.file_key ?? data.s3_key);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "PUT PDF Bytes to S3 (step 2/3)",
@@ -1163,14 +1243,27 @@
             "description": "title*, category*, file_key and/or file_url*, file_size_bytes, description, published_on",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Ad Policy 2026\",\n  \"category\": \"policy\",\n  \"file_key\": \"references/123-Ad-Policy-2026.pdf\",\n  \"file_url\": \"https://bucket/references/123-Ad-Policy-2026.pdf\",\n  \"file_size_bytes\": 1048576,\n  \"description\": \"Central rates\",\n  \"published_on\": \"2026-01-15\"\n}",
+              "raw": "{\n  \"title\": \"Ad Policy 2026\",\n  \"category\": \"policy\",\n  \"file_key\": \"{{fileKey}}\",\n  \"file_url\": \"https://bucket/references/123-Ad-Policy-2026.pdf\",\n  \"file_size_bytes\": 1048576,\n  \"description\": \"Central rates\",\n  \"published_on\": \"2026-01-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('docId', data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Edit Details",
@@ -1482,7 +1575,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.brand ?? data).id !== undefined) pm.collectionVariables.set('brandId', (data.brand ?? data).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Update Brand",
@@ -1748,7 +1854,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('userId', data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "List Users (admin)",
@@ -2072,7 +2191,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('bundleId', data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Assign Bundle",
@@ -2282,7 +2414,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('orgId', data.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "List Organizations",
@@ -2632,7 +2777,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.brand ?? data).id !== undefined) pm.collectionVariables.set('brandId', (data.brand ?? data).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Create Test Creative",
@@ -2667,7 +2825,21 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.creative ?? data).id !== undefined) pm.collectionVariables.set('creativeId', (data.creative ?? data).id);",
+                  "if ((data.version ?? {}).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? {}).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Schedule Test Advert",
@@ -2702,7 +2874,20 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.advert ?? data).id !== undefined) pm.collectionVariables.set('advertId', (data.advert ?? data).id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Bootstrap Test Flow",
@@ -2737,7 +2922,23 @@
                 }
               }
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.brand?.id !== undefined) pm.collectionVariables.set('brandId', data.brand?.id);",
+                  "if (data.creative?.id !== undefined) pm.collectionVariables.set('creativeId', data.creative?.id);",
+                  "if (data.version?.id !== undefined) pm.collectionVariables.set('versionId', data.version?.id);",
+                  "if (data.advert?.id !== undefined) pm.collectionVariables.set('advertId', data.advert?.id);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Go-Live Sync",
