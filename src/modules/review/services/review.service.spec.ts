@@ -105,10 +105,6 @@ function makeDeps() {
     presignedUploadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/uploads/x?mock=1'),
     assertFileUrlAllowed: jest.fn(),
     resolveCreativeFileUrl: jest.fn((s: string) => s),
-    putObject: jest.fn().mockResolvedValue({
-      fileUrl: 'https://mock-storage.local/uploads/agency/1-a.png?mock=1',
-      key: 'agency/1-a.png',
-    }),
   };
   const service = new CreativeService(
     prisma as never,
@@ -693,46 +689,6 @@ describe('CreativeService.upsertThread', () => {
   });
 });
 
-describe('CreativeService.getHistory', () => {
-  it('resolves actor display names in a single batch', async () => {
-    const { service, creative, user } = makeDeps();
-    creative.findUnique.mockResolvedValue({
-      ...creativeRow,
-      brand: brandRow,
-      versions: [
-        {
-          ...versionRow,
-          actions: [
-            {
-              id: 'ra1',
-              versionId: 'v1',
-              actorId: 'user1',
-              action: 'REJECT',
-              comments: 'x',
-              createdAt: new Date('2026-10-07T01:00:00Z'),
-            },
-          ],
-        },
-      ],
-    });
-    user.findMany.mockResolvedValue([{ id: 'user1', firstName: 'Riya', lastName: 'Sharma' }]);
-
-    const history = await service.getHistory('c1');
-
-    expect(user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['user1'] } } }),
-    );
-    expect(history.versions[0].actions?.[0]).toMatchObject({ actor_name: 'Riya Sharma' });
-  });
-
-  it('throws NotFound for an unknown creative', async () => {
-    const { service, creative } = makeDeps();
-    creative.findUnique.mockResolvedValue(null);
-
-    await expect(service.getHistory('missing')).rejects.toThrow(NotFoundException);
-  });
-});
-
 describe('CreativeService.getCreative', () => {
   it('returns the full detail view and records the view', async () => {
     const { service, creative, agencyRef, user } = makeDeps();
@@ -958,46 +914,6 @@ describe('CreativeService.finalizeUpload', () => {
           mediaUrl: 'https://grub-media.s3.ap-south-1.amazonaws.com/creatives/2-b.png',
         }),
       }),
-    );
-  });
-});
-
-describe('CreativeService.uploadMedia', () => {
-  const png = {
-    buffer: Buffer.from('png-bytes'),
-    originalname: 'a.png',
-    mimetype: 'image/png',
-    size: 9,
-  };
-
-  it('requires a file and a target', async () => {
-    const { service } = makeDeps();
-    await expect(
-      service.uploadMedia(
-        { buffer: Buffer.alloc(0), originalname: 'a.png', mimetype: 'image/png', size: 0 },
-        { brand_id: 'b1', name: 'Ad' },
-        'u1',
-      ),
-    ).rejects.toThrow(BadRequestException);
-    await expect(service.uploadMedia(png, {}, 'u1')).rejects.toThrow(BadRequestException);
-  });
-
-  it('streams to S3 then creates a new thread with v1', async () => {
-    const { service, brand, creative, creativeVersion, storage } = makeDeps();
-    brand.findUnique.mockResolvedValue(brandRow);
-    creative.create.mockResolvedValue(creativeRow);
-    creativeVersion.create.mockResolvedValue(versionRow);
-    creative.update.mockResolvedValue(creativeRow);
-
-    await service.uploadMedia(png, { brand_id: 'brand1', name: 'Festive Ad' }, 'u1');
-
-    expect(storage.putObject).toHaveBeenCalledWith(
-      expect.stringContaining('agency/'),
-      png.buffer,
-      'image/png',
-    );
-    expect(creative.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ creativeName: 'Festive Ad' }) }),
     );
   });
 });

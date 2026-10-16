@@ -38,6 +38,30 @@
     {
       "key": "docId",
       "value": ""
+    },
+    {
+      "key": "orgId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "bundleId",
+      "value": ""
+    },
+    {
+      "key": "adminId",
+      "value": ""
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "faqId",
+      "value": ""
     }
   ],
   "item": [
@@ -491,27 +515,6 @@
           "response": []
         },
         {
-          "name": "Creative History",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/creatives/{{creativeId}}/history?shape=array",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "creatives",
-                "{{creativeId}}",
-                "history"
-              ]
-            },
-            "description": "Approval thread: versions newest-first with actions."
-          },
-          "response": []
-        },
-        {
           "name": "Get Creative",
           "request": {
             "method": "GET",
@@ -705,73 +708,6 @@
             "description": "action* (APPROVE|REJECT|HOLD|REQUEST_CHANGES|RESUME); comments mandatory for REJECT/REQUEST_CHANGES; expectedVersion optimistic lock"
           },
           "response": []
-        },
-        {
-          "name": "Upload Media (single-call)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/creatives/media",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "creatives",
-                "media"
-              ]
-            },
-            "description": "multipart file=image/jpeg|png (25MB) + fields creative_id|brand_id+name. In Postman use form-data body type 'file'. Text fields: creative_id XOR brand_id+name, media_type, notes. File limit 25MB (jpeg/png).",
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "file",
-                  "type": "file",
-                  "src": "",
-                  "description": "Select an image file (PNG/JPEG)"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Take Action (legacy alias)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/creatives/version/{{versionId}}/action",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "creatives",
-                "version",
-                "{{versionId}}",
-                "action"
-              ]
-            },
-            "description": "action* (APPROVE|REJECT|HOLD|REQUEST_CHANGES|RESUME); comments mandatory for REJECT/REQUEST_CHANGES; expectedVersion optimistic lock",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"APPROVE\",\n  \"comments\": \"Compliant\",\n  \"expectedVersion\": 1\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
         },
         {
           "name": "Get Brand Options (for creative)",
@@ -1720,6 +1656,1150 @@
                 }
               }
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile"
+              ]
+            },
+            "description": "Current user profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile"
+              ]
+            },
+            "description": "firstName, lastName, avatarUrl (https), jurisdiction — all optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Ishani\",\n  \"lastName\": \"Reddy\",\n  \"avatarUrl\": \"https://cdn.example.com/a.png\",\n  \"jurisdiction\": \"Maharashtra\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create User (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "email*, password* (8+, upper+lower+number), firstName*, lastName*, phoneNumber, role, organizationId",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new@grubpac.com\",\n  \"password\": \"Temp@123456\",\n  \"firstName\": \"New\",\n  \"lastName\": \"User\",\n  \"phoneNumber\": \"+919876543210\",\n  \"role\": \"EMPLOYEE\",\n  \"organizationId\": \"{{orgId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List Users (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users?page=1&limit=20"
+              ]
+            },
+            "description": "Filters: ?search= &role= &status=, sort via sortBy/sortOrder"
+          }
+        },
+        {
+          "name": "Export Users CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "export",
+                "csv"
+              ]
+            },
+            "description": "Same filters as list"
+          }
+        },
+        {
+          "name": "Bulk Activate",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/bulk-activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "bulk-activate"
+              ]
+            },
+            "description": "ids* — lifts SUSPENDED/INACTIVE to ACTIVE",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{userId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Updatable: everything except password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"New\",\n  \"lastName\": \"Name\",\n  \"role\": \"EMPLOYEE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Suspend User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "suspend"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Activate User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "activate"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Dismiss User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/dismiss",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "dismiss"
+              ]
+            },
+            "description": "Sets INACTIVE — persists, login blocked"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Soft-delete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Access Management",
+      "item": [
+        {
+          "name": "List Permissions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "permissions"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create Permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "permissions"
+              ]
+            },
+            "description": "module*, page*, action*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"module\": \"brands\",\n  \"page\": \"list\",\n  \"action\": \"read\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List Bundles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "bundles"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create Bundle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "bundles"
+              ]
+            },
+            "description": "name*, description, permissionIds*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Content Manager\",\n  \"description\": \"Media + help\",\n  \"permissionIds\": [\n    \"{{permissionId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Assign Bundle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "bundles"
+              ]
+            },
+            "description": "bundleId*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bundleId\": \"{{bundleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove Bundle",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles/{{bundleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "bundles",
+                "{{bundleId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Assign Admin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "admin"
+              ]
+            },
+            "description": "adminId*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminId\": \"{{adminId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unassign Admin",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "admin"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List Assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "assignments"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload",
+      "item": [
+        {
+          "name": "Upload Image (avatar/org logo)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "upload"
+              ]
+            },
+            "description": "Multipart: file* (jpeg/png/webp, 5MB) + type* (avatar|org-logo) + targetId (org ID, required for org-logo). Avatar replaces your own picture; org-logo returns URL.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a file"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Organizations",
+      "item": [
+        {
+          "name": "Create Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations"
+              ]
+            },
+            "description": "name*, regNumber, logoUrl (https), jurisdiction",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"GrubPac Foods Pvt Ltd\",\n  \"regNumber\": \"GRUB-ORG-001\",\n  \"logoUrl\": \"https://cdn.example.com/org.png\",\n  \"jurisdiction\": \"Maharashtra\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations?page=1&limit=20"
+              ]
+            },
+            "description": "Filters: ?search= &status="
+          }
+        },
+        {
+          "name": "Get Organization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": "All optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New Name\",\n  \"jurisdiction\": \"Delhi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Upload Org Logo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/logo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "logo"
+              ]
+            },
+            "description": "Multipart file* (jpeg/png/webp, 5MB).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a file"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Suspend Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "suspend"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Activate Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "activate"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": "Soft-delete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Help",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "categories"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Category FAQs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories/{{categoryId}}/faqs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "categories",
+                "{{categoryId}}",
+                "faqs"
+              ]
+            },
+            "description": "categoryId is an integer"
+          }
+        },
+        {
+          "name": "Get FAQ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/faqs/{{faqId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "faqs",
+                "{{faqId}}"
+              ]
+            },
+            "description": "faq id is an integer"
+          }
+        },
+        {
+          "name": "Search Help",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/search?q=attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "search?q=attendance"
+              ]
+            },
+            "description": "?q=* required; optional &categoryId="
+          }
+        },
+        {
+          "name": "Contact Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/contact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "contact"
+              ]
+            },
+            "description": "Support mailto details"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Intake (test)",
+      "item": [
+        {
+          "name": "Register Agency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/agencies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "agencies"
+              ]
+            },
+            "description": "upstream_agency_id*, agency_name*, city, address",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"upstream_agency_id\": \"agency-001\",\n  \"agency_name\": \"Dentsu\",\n  \"city\": \"Mumbai\",\n  \"address\": \"BKC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Test Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/brands",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "brands"
+              ]
+            },
+            "description": "brand_name* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_name\": \"Test Brand\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"upstream_brand_id\": \"ub-001\",\n  \"upstream_agency_id\": \"agency-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Test Creative",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/creatives",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "creatives"
+              ]
+            },
+            "description": "creative_name*, media_url*, media_type* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"creative_name\": \"Test Creative\",\n  \"media_url\": \"https://bucket/agency/x.png\",\n  \"media_type\": \"Image\",\n  \"campaign_ref\": \"DIWALI-26\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Schedule Test Advert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "schedule"
+              ]
+            },
+            "description": "lat*, lng*, address_text*, start_date*, end_date* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 12.9716,\n  \"lng\": 77.5946,\n  \"address_text\": \"MG Road\",\n  \"start_date\": \"2026-11-01\",\n  \"end_date\": \"2026-11-30\",\n  \"city_name\": \"Bengaluru\",\n  \"radius\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Bootstrap Test Flow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/bootstrap",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "bootstrap"
+              ]
+            },
+            "description": "One-call agency→schedule flow; approve_immediately, schedule, admin_approval optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approve_immediately\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Go-Live Sync",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/go-live-sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "go-live-sync"
+              ]
+            },
+            "description": "No body — promotes due schedules"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Liveness probe (no auth)."
+          }
+        },
+        {
+          "name": "Health Check (versioned)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ]
+            },
+            "description": "Liveness probe (no auth)."
           }
         }
       ]

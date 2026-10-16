@@ -43,6 +43,9 @@ export class StorageService {
           accessKeyId: this.config.get<string>('storage.accessKeyId') || '',
           secretAccessKey: this.config.get<string>('storage.secretAccessKey') || '',
         },
+        // Same as the reference storage client: keep presigned PUTs usable
+        // with plain Content-Type uploads (no mandatory CRC32 headers).
+        requestChecksumCalculation: 'WHEN_REQUIRED',
       });
     }
     return this.s3;
@@ -98,29 +101,6 @@ export class StorageService {
     if (!bucket) return value; // mock mode: nothing to normalize against
     const region = this.config.get<string>('storage.region') ?? 'ap-south-1';
     return `https://${bucket}.s3.${region}.amazonaws.com/${value}`;
-  }
-
-  /**
-   * Direct server-side upload (single-call flows): PUTs a buffer to S3 and
-   * returns the renderable file URL. Mock mode returns a mock-storage URL.
-   */
-  async putObject(
-    key: string,
-    body: Buffer,
-    contentType: string,
-  ): Promise<{ fileUrl: string; key: string }> {
-    if (!this.isConfigured) {
-      return { fileUrl: `https://mock-storage.local/uploads/${key}?mock=1`, key };
-    }
-    await this.client().send(
-      new PutObjectCommand({
-        Bucket: this.config.get<string>('storage.bucket'),
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-      }),
-    );
-    return { fileUrl: this.resolveCreativeFileUrl(key), key };
   }
 
   /** Restricts stored file URLs to the approved media bucket in production. */

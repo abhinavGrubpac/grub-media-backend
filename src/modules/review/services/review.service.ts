@@ -683,80 +683,6 @@ export class CreativeService {
   }
 
   /**
-   * Upstream-compatible single-call upload: multipart file + fields, streamed
-   * to S3 and bound to a thread in one request. With creative_id it appends a
-   * version; otherwise brand_id + name start a new thread with v1.
-   */
-  async uploadMedia(
-    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
-    data: {
-      creative_id?: string;
-      brand_id?: string;
-      name?: string;
-      external_ref_id?: string;
-      media_type?: string;
-      notes?: string;
-    },
-    actorId: string,
-  ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
-    if (!file?.buffer?.length) throw new BadRequestException('file is required');
-    const mediaType = data.media_type || 'Image';
-    assertValidMediaType(mediaType);
-    const ext = file.mimetype === 'image/jpeg' ? 'jpg' : 'png';
-    const keyName = data.name?.trim() || file.originalname || 'upload';
-    if (!data.creative_id && (!data.brand_id?.trim() || !keyName.trim())) {
-      throw new BadRequestException('Provide creative_id or brand_id + name');
-    }
-    if (data.creative_id) {
-      const creative = await this.prisma.client.creative.findUnique({
-        where: { id: data.creative_id },
-        include: { brand: true },
-      });
-      if (!creative) throw new NotFoundException(`Creative with ID ${data.creative_id} not found`);
-      assertBrandActive(creative.brand.isActive, creative.brand.id);
-    } else {
-      const brand = await this.prisma.client.brand.findUnique({
-        where: { id: data.brand_id as string },
-      });
-      if (!brand) throw new NotFoundException(`Brand with ID ${data.brand_id} not found`);
-      assertBrandActive(brand.isActive, brand.id);
-    }
-    await this.outbox.emit({
-      eventType: 'creative.upload_intent',
-      entityType: 'Creative',
-      entityId: 'pending',
-      actorId,
-      key: data.creative_id ?? data.brand_id ?? 'unknown',
-      payload: {
-        creative_id: data.creative_id ?? null,
-        brand_id: data.brand_id ?? null,
-        name: file.originalname,
-        media_type: mediaType,
-        bytes: file.size,
-      },
-    });
-    const s3Key = this.storage.buildKey('agency', keyName, ext);
-    const { fileUrl } = await this.storage.putObject(s3Key, file.buffer, file.mimetype);
-    if (data.creative_id) {
-      const { version } = await this.uploadVersion(
-        data.creative_id,
-        { media_url: fileUrl, media_type: mediaType, notes: data.notes },
-        actorId,
-      );
-      return version;
-    }
-    return this.createCreative(
-      {
-        brand_id: data.brand_id as string,
-        creative_name: (data.name as string).trim(),
-        external_ref_id: data.external_ref_id,
-        initial_version: { media_url: fileUrl, media_type: mediaType, notes: data.notes },
-      },
-      actorId,
-    );
-  }
-
-  /**
    * Records a review decision. Optimistic locking via expectedVersion: the
    * first write wins, the loser gets 409. REJECT/NEEDS_CHANGES cascade
    * advert.auto_revoked to every non-revoked advert of the version.
@@ -855,32 +781,6 @@ export class CreativeService {
       return saved;
     });
     return this.toVersionResponse(updated, new Map());
-  }
-
-  /** Full approval-thread history: versions newest-first with actions oldest-first. */
-  async getHistory(
-    creativeId: string,
-  ): Promise<{ creative: CreativeResponseDto; versions: CreativeVersionResponseDto[] }> {
-    const creative = await this.prisma.client.creative.findUnique({
-      where: { id: creativeId },
-      include: {
-        brand: true,
-        versions: {
-          orderBy: { versionNumber: 'desc' },
-          include: { actions: { orderBy: { createdAt: 'asc' } } },
-        },
-      },
-    });
-    if (!creative) throw new NotFoundException(`Creative with ID ${creativeId} not found`);
-
-    const actorNames = await this.resolveActorNames([
-      ...this.collectActorIds(creative.versions),
-      ...this.collectRowIds([creative]),
-    ]);
-    return {
-      creative: this.toCreativeResponse(creative, actorNames),
-      versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
-    };
   }
 
   /**

@@ -1,16 +1,4 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  Res,
-  UploadedFile,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { StandardMeta } from '../../../common/utils/paginate';
@@ -27,7 +15,6 @@ import { CreativeUploadRequestDto } from '../dto/creative-upload-request.dto';
 import { CreativeResponseDto, CreativeVersionResponseDto } from '../dto/creative-response.dto';
 import { CreateCreativeDto } from '../dto/create-creative.dto';
 import { TakeActionDto } from '../dto/take-action.dto';
-import { UploadMediaDto } from '../dto/upload-media.dto';
 import { UploadVersionDto } from '../dto/upload-version.dto';
 import { ExportService } from '../services/export.service';
 import { CreativeService } from '../services/review.service';
@@ -76,9 +63,9 @@ export class ReviewController {
   /**
    * Filter-modal support data (locations, actioners, per-creative geo).
    * NOTE: static single-segment GET routes (`export` above, `filter-options`
-   * here) must stay declared BEFORE the parameterized GET routes below
-   * (`:id/history`, `:id`); otherwise `/filter-options` is captured as `:id`
-   * and answers "Creative with ID filter-options not found".
+   * here) must stay declared BEFORE the parameterized GET route below
+   * (`:id`); otherwise `/filter-options` is captured as `:id` and answers
+   * "Creative with ID filter-options not found".
    */
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Get('filter-options')
@@ -88,21 +75,6 @@ export class ReviewController {
     geo: Record<string, string[]>;
   }> {
     return this.creativeService.filterOptions();
-  }
-
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Get(':id/history')
-  async getHistory(
-    @Param('id') id: string,
-    @Query('shape') shape?: string,
-  ): Promise<
-    | { creative: CreativeResponseDto; versions: CreativeVersionResponseDto[] }
-    | CreativeVersionResponseDto[]
-  > {
-    const history = await this.creativeService.getHistory(id);
-    // Upstream compatibility: ?shape=array returns the bare versions array.
-    if (shape === 'array') return history.versions;
-    return history;
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
@@ -149,41 +121,6 @@ export class ReviewController {
     return this.creativeService.createCreative(dto, user.id);
   }
 
-  /**
-   * Upstream-compatible single-call upload: multipart file + fields, streamed
-   * to S3 and bound to a thread in one request. Declared before the
-   * :versionId/* routes so media is never captured as a version id.
-   */
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Post('media')
-  @ResponseMessage('Media uploaded')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 25 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') cb(null, true);
-        else cb(new BadRequestException('Only image/jpeg and image/png files are accepted'), false);
-      },
-    }),
-  )
-  uploadMedia(
-    @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() dto: UploadMediaDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
-    if (!file?.buffer?.length) throw new BadRequestException('file is required');
-    return this.creativeService.uploadMedia(
-      {
-        buffer: file.buffer,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size,
-      },
-      dto,
-      user.id,
-    );
-  }
-
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Post(':id/version')
   @ResponseMessage('Creative version uploaded')
@@ -203,18 +140,6 @@ export class ReviewController {
   @Post(':versionId/action')
   @ResponseMessage('Review decision recorded')
   takeAction(
-    @Param('versionId') versionId: string,
-    @Body() dto: TakeActionDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<CreativeVersionResponseDto> {
-    return this.creativeService.takeAction(versionId, dto, user.id);
-  }
-
-  /** Legacy upstream alias: POST /creatives/version/:versionId/action. */
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @Post('version/:versionId/action')
-  @ResponseMessage('Review decision recorded')
-  takeActionLegacy(
     @Param('versionId') versionId: string,
     @Body() dto: TakeActionDto,
     @CurrentUser() user: AuthUser,
