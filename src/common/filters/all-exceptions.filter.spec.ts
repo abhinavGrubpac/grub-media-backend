@@ -106,4 +106,28 @@ describe('AllExceptionsFilter', () => {
     expect(holder.body?.errorCode).toBe('INTERNAL_ERROR');
     expect(JSON.stringify(holder.body)).not.toContain('hunter2');
   });
+
+  it('maps Multer LIMIT_UNEXPECTED_FILE to a guided 400', () => {
+    const holder: { code?: number; body?: Record<string, unknown> } = {};
+    const err = Object.assign(new Error('Unexpected file field'), {
+      name: 'MulterError',
+      code: 'LIMIT_UNEXPECTED_FILE',
+      field: 'image',
+    });
+    new AllExceptionsFilter().catch(err, host(holder));
+    expect(holder.code).toBe(400);
+    expect(holder.body?.errorCode).toBe('BAD_REQUEST');
+    expect(holder.body?.message).toBe("Attach exactly one file under field 'image'");
+  });
+
+  it('maps Multer LIMIT_FILE_SIZE to a 400', () => {
+    const holder: { code?: number; body?: Record<string, unknown> } = {};
+    const err = Object.assign(new Error('File too large'), {
+      name: 'MulterError',
+      code: 'LIMIT_FILE_SIZE',
+    });
+    new AllExceptionsFilter().catch(err, host(holder));
+    expect(holder.code).toBe(400);
+    expect(holder.body?.message).toBe('Uploaded file is too large');
+  });
 });
