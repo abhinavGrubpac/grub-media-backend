@@ -353,17 +353,22 @@ async function seedBundles(
     bundleIdMap.set(def.name, bundle.id);
 
     // Attach permissions
+    let attached = 0;
     for (const key of def.permKeys) {
       const permId = permMap.get(key);
-      if (!permId) continue;
+      if (!permId) {
+        console.warn(`  WARNING: permission key "${key}" not found in catalog — skipped`);
+        continue;
+      }
       await prisma.bundlePermission.upsert({
         where: { bundleId_permissionId: { bundleId: bundle.id, permissionId: permId } },
         update: {},
         create: { bundleId: bundle.id, permissionId: permId },
       });
+      attached++;
     }
 
-    console.log(`  Bundle "${def.name}": ${def.permKeys.length} permissions (id: ${bundle.id})`);
+    console.log(`  Bundle "${def.name}": ${attached} permissions (id: ${bundle.id})`);
   }
 
   return bundleIdMap;
