@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { LogType, UserRole } from '@prisma/client';
-import { BundleDto, PermissionDto } from '../dto/access.dto';
+import { BundleDto, PermissionDto, UpdateBundleDto } from '../dto/access.dto';
 import { LogsService } from '../../logs/services/logs.service';
 import { describeActor, logRefOf } from '../../../common/utils/log-ref';
 
@@ -14,6 +14,20 @@ export class AccessService {
     private readonly prisma: PrismaService,
     private readonly logs: LogsService,
   ) {}
+  private async assertNotSelfBundle(
+    actorId: string,
+    actorRole: UserRole,
+    bundleId: string,
+  ): Promise<void> {
+    if (actorRole === UserRole.SUPER_ADMIN) return;
+    const selfAssignment = await this.prisma.client.userBundle.findUnique({
+      where: { userId_bundleId: { userId: actorId, bundleId } },
+    });
+    if (selfAssignment) {
+      throw new ForbiddenException('Cannot modify a bundle you are currently assigned to');
+    }
+  }
+
   permissions() {
     return this.prisma.client.permission.findMany({
       orderBy: [{ module: 'asc' }, { page: 'asc' }, { action: 'asc' }],
@@ -90,6 +104,74 @@ export class AccessService {
     });
     return bundle;
   }
+  async updateBundle(actorId: string, actorRole: UserRole, bundleId: string, dto: UpdateBundleDto) {
+    await this.assertNotSelfBundle(actorId, actorRole, bundleId);
+    const existing = await this.prisma.client.permissionBundle.findUnique({
+      where: { id: bundleId },
+      include: { _count: { select: { permissions: true, users: true } } },
+    });
+    if (!existing) throw new NotFoundException('Bundle not found');
+    const oldPermCount = existing._count.permissions;
+
+    const bundle = await this.prisma.client.permissionBundle.update({
+      where: { id: bundleId },
+      data: {
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.permissionIds
+          ? {
+              permissions: {
+                deleteMany: {},
+                create: dto.permissionIds.map((permissionId) => ({ permissionId })),
+              },
+            }
+          : {}),
+      },
+      include: {
+        permissions: { include: { permission: true } },
+        _count: { select: { users: true } },
+      },
+    });
+
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY,
+      actionName: 'Update Bundle',
+      actionText: `The permission bundle "${bundle.name}" was updated by ${await describeActor(this.prisma, actorId)}`,
+      userId: actorId,
+      target: bundleId,
+      oldDetail: { permissionCount: oldPermCount },
+      newDetail: { permissionCount: bundle.permissions.length },
+    });
+
+    return { bundle, affectedUserCount: bundle._count.users };
+  }
+
+  async deleteBundle(actorId: string, actorRole: UserRole, bundleId: string) {
+    await this.assertNotSelfBundle(actorId, actorRole, bundleId);
+    const existing = await this.prisma.client.permissionBundle.findUnique({
+      where: { id: bundleId },
+      include: { _count: { select: { users: true } } },
+    });
+    if (!existing) throw new NotFoundException('Bundle not found');
+    const affectedUserCount = existing._count.users;
+
+    await this.prisma.client.permissionBundle.delete({ where: { id: bundleId } });
+
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY,
+      actionName: 'Delete Bundle',
+      actionText: `The permission bundle "${existing.name}" was deleted by ${await describeActor(this.prisma, actorId)}`,
+      userId: actorId,
+      target: bundleId,
+      oldDetail: { name: existing.name, affectedUserCount },
+      newDetail: null,
+    });
+
+    return { id: bundleId, name: existing.name, affectedUserCount };
+  }
+
   async assignBundle(actor: string, employeeId: string, bundleId: string) {
     // Pre-read the existing assignment so the audit row can carry the previous
     // state when this upsert reassigns rather than creates; resolve the names
