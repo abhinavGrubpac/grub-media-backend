@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { LogType, UserRole } from '@prisma/client';
 import { BundleDto, PermissionDto, ReassignBundleDto, UpdateBundleDto } from '../dto/access.dto';
@@ -172,7 +177,14 @@ export class AccessService {
     return { id: bundleId, name: existing.name, affectedUserCount };
   }
 
-  async reassignBundle(actorId: string, fromBundleId: string, dto: ReassignBundleDto) {
+  async reassignBundle(
+    actorId: string,
+    actorRole: UserRole,
+    fromBundleId: string,
+    dto: ReassignBundleDto,
+  ) {
+    await this.assertNotSelfBundle(actorId, actorRole, fromBundleId);
+
     const [fromBundle, targetBundle] = await Promise.all([
       this.prisma.client.permissionBundle.findUnique({
         where: { id: fromBundleId },
@@ -186,32 +198,47 @@ export class AccessService {
     if (!fromBundle) throw new NotFoundException('Source bundle not found');
     if (!targetBundle) throw new NotFoundException('Target bundle not found');
 
-    await this.prisma.client.$transaction(async (tx) => {
-      await tx.userBundle.deleteMany({
-        where: { bundleId: fromBundleId, userId: { in: dto.userIds } },
+    // Restrict to users actually assigned to the source bundle — prevents
+    // arbitrary userId injection and gives an accurate audit count.
+    const validAssignments = await this.prisma.client.userBundle.findMany({
+      where: { bundleId: fromBundleId, userId: { in: dto.userIds } },
+      select: { userId: true },
+    });
+    if (validAssignments.length === 0) {
+      throw new BadRequestException(
+        'None of the specified users are assigned to the source bundle',
+      );
+    }
+    const validUserIds = validAssignments.map((a) => a.userId);
+
+    const { deleted } = await this.prisma.client.$transaction(async (tx) => {
+      const deleted = await tx.userBundle.deleteMany({
+        where: { bundleId: fromBundleId, userId: { in: validUserIds } },
       });
       await tx.userBundle.createMany({
-        data: dto.userIds.map((userId) => ({
+        data: validUserIds.map((userId) => ({
           userId,
           bundleId: dto.targetBundleId,
           assignedBy: actorId,
         })),
         skipDuplicates: true,
       });
+      return { deleted };
     });
 
+    const reassigned = deleted.count;
     await this.logs.record({
       typeEnum: LogType.EMPLOYEE,
       categoryName: LOG_CATEGORY,
       actionName: 'Reassign Bundle',
-      actionText: `${dto.userIds.length} user(s) were reassigned from bundle "${fromBundle.name}" to "${targetBundle.name}" by ${await describeActor(this.prisma, actorId)}`,
+      actionText: `${reassigned} user(s) were reassigned from bundle "${fromBundle.name}" to "${targetBundle.name}" by ${await describeActor(this.prisma, actorId)}`,
       userId: actorId,
       target: dto.targetBundleId,
-      oldDetail: { fromBundleId, fromBundleName: fromBundle.name, userCount: dto.userIds.length },
+      oldDetail: { fromBundleId, fromBundleName: fromBundle.name, userCount: reassigned },
       newDetail: { targetBundleId: dto.targetBundleId, targetBundleName: targetBundle.name },
     });
 
-    return { reassigned: dto.userIds.length, fromBundleId, targetBundleId: dto.targetBundleId };
+    return { reassigned, fromBundleId, targetBundleId: dto.targetBundleId };
   }
 
   async assignBundle(actor: string, employeeId: string, bundleId: string) {

@@ -76,7 +76,7 @@ export class AccessController {
     @Param('id') fromBundleId: string,
     @Body() dto: ReassignBundleDto,
   ) {
-    return this.access.reassignBundle(u.id, fromBundleId, dto);
+    return this.access.reassignBundle(u.id, u.role, fromBundleId, dto);
   }
   @Post('employees/:employeeId/bundles') assign(
     @CurrentUser() u: AuthUser,
