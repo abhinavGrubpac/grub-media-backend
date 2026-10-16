@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsOptional, IsString, Length, ValidateNested } from 'class-validator';
 import { CreativeScheduleInputDto } from './creative-schedule.dto';
 
@@ -27,6 +27,7 @@ export class InitialVersionDto {
 export class CreateCreativeDto {
   @ApiProperty({ description: 'Brand the creative belongs to' })
   @IsString()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
   brand_id!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 200 })

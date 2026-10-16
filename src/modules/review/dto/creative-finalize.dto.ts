@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsOptional, IsString, Length } from 'class-validator';
 
 export class CreativeFinalizeDto {
@@ -7,11 +8,13 @@ export class CreativeFinalizeDto {
   })
   @IsOptional()
   @IsString()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
   creative_id?: string;
 
   @ApiPropertyOptional({ description: 'Brand for a new creative (required without creative_id)' })
   @IsOptional()
   @IsString()
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
   brand_id?: string;
 
   @ApiPropertyOptional({ description: 'Name for a new creative', maxLength: 200 })
