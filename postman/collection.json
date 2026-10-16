@@ -723,7 +723,18 @@
                 "media"
               ]
             },
-            "description": "multipart file=image/jpeg|png (25MB) + fields creative_id|brand_id+name. In Postman use form-data body type 'file'."
+            "description": "multipart file=image/jpeg|png (25MB) + fields creative_id|brand_id+name. In Postman use form-data body type 'file'. Text fields: creative_id XOR brand_id+name, media_type, notes. File limit 25MB (jpeg/png).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select an image file (PNG/JPEG)"
+                }
+              ]
+            }
           }
         },
         {
@@ -864,12 +875,12 @@
                 {
                   "key": "image",
                   "type": "file",
-                  "src": "image.png",
-                  "description": "PNG or JPEG query image"
+                  "src": "",
+                  "description": "Select an image file (PNG/JPEG)"
                 }
               ]
             },
-            "description": "Upload PNG/JPEG; matches by dHash Hamming distance, nearest first. Exact duplicates land at distance 0."
+            "description": "Upload PNG/JPEG; matches by dHash Hamming distance, nearest first. Exact duplicates land at distance 0. Query: ?max_distance= (0-64) &page= &limit=. File limit 5MB."
           },
           "response": []
         },
