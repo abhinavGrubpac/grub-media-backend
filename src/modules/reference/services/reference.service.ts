@@ -11,13 +11,11 @@ import { EventOutboxService } from '../../events/event.outbox';
 import { EventTypes } from '../../events/events.constants';
 import { ReferenceDocResponseDto } from '../dto/reference-response.dto';
 import { ReferenceFinalizeDto } from '../dto/reference-finalize.dto';
-import { ReferenceLinkDto } from '../dto/reference-link.dto';
 import {
   REFERENCE_SORT_KEYS,
   ReferenceListQueryDto,
   ReferenceSortKey,
 } from '../dto/reference-list-query.dto';
-import { ReferenceThumbnailUploadUrlDto } from '../dto/reference-thumbnail-upload.dto';
 import { ReferenceUpdateDto } from '../dto/reference-update.dto';
 import { ReferenceUploadUrlDto } from '../dto/reference-upload-url.dto';
 import { REFERENCE_MAX_FILE_BYTES, StorageService } from './storage.service';
@@ -26,7 +24,6 @@ export interface ReferenceCreateInput {
   title: string;
   category: string;
   file_url: string;
-  thumbnail_url?: string | null;
   file_size_bytes?: number | null;
   description?: string | null;
   published_on?: string | null;
@@ -36,7 +33,6 @@ export interface ReferenceUpdateInput {
   title?: string;
   category?: string;
   file_url?: string;
-  thumbnail_url?: string | null;
   description?: string | null;
   published_on?: string | null;
 }
@@ -132,7 +128,7 @@ export class ReferenceService {
   async generateUploadUrl(
     dto: ReferenceUploadUrlDto,
     actorId: string,
-  ): Promise<{ upload_url: string; file_key: string }> {
+  ): Promise<{ upload_url: string; file_key: string; file_url: string }> {
     this.storage.assertFileSizeAllowed(dto.file_size_bytes);
     await this.outbox.emit({
       eventType: 'reference.upload_intent',
@@ -148,42 +144,32 @@ export class ReferenceService {
     });
     const fileKey = this.storage.buildKey('references', dto.title, 'pdf');
     const uploadUrl = await this.storage.presignedUploadUrl(fileKey);
-    return { upload_url: uploadUrl, file_key: fileKey };
-  }
-
-  /**
-   * Issues a presigned thumbnail target for the auto-generated first-page
-   * preview (client renders page 1 via PDF preview and uploads JPEG/PNG).
-   */
-  async generateThumbnailUploadUrl(
-    dto: ReferenceThumbnailUploadUrlDto,
-    actorId: string,
-  ): Promise<{ upload_url: string; file_key: string; thumbnail_url_hint: string | null }> {
-    this.storage.assertThumbnailSizeAllowed(dto.file_size_bytes);
-    const ext = dto.content_type ?? 'jpeg';
-    const fileKey = this.storage.buildKey('references/thumbnails', dto.title, ext);
-    const uploadUrl = await this.storage.presignedUploadUrl(fileKey);
-    await this.outbox.emit({
-      eventType: 'reference.upload_intent',
-      entityType: 'ReferenceDoc',
-      entityId: 'pending',
-      key: actorId,
-      actorId,
-      payload: { title: dto.title, thumbnail_key: fileKey },
-    });
-    return { upload_url: uploadUrl, file_key: fileKey, thumbnail_url_hint: null };
+    // file_url is the permanent object URL — paste it straight into finalize.
+    // upload_url is single-use SigV4 (expires in 15 min) for the PUT only.
+    return {
+      upload_url: uploadUrl,
+      file_key: fileKey,
+      file_url: this.storage.publicUrlForKey(fileKey),
+    };
   }
 
   async finalizeUpload(dto: ReferenceFinalizeDto): Promise<ReferenceDocResponseDto> {
     const title = this.requireTrimmed(dto.title, 'title');
     const category = this.requireTrimmed(dto.category, 'category');
-    this.storage.assertFileUrlAllowed(dto.file_url);
+    // Easiest path: paste file_key from upload-url and the server builds the
+    // URL. file_url also accepted (presigned query strings are stripped).
+    const keyInput = dto.file_key?.trim() ? dto.file_key.trim() : null;
+    const urlInput = dto.file_url?.trim() ? dto.file_url.trim() : null;
+    if (!keyInput && !urlInput) {
+      throw new BadRequestException('Provide file_key or file_url');
+    }
+    const fileUrl = this.storage.resolveStoredFileUrl((keyInput ?? urlInput) as string);
+    this.storage.assertFileUrlAllowed(fileUrl);
     this.storage.assertFileSizeAllowed(dto.file_size_bytes);
-    if (dto.thumbnail_url) this.storage.assertFileUrlAllowed(dto.thumbnail_url);
 
     // Authoritative 99 MB check: declared size is validated above; when S3 is
     // configured the stored object is HEADed so spoofed sizes cannot bypass.
-    const key = this.storage.extractKeyFromUrl(dto.file_url);
+    const key = this.storage.extractKeyFromUrl(fileUrl);
     if (key) {
       const actual = await this.storage.getObjectSize(key).catch(() => null);
       if (actual !== null && actual > REFERENCE_MAX_FILE_BYTES) {
@@ -198,8 +184,7 @@ export class ReferenceService {
         data: {
           title,
           category,
-          fileUrl: dto.file_url,
-          thumbnailUrl: dto.thumbnail_url?.trim() ? dto.thumbnail_url.trim() : null,
+          fileUrl,
           fileSizeBytes: dto.file_size_bytes ?? null,
           description: dto.description?.trim() ? dto.description.trim() : null,
           publishedOn: (parsePublishedOn(dto.published_on ?? null) as Date | null) ?? null,
@@ -215,7 +200,6 @@ export class ReferenceService {
           title: created.title,
           category: created.category,
           file_url: created.fileUrl,
-          thumbnail_url: created.thumbnailUrl,
           file_size_bytes: created.fileSizeBytes,
           description: created.description,
           published_on: created.publishedOn ? created.publishedOn.toISOString() : null,
@@ -233,17 +217,11 @@ export class ReferenceService {
     if (dto.title !== undefined) this.requireTrimmed(dto.title, 'title');
     if (dto.category !== undefined) this.requireTrimmed(dto.category, 'category');
     if (dto.file_url !== undefined) this.storage.assertFileUrlAllowed(dto.file_url);
-    if (dto.thumbnail_url !== undefined && dto.thumbnail_url.trim() !== '') {
-      this.storage.assertFileUrlAllowed(dto.thumbnail_url);
-    }
 
     const data: Prisma.ReferenceDocUpdateInput = {
       ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
       ...(dto.category !== undefined ? { category: dto.category.trim() } : {}),
       ...(dto.file_url !== undefined ? { fileUrl: dto.file_url } : {}),
-      ...(dto.thumbnail_url !== undefined
-        ? { thumbnailUrl: dto.thumbnail_url.trim() ? dto.thumbnail_url.trim() : null }
-        : {}),
       ...(dto.description !== undefined
         ? { description: dto.description.trim() ? dto.description.trim() : null }
         : {}),
@@ -265,14 +243,12 @@ export class ReferenceService {
             title: existing.title,
             category: existing.category,
             file_url: existing.fileUrl,
-            thumbnail_url: existing.thumbnailUrl,
             description: existing.description,
           },
           newValue: {
             title: updated.title,
             category: updated.category,
             file_url: updated.fileUrl,
-            thumbnail_url: updated.thumbnailUrl,
             description: updated.description,
           },
         },
@@ -398,39 +374,6 @@ export class ReferenceService {
     });
   }
 
-  /** Justifies a review decision by linking a document to a creative version. */
-  async linkToCreative(
-    dto: ReferenceLinkDto,
-    actorId: string,
-  ): Promise<{ version_id: string; doc_id: string }> {
-    const version = await this.prisma.client.creativeVersion.findUnique({
-      where: { id: dto.version_id },
-    });
-    if (!version) throw new NotFoundException(`Creative version ${dto.version_id} not found`);
-    const doc = await this.prisma.client.referenceDoc.findUnique({ where: { id: dto.doc_id } });
-    if (!doc) throw new NotFoundException(`Reference document ${dto.doc_id} not found`);
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.creativeReference.create({
-        data: { versionId: dto.version_id, docId: dto.doc_id },
-      });
-      await this.outbox.emitInTx(tx, {
-        eventType: EventTypes.referenceLinkedToVersion,
-        entityType: 'CreativeReference',
-        entityId: `${dto.version_id}:${dto.doc_id}`,
-        key: dto.version_id,
-        actorId,
-        payload: {
-          version_id: dto.version_id,
-          doc_id: dto.doc_id,
-          doc_title: doc.title,
-          creative_id: version.creativeId,
-        },
-      });
-    });
-    return { version_id: dto.version_id, doc_id: dto.doc_id };
-  }
-
   private requireTrimmed(value: string, field: string): string {
     const trimmed = value.trim();
     if (trimmed.length === 0) throw new BadRequestException(`${field} must not be empty`);
@@ -444,7 +387,6 @@ export class ReferenceService {
         id: doc.id,
         title: doc.title,
         file_url: doc.fileUrl,
-        thumbnail_url: (doc as { thumbnailUrl?: string | null }).thumbnailUrl ?? null,
         file_size_bytes: (doc as { fileSizeBytes?: number | null }).fileSizeBytes ?? null,
         category: doc.category,
         description: doc.description,

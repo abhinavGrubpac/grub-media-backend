@@ -14,10 +14,6 @@ export class ReferenceDocResponseDto {
   @Expose()
   file_url!: string;
 
-  @ApiPropertyOptional({ description: 'First-page thumbnail preview (auto-uploaded with the doc)' })
-  @Expose()
-  thumbnail_url!: string | null;
-
   @ApiPropertyOptional({ description: 'Stored file size in bytes (99 MB max)' })
   @Expose()
   file_size_bytes!: number | null;

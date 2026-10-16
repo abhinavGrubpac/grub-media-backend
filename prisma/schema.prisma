@@ -328,7 +328,6 @@ model ReferenceDoc {
   id            String              @id @default(cuid())
   title         String
   fileUrl       String
-  thumbnailUrl  String?
   fileSizeBytes Int?
   category      String
   description   String?

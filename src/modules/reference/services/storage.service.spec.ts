@@ -1,4 +1,4 @@
-import { REFERENCE_MAX_FILE_BYTES, StorageService } from './storage.service';
+import { REFERENCE_MAX_FILE_BYTES, StorageService, stripUrlQuery } from './storage.service';
 
 function makeService(configMap: Record<string, string | undefined>): StorageService {
   const config = { get: jest.fn((key: string) => configMap[key]) };
@@ -104,5 +104,44 @@ describe('StorageService', () => {
       'mock-storage.local/downloads/references/1.pdf',
     );
     await expect(storage.getObjectSize('references/1.pdf')).resolves.toBeNull();
+  });
+
+  it('builds ready-to-store public URLs from keys', () => {
+    const storage = makeService({
+      'app.nodeEnv': 'development',
+      'storage.bucket': 'grub-media',
+      'storage.region': 'ap-south-1',
+      'storage.accessKeyId': 'key',
+      'storage.secretAccessKey': 'secret',
+    });
+    expect(storage.publicUrlForKey('references/1.pdf')).toBe(
+      'https://grub-media.s3.ap-south-1.amazonaws.com/references/1.pdf',
+    );
+  });
+
+  it('resolves finalize file_key input to canonical URLs', () => {
+    const storage = makeService({
+      'app.nodeEnv': 'development',
+      'storage.bucket': 'grub-media',
+      'storage.region': 'ap-south-1',
+      'storage.accessKeyId': 'key',
+      'storage.secretAccessKey': 'secret',
+    });
+    expect(storage.resolveStoredFileUrl('references/1.pdf')).toBe(
+      'https://grub-media.s3.ap-south-1.amazonaws.com/references/1.pdf',
+    );
+    // A pasted presigned upload_url still resolves to the permanent object URL.
+    expect(
+      storage.resolveStoredFileUrl(
+        'https://grub-media.s3.ap-south-1.amazonaws.com/references/1.pdf?X-Amz-Signature=abc',
+      ),
+    ).toBe('https://grub-media.s3.ap-south-1.amazonaws.com/references/1.pdf');
+    expect(() => storage.resolveStoredFileUrl('   ')).toThrow(/must not be empty/);
+  });
+
+  it('strips query strings and fragments from URLs', () => {
+    expect(stripUrlQuery('https://cdn.test/a.pdf?x=1#frag')).toBe('https://cdn.test/a.pdf');
+    expect(stripUrlQuery('https://cdn.test/a.pdf')).toBe('https://cdn.test/a.pdf');
+    expect(stripUrlQuery('not a url')).toBe('not a url');
   });
 });

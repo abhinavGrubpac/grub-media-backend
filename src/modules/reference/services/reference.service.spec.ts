@@ -5,7 +5,6 @@ const docRow = {
   id: 'doc1',
   title: 'CPC Guidelines',
   fileUrl: 'https://grubpac-media.s3.ap-south-1.amazonaws.com/references/1.pdf',
-  thumbnailUrl: 'https://grubpac-media.s3.ap-south-1.amazonaws.com/references/thumbnails/1.jpeg',
   fileSizeBytes: 1024,
   category: 'Regulatory',
   description: 'Central rates',
@@ -45,9 +44,10 @@ function makeDeps() {
       .fn()
       .mockResolvedValue('https://mock-storage.local/uploads/references/1-guidelines.pdf'),
     presignedDownloadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/downloads/1.pdf'),
+    publicUrlForKey: jest.fn((key: string) => `https://cdn.test/${key}`),
+    resolveStoredFileUrl: jest.fn((input: string) => input),
     assertFileUrlAllowed: jest.fn(),
     assertFileSizeAllowed: jest.fn(),
-    assertThumbnailSizeAllowed: jest.fn(),
     extractKeyFromUrl: jest.fn().mockReturnValue(null),
     getObjectSize: jest.fn().mockResolvedValue(null),
   };
@@ -137,6 +137,7 @@ describe('ReferenceService.generateUploadUrl', () => {
 
     expect(storage.assertFileSizeAllowed).toHaveBeenCalledWith(undefined);
     expect(result.file_key).toContain('references/');
+    expect(result.file_url).toBe('https://cdn.test/references/1-guidelines.pdf');
     expect(outbox.emit).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'reference.upload_intent',
@@ -180,11 +181,10 @@ describe('ReferenceService.finalizeUpload', () => {
       expect.anything(),
       expect.objectContaining({ eventType: 'reference.uploaded' }),
     );
-    expect(response.thumbnail_url).toBe(docRow.thumbnailUrl);
     expect(response.file_size_bytes).toBe(docRow.fileSizeBytes);
   });
 
-  it('persists thumbnail previews and declared file sizes', async () => {
+  it('persists declared file sizes', async () => {
     const { service, referenceDoc } = makeDeps();
     referenceDoc.create.mockResolvedValue(docRow);
 
@@ -192,14 +192,12 @@ describe('ReferenceService.finalizeUpload', () => {
       title: 'CPC Guidelines',
       category: 'Regulatory',
       file_url: docRow.fileUrl,
-      thumbnail_url: docRow.thumbnailUrl,
       file_size_bytes: 1024,
     });
 
     expect(referenceDoc.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          thumbnailUrl: docRow.thumbnailUrl,
           fileSizeBytes: 1024,
         }),
       }),
@@ -222,6 +220,32 @@ describe('ReferenceService.finalizeUpload', () => {
     await expect(
       service.finalizeUpload({ title: '   ', category: 'Regulatory', file_url: 'https://x/y.pdf' }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('accepts file_key instead of file_url', async () => {
+    const { service, referenceDoc, storage } = makeDeps();
+    referenceDoc.create.mockResolvedValue(docRow);
+    storage.resolveStoredFileUrl.mockReturnValue('https://cdn.test/references/1-guidelines.pdf');
+
+    await service.finalizeUpload({
+      title: 'CPC Guidelines',
+      category: 'Regulatory',
+      file_key: 'references/1-guidelines.pdf',
+    });
+
+    expect(storage.resolveStoredFileUrl).toHaveBeenCalledWith('references/1-guidelines.pdf');
+    expect(referenceDoc.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fileUrl: 'https://cdn.test/references/1-guidelines.pdf' }),
+      }),
+    );
+  });
+
+  it('requires file_key or file_url', async () => {
+    const { service } = makeDeps();
+    await expect(
+      service.finalizeUpload({ title: 'CPC Guidelines', category: 'Regulatory' }),
+    ).rejects.toThrow(/file_key or file_url/);
   });
 });
 
@@ -349,27 +373,5 @@ describe('ReferenceService.downloadUrl', () => {
     const { service, referenceDoc } = makeDeps();
     referenceDoc.findUnique.mockResolvedValue(null);
     await expect(service.downloadUrl('missing')).rejects.toThrow(NotFoundException);
-  });
-});
-
-describe('ReferenceService.linkToCreative', () => {
-  it('validates both the version and the document before linking', async () => {
-    const { service, creativeVersion, referenceDoc } = makeDeps();
-    creativeVersion.findUnique.mockResolvedValue({ id: 'v1', creativeId: 'c1' });
-    referenceDoc.findUnique.mockResolvedValue(docRow);
-
-    await service.linkToCreative({ version_id: 'v1', doc_id: 'doc1' }, 'reviewer1');
-
-    expect(creativeVersion.findUnique).toHaveBeenCalledWith({ where: { id: 'v1' } });
-    expect(referenceDoc.findUnique).toHaveBeenCalledWith({ where: { id: 'doc1' } });
-  });
-
-  it('rejects links to unknown versions', async () => {
-    const { service, creativeVersion } = makeDeps();
-    creativeVersion.findUnique.mockResolvedValue(null);
-
-    await expect(
-      service.linkToCreative({ version_id: 'missing', doc_id: 'doc1' }, 'r1'),
-    ).rejects.toThrow(NotFoundException);
   });
 });

@@ -20,12 +20,6 @@ export class ReferenceUpdateDto {
   @Length(1, 2000)
   file_url?: string;
 
-  @ApiPropertyOptional({ description: 'First-page thumbnail preview URL', maxLength: 2000 })
-  @IsOptional()
-  @IsString()
-  @Length(0, 2000)
-  thumbnail_url?: string;
-
   @ApiPropertyOptional({
     description: 'Pass an empty string to clear the description',
     maxLength: 2000,

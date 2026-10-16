@@ -11,8 +11,18 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 /** Max uploaded doc size: 99 MB or less (portal rule). */
 export const REFERENCE_MAX_FILE_BYTES = 99 * 1024 * 1024;
 
-/** Max first-page thumbnail size (client-generated JPEG/PNG preview). */
-export const REFERENCE_THUMBNAIL_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * Drops query string and fragment from a URL (presigned SigV4 params must
+ * never be stored). Non-URLs pass through for downstream validators.
+ */
+export function stripUrlQuery(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return value;
+  }
+}
 
 /**
  * Media storage abstraction. Without S3 credentials the service runs in local
@@ -43,6 +53,30 @@ export class StorageService {
       .replace(/^-|-$/g, '')
       .slice(0, 80);
     return `${prefix}/${Date.now()}-${slug || 'file'}.${ext}`;
+  }
+
+  /**
+   * Ready-to-store public URL for an issued key. Copy this straight into
+   * finalize `file_url` — never the presigned `upload_url` (its SigV4 query
+   * string expires in 15 minutes and would rot the stored link).
+   */
+  publicUrlForKey(key: string): string {
+    if (!this.isConfigured) return `https://mock-storage.local/uploads/${key}`;
+    const bucket = this.config.get<string>('storage.bucket');
+    const region = this.config.get<string>('storage.region') ?? 'ap-south-1';
+    return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  }
+
+  /**
+   * Finalize input -> canonical stored URL. Accepts a bare bucket key or a
+   * full object URL; presigned query strings are stripped so a pasted
+   * `upload_url` still resolves to the permanent object URL.
+   */
+  resolveStoredFileUrl(input: string): string {
+    const clean = stripUrlQuery((input ?? '').trim());
+    if (!clean) throw new BadRequestException('file_key/file_url must not be empty');
+    if (!this.isConfigured) return clean;
+    return this.resolveCreativeFileUrl(clean);
   }
 
   private client(): S3Client {
@@ -102,17 +136,6 @@ export class StorageService {
     }
     if (size > REFERENCE_MAX_FILE_BYTES) {
       throw new BadRequestException(`${field} must be 99 MB or less (got ${size} bytes)`);
-    }
-  }
-
-  /** Rejects thumbnail previews larger than 5 MB. */
-  assertThumbnailSizeAllowed(size: number | undefined | null): void {
-    if (size === undefined || size === null) return;
-    if (!Number.isInteger(size) || size <= 0) {
-      throw new BadRequestException('thumbnail_file_size_bytes must be a positive integer');
-    }
-    if (size > REFERENCE_THUMBNAIL_MAX_BYTES) {
-      throw new BadRequestException(`thumbnail must be 5 MB or less (got ${size} bytes)`);
     }
   }
 

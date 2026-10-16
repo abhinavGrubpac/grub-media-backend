@@ -18,10 +18,8 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { BulkRestoreDto, RestoreAllQueryDto } from '../dto/bulk-restore.dto';
 import { ReferenceFinalizeDto } from '../dto/reference-finalize.dto';
-import { ReferenceLinkDto } from '../dto/reference-link.dto';
 import { ReferenceListQueryDto } from '../dto/reference-list-query.dto';
 import { ReferenceDocResponseDto } from '../dto/reference-response.dto';
-import { ReferenceThumbnailUploadUrlDto } from '../dto/reference-thumbnail-upload.dto';
 import { ReferenceUpdateDto } from '../dto/reference-update.dto';
 import { ReferenceUploadUrlDto } from '../dto/reference-upload-url.dto';
 import { ReferenceService } from '../services/reference.service';
@@ -59,18 +57,8 @@ export class ReferenceController {
   requestUploadUrl(
     @Body() dto: ReferenceUploadUrlDto,
     @CurrentUser() user: AuthUser,
-  ): Promise<{ upload_url: string; file_key: string }> {
+  ): Promise<{ upload_url: string; file_key: string; file_url: string }> {
     return this.referenceService.generateUploadUrl(dto, user.id);
-  }
-
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Post('thumbnail-upload-url')
-  @ResponseMessage('Thumbnail upload URL generated')
-  requestThumbnailUploadUrl(
-    @Body() dto: ReferenceThumbnailUploadUrlDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<{ upload_url: string; file_key: string; thumbnail_url_hint: string | null }> {
-    return this.referenceService.generateThumbnailUploadUrl(dto, user.id);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
@@ -127,16 +115,5 @@ export class ReferenceController {
   @ResponseMessage('Reference document restored')
   restore(@Param('id') id: string): Promise<ReferenceDocResponseDto> {
     return this.referenceService.restore(id);
-  }
-
-  /** Links a document to a creative version to justify a review decision. */
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @Post('link')
-  @ResponseMessage('Reference linked to version')
-  linkToCreative(
-    @Body() dto: ReferenceLinkDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<{ version_id: string; doc_id: string }> {
-    return this.referenceService.linkToCreative(dto, user.id);
   }
 }

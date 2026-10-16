@@ -14,19 +14,25 @@ export class ReferenceFinalizeDto {
   @Length(1, 100)
   category!: string;
 
-  @ApiProperty({ description: 'Bucket-scoped file URL returned after the upload', maxLength: 2000 })
-  @IsString()
-  @Length(1, 2000)
-  file_url!: string;
-
   @ApiPropertyOptional({
-    description: 'First-page thumbnail preview URL (auto-uploaded with the doc)',
+    description:
+      'Stored file URL. Optional when file_key is given; presigned query strings are stripped automatically',
     maxLength: 2000,
   })
   @IsOptional()
   @IsString()
   @Length(1, 2000)
-  thumbnail_url?: string;
+  file_url?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Bare bucket key from upload-url (e.g. references/123-slug.pdf). Easiest option — the server builds the file URL',
+    maxLength: 2000,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 2000)
+  file_key?: string;
 
   @ApiPropertyOptional({ description: 'Stored file size in bytes; must be 99 MB or less' })
   @IsOptional()

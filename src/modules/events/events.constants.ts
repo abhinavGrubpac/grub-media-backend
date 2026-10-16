@@ -93,7 +93,6 @@ export const EventTypes = {
   referenceUnarchived: 'reference.unarchived',
   referenceBulkRestored: 'reference.bulk_restored',
   referenceDeleted: 'reference.deleted',
-  referenceLinkedToVersion: 'reference.linked_to_version',
 
   // notification / system
   notificationCreated: 'notification.created',
