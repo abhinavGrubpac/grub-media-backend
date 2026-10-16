@@ -7,5 +7,5 @@
     "incremental": false,
     "declaration": false
   },
-  "include": ["prisma/seed.ts"]
+  "include": ["prisma/seed.ts", "prisma/seed-logs.ts"]
 }

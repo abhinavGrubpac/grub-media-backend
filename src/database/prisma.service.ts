@@ -77,8 +77,47 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   });
 
   async onModuleInit(): Promise<void> {
-    await this.$connect();
-    this.logger.log('Prisma connected');
+    const connected = await this.connectWithRetry();
+    this.logger.log(
+      connected
+        ? 'Prisma connected'
+        : 'Prisma will connect lazily — database was unreachable at boot',
+    );
+  }
+
+  /**
+   * Eagerly connect, retrying through transient outages (a briefly unreachable
+   * database server must not kill the boot — e.g. a cloud DB waking up or a
+   * network blip). Bounded exponential backoff: 1s → 2s → 4s → 8s (5 attempts,
+   * ~15s worst case). If it still fails, WARN and continue instead of
+   * crashing: Prisma reconnects lazily on the next query anyway, and
+   * GET /api/health reports 503 until the database is reachable again.
+   *
+   * @returns true when the eager $connect succeeded, false when we fell back
+   * to lazy connection after exhausting the retries.
+   */
+  private async connectWithRetry(attempts = 5, baseDelayMs = 1000): Promise<boolean> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        await this.$connect();
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (attempt === attempts) {
+          this.logger.warn(
+            `Prisma $connect still failing after ${attempts} attempts (${message}). ` +
+              'Continuing — the client will reconnect lazily on the next query.',
+          );
+          return false;
+        }
+        const delay = baseDelayMs * 2 ** (attempt - 1);
+        this.logger.warn(
+          `Prisma $connect failed (attempt ${attempt}/${attempts}): ${message} — retrying in ${delay}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    return false;
   }
 
   async onModuleDestroy(): Promise<void> {

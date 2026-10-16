@@ -21,6 +21,7 @@ import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
 import { HelpModule } from './modules/help/help.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { LogsModule } from './modules/logs/logs.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -94,6 +95,7 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     OrganizationsModule,
     HealthModule,
     HelpModule,
+    LogsModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.

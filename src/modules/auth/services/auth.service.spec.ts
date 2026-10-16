@@ -1,9 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import {
-  InvalidCredentialsException,
-  UserNotFoundException,
-} from '../../../common/exceptions/domain.exceptions';
+import { InvalidCredentialsException } from '../../../common/exceptions/domain.exceptions';
 
 jest.mock('argon2', () => ({
   verify: jest.fn(),
@@ -91,7 +88,6 @@ function build(opts: {
     },
     user: {
       update: jest.fn().mockResolvedValue({}),
-      findFirst: jest.fn().mockResolvedValue(null),
     },
   } as never;
 
@@ -100,14 +96,17 @@ function build(opts: {
     sendPasswordResetLink: jest.fn().mockResolvedValue(undefined),
   } as never;
 
+  const logs = { record: jest.fn().mockResolvedValue(undefined) } as never;
+
   return {
-    svc: new AuthService(users, tokens, redis, config, prisma, mailer),
+    svc: new AuthService(users, tokens, redis, config, prisma, mailer, logs),
     users,
     tokens,
     redis,
     config,
     prisma,
     mailer,
+    logs,
   };
 }
 
@@ -119,13 +118,31 @@ describe('AuthService.login', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('returns tokens + user on valid credentials and clears the attempt counter', async () => {
-    const { svc, redis } = build({ verify: true });
+    const { svc, redis, logs } = build({ verify: true });
     const res = await svc.login({ email: 'a@b.c', password: 'x' }, { ip: '1.1.1.1' });
     expect(res.accessToken).toBe('a');
     expect(res.refreshToken).toBe('r');
     expect(res.user).not.toHaveProperty('passwordHash');
     expect(res.user.email).toBe('a@b.c');
     expect((redis as never as { del: jest.Mock }).del).toHaveBeenCalled();
+    expect((logs as never as { record: jest.Mock }).record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        typeEnum: 'SYSTEM', // auth-session events live in the SYSTEM stream
+        categoryName: 'Authentication',
+        actionName: 'Login',
+        userId: 'u1',
+      }),
+    );
+  });
+
+  it('records an ACTIVITY/Failed Login audit row on a wrong password', async () => {
+    const { svc, logs } = build({ verify: false });
+    await expect(svc.login({ email: 'a@b.c', password: 'x' }, {})).rejects.toBeInstanceOf(
+      InvalidCredentialsException,
+    );
+    expect((logs as never as { record: jest.Mock }).record).toHaveBeenCalledWith(
+      expect.objectContaining({ actionName: 'Failed Login', target: 'a@b.c' }),
+    );
   });
 
   it('throws InvalidCredentials on a wrong password', async () => {
@@ -230,11 +247,18 @@ describe('AuthService.requestOtpLogin', () => {
     );
   });
 
-  it('throws UserNotFoundException when the email is not registered', async () => {
-    const { svc } = build({ prismaUser: null });
-    await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
-      UserNotFoundException,
-    );
+  it('resolves silently without sending an OTP when the email is not registered (no enumeration)', async () => {
+    const { svc, mailer, logs } = build({ prismaUser: null });
+    await expect(svc.requestOtpLogin({ email: 'ghost@b.c' })).resolves.toBeUndefined();
+    expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
+    // The probe is still audited for admins — with no userId (no account).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('OTP Requested');
+    expect(arg.userId).toBeUndefined();
+    expect(arg.actionText).toContain('ghost@b.c');
   });
 
   it('throws Forbidden when account is inactive (does not send OTP)', async () => {
@@ -251,6 +275,22 @@ describe('AuthService.requestOtpLogin', () => {
       ForbiddenException,
     );
     expect((mailer as never as { sendOtp: jest.Mock }).sendOtp).not.toHaveBeenCalled();
+  });
+
+  it('still records the OTP Requested row when email delivery fails', async () => {
+    const { svc, mailer, logs } = build({});
+    (mailer as never as { sendOtp: jest.Mock }).sendOtp.mockRejectedValue(new Error('SMTP down'));
+
+    await expect(svc.requestOtpLogin({ email: 'a@b.c' }, { ip: '1.1.1.1' })).rejects.toThrow();
+
+    // The code was created before the send — the attempt must be audited even
+    // though delivery threw (the 5xx failure row covers the delivery error).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('OTP Requested');
+    expect(arg.userId).toBe('u1');
   });
 });
 
@@ -336,11 +376,20 @@ describe('AuthService.forgotPassword', () => {
     ).toHaveBeenCalledWith('a@b.c', expect.stringContaining('.'));
   });
 
-  it('throws UserNotFoundException when email is not registered', async () => {
-    const { svc } = build({ prismaUser: null });
-    await expect(svc.forgotPassword({ email: 'ghost@b.c' })).rejects.toBeInstanceOf(
-      UserNotFoundException,
-    );
+  it('resolves silently without sending a reset link when email is not registered (no enumeration)', async () => {
+    const { svc, mailer, logs } = build({ prismaUser: null });
+    await expect(svc.forgotPassword({ email: 'ghost@b.c' })).resolves.toBeUndefined();
+    expect(
+      (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
+    ).not.toHaveBeenCalled();
+    // The probe is still audited for admins — with no userId (no account).
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.userId).toBeUndefined();
+    expect(arg.actionText).toContain('ghost@b.c');
   });
 
   it('throws Forbidden when account is inactive (does not send reset link)', async () => {
@@ -349,6 +398,22 @@ describe('AuthService.forgotPassword', () => {
     expect(
       (mailer as never as { sendPasswordResetLink: jest.Mock }).sendPasswordResetLink,
     ).not.toHaveBeenCalled();
+  });
+
+  it('still records the request row when the reset email fails', async () => {
+    const { svc, mailer, logs } = build({});
+    (
+      mailer as never as { sendPasswordResetLink: jest.Mock }
+    ).sendPasswordResetLink.mockRejectedValue(new Error('SMTP down'));
+
+    await expect(svc.forgotPassword({ email: 'a@b.c' })).rejects.toThrow();
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.userId).toBe('u1');
   });
 });
 
@@ -405,7 +470,76 @@ describe('AuthService.resetPassword', () => {
       }),
     );
   });
+
+  it('audits the reset with redacted markers and never the password itself', async () => {
+    const { svc, logs } = build({ claimCount: 1 });
+    await svc.resetPassword({ token: 'rt1.secret', password: 'NewPass1!' });
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Reset');
+    expect(arg.empId).toBe('u1');
+    expect(arg.oldDetail).toEqual({ password: '<redacted: previous value>' });
+    expect(arg.newDetail).toEqual({ password: '<redacted: new value>' });
+    // The reset password may never reach the audit trail.
+    expect(JSON.stringify(arg)).not.toContain('NewPass1!');
+  });
 });
 
-// changePassword / requestProfileOtp / verifyProfileOtp live in UsersService now.
-// Tests for those methods are in users.service.spec.ts.
+// ---------------------------------------------------------------------------
+// changePassword
+// ---------------------------------------------------------------------------
+
+describe('AuthService.changePassword', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('throws InvalidCredentials when the current password is wrong', async () => {
+    const { svc } = build({ verify: false });
+    await expect(
+      svc.changePassword('u1', { currentPassword: 'wrong', newPassword: 'NewPass1!' }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsException);
+  });
+
+  it('throws BadRequestException when new password is the same as current', async () => {
+    // verify: currentPassword → true (correct), then newPassword → true (same hash match)
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    const { svc } = build({});
+    await expect(
+      svc.changePassword('u1', { currentPassword: 'SamePass1!', newPassword: 'SamePass1!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('succeeds when current password is correct and new password is different', async () => {
+    // verify: currentPassword → true, newPassword → false (different)
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { svc, prisma } = build({});
+    await svc.changePassword('u1', { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' });
+    expect(
+      (prisma as never as { client: { user: { update: jest.Mock } } }).client.user.update,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tokenVersion: { increment: 1 } }),
+      }),
+    );
+  });
+
+  it('audits the change with redacted markers and never the passwords themselves', async () => {
+    argon2.verify.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { svc, logs } = build({});
+    await svc.changePassword('u1', { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' });
+
+    const arg = (logs as never as { record: jest.Mock }).record.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(arg.actionName).toBe('Password Changed');
+    expect(arg.empId).toBe('u1');
+    expect(arg.oldDetail).toEqual({ password: '<redacted: previous value>' });
+    expect(arg.newDetail).toEqual({ password: '<redacted: new value>' });
+    // Neither submitted password may ever reach the audit trail.
+    expect(JSON.stringify(arg)).not.toContain('OldPass1!');
+    expect(JSON.stringify(arg)).not.toContain('NewPass1!');
+  });
+});
