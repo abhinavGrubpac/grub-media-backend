@@ -10,6 +10,7 @@ import {
   AssignBundleDto,
   BundleDto,
   PermissionDto,
+  ReassignBundleDto,
   UpdateBundleDto,
 } from '../dto/access.dto';
 @ApiTags('Access Management')
@@ -67,6 +68,15 @@ export class AccessController {
   @Delete('bundles/:id')
   deleteBundle(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.access.deleteBundle(u.id, u.role, id);
+  }
+
+  @Post('bundles/:id/reassign')
+  reassignBundle(
+    @CurrentUser() u: AuthUser,
+    @Param('id') fromBundleId: string,
+    @Body() dto: ReassignBundleDto,
+  ) {
+    return this.access.reassignBundle(u.id, fromBundleId, dto);
   }
   @Post('employees/:employeeId/bundles') assign(
     @CurrentUser() u: AuthUser,

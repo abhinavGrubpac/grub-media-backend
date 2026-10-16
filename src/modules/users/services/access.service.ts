@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { LogType, UserRole } from '@prisma/client';
-import { BundleDto, PermissionDto, UpdateBundleDto } from '../dto/access.dto';
+import { BundleDto, PermissionDto, ReassignBundleDto, UpdateBundleDto } from '../dto/access.dto';
 import { LogsService } from '../../logs/services/logs.service';
 import { describeActor, logRefOf } from '../../../common/utils/log-ref';
 
@@ -170,6 +170,48 @@ export class AccessService {
     });
 
     return { id: bundleId, name: existing.name, affectedUserCount };
+  }
+
+  async reassignBundle(actorId: string, fromBundleId: string, dto: ReassignBundleDto) {
+    const [fromBundle, targetBundle] = await Promise.all([
+      this.prisma.client.permissionBundle.findUnique({
+        where: { id: fromBundleId },
+        select: { name: true },
+      }),
+      this.prisma.client.permissionBundle.findUnique({
+        where: { id: dto.targetBundleId },
+        select: { name: true },
+      }),
+    ]);
+    if (!fromBundle) throw new NotFoundException('Source bundle not found');
+    if (!targetBundle) throw new NotFoundException('Target bundle not found');
+
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.userBundle.deleteMany({
+        where: { bundleId: fromBundleId, userId: { in: dto.userIds } },
+      });
+      await tx.userBundle.createMany({
+        data: dto.userIds.map((userId) => ({
+          userId,
+          bundleId: dto.targetBundleId,
+          assignedBy: actorId,
+        })),
+        skipDuplicates: true,
+      });
+    });
+
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: LOG_CATEGORY,
+      actionName: 'Reassign Bundle',
+      actionText: `${dto.userIds.length} user(s) were reassigned from bundle "${fromBundle.name}" to "${targetBundle.name}" by ${await describeActor(this.prisma, actorId)}`,
+      userId: actorId,
+      target: dto.targetBundleId,
+      oldDetail: { fromBundleId, fromBundleName: fromBundle.name, userCount: dto.userIds.length },
+      newDetail: { targetBundleId: dto.targetBundleId, targetBundleName: targetBundle.name },
+    });
+
+    return { reassigned: dto.userIds.length, fromBundleId, targetBundleId: dto.targetBundleId };
   }
 
   async assignBundle(actor: string, employeeId: string, bundleId: string) {
