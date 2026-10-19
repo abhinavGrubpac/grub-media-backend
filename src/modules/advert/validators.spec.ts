@@ -28,6 +28,10 @@ describe('advert transition matrix', () => {
     expect(validateAdvertTransition('SCHEDULED', 'REVOKED', 'govt')).toBeNull();
     expect(validateAdvertTransition('LIVE', 'REVOKED', 'govt')).toBeNull();
     expect(validateAdvertTransition('PAUSED', 'REVOKED', 'govt')).toBeNull();
+    // Resume restores the pre-pause state; the service date guard picks which
+    // of the two targets is legal for the current window.
+    expect(validateAdvertTransition('PAUSED', 'SCHEDULED', 'govt')).toBeNull();
+    expect(validateAdvertTransition('PAUSED', 'LIVE', 'govt')).toBeNull();
   });
 
   it('forbids cross-origin actions with 400', () => {

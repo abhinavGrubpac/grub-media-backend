@@ -99,9 +99,8 @@ export class OrganizationsController {
   uploadLogo(
     @Param('id') id: string,
     @UploadedFile(new ImageFileValidationPipe()) file: Express.Multer.File,
-    @CurrentUser() actor: AuthUser,
   ): Promise<OrganizationResponseDto> {
-    return this.orgs.uploadLogo(id, file, actor.id);
+    return this.orgs.uploadLogo(id, file);
   }
 
   // ---------------------------------------------------------------------------

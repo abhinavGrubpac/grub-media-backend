@@ -382,7 +382,7 @@ export class AdvertService {
     const wkt = `POINT(${dto.lng} ${dto.lat})`;
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "Advert" ("id", "versionId", "location", "addressText", "status", "startDate", "endDate", "cityName", "zoneName", "radiusKm", "imageHash", "createdAt")
+        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "created_at")
         VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${dto.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${dto.start_date}, ${dto.end_date}, ${dto.city_name ?? null}, ${dto.zone_name ?? null}, ${dto.radius ?? null}, ${dto.image_hash ?? null}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {
@@ -676,24 +676,24 @@ export class AdvertService {
         total: number;
       }>
     >(Prisma.sql`
-      SELECT a."id", a."versionId" AS "versionId", a."addressText" AS "addressText",
-             a."status", a."startDate" AS "startDate", a."endDate" AS "endDate",
-             a."cityName" AS "cityName", a."zoneName" AS "zoneName",
-             a."imageHash" AS "imageHash", a."upstreamAdvertId" AS "upstreamAdvertId",
-             a."createdAt" AS "createdAt",
-             a."radiusKm" AS "radiusKm",
-             v."id" AS "versionId2", v."versionNumber" AS "versionNumber", v."status" AS "versionStatus",
-             v."mediaUrl" AS "mediaUrl", v."mediaType" AS "mediaType",
-             c."id" AS "creativeId", c."creativeName" AS "creativeName",
-             b."id" AS "brandId", b."brandName" AS "brandName", b."isFlagged" AS "isFlagged",
-             b."industryCategory" AS "industryCategory",
+      SELECT a."id", a."version_id" AS "versionId", a."address_text" AS "addressText",
+             a."status", a."start_date" AS "startDate", a."end_date" AS "endDate",
+             a."city_name" AS "cityName", a."zone_name" AS "zoneName",
+             a."image_hash" AS "imageHash", a."upstream_advert_id" AS "upstreamAdvertId",
+             a."created_at" AS "createdAt",
+             a."radius_km" AS "radiusKm",
+             v."id" AS "versionId2", v."version_number" AS "versionNumber", v."status" AS "versionStatus",
+             v."media_url" AS "mediaUrl", v."media_type" AS "mediaType",
+             c."id" AS "creativeId", c."creative_name" AS "creativeName",
+             b."id" AS "brandId", b."brand_name" AS "brandName", b."isFlagged" AS "isFlagged",
+             b."industry_category" AS "industryCategory",
              ST_AsText(a."location") AS "location",
              ST_Distance(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography) / 1000 AS "distanceKm",
              COUNT(*) OVER() AS "total"
       FROM "Advert" a
-      JOIN "CreativeVersion" v ON v."id" = a."versionId"
-      JOIN "Creative" c ON c."id" = v."creativeId"
-      JOIN "Brand" b ON b."id" = c."brandId"
+      JOIN "CreativeVersion" v ON v."id" = a."version_id"
+      JOIN "Creative" c ON c."id" = v."creative_id"
+      JOIN "Brand" b ON b."id" = c."brand_id"
       WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusKm * 1000})
         ${industryClause} ${brandClause} ${startClause} ${endClause}
       ${orderClause}
@@ -941,13 +941,13 @@ export class AdvertService {
         await tx.$executeRaw`
           UPDATE "Advert"
           SET "location" = ST_GeomFromText(${wkt}, 4326),
-              "addressText" = ${input.address_text},
-              "startDate" = ${input.start_date},
-              "endDate" = ${input.end_date},
-              "cityName" = ${input.city_name ?? null},
-              "zoneName" = ${input.zone_name ?? null},
-              "radiusKm" = ${input.radius_km ?? null},
-              "imageHash" = ${input.image_hash ?? null}
+              "address_text" = ${input.address_text},
+              "start_date" = ${input.start_date},
+              "end_date" = ${input.end_date},
+              "city_name" = ${input.city_name ?? null},
+              "zone_name" = ${input.zone_name ?? null},
+              "radius_km" = ${input.radius_km ?? null},
+              "image_hash" = ${input.image_hash ?? null}
           WHERE "id" = ${existing.id}
         `;
         await this.outbox.emitInTx(tx, {
@@ -981,7 +981,7 @@ export class AdvertService {
     const advertId = randomUUID();
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "Advert" ("id", "versionId", "location", "addressText", "status", "startDate", "endDate", "cityName", "zoneName", "radiusKm", "imageHash", "upstreamAdvertId", "createdAt")
+        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "upstream_advert_id", "created_at")
         VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${input.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${input.start_date}, ${input.end_date}, ${input.city_name ?? null}, ${input.zone_name ?? null}, ${input.radius_km ?? null}, ${input.image_hash ?? null}, ${input.upstream_advert_id}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {

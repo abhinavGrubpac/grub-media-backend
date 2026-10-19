@@ -5,7 +5,7 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { ReviewStatus } from '@prisma/client';
+import { Prisma, ReviewStatus } from '@prisma/client';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { CreativeService } from './review.service';
 import { ReviewController } from '../controllers/review.controller';
@@ -60,6 +60,7 @@ function makeDeps() {
   };
   const creativeVersion = {
     findUnique: jest.fn().mockResolvedValue(null),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({ ...versionRow, actions: [] }),
     findFirst: jest.fn().mockResolvedValue(null),
     findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
@@ -70,7 +71,10 @@ function makeDeps() {
     findMany: jest.fn().mockResolvedValue([]),
   };
   const brand = { findUnique: jest.fn().mockResolvedValue(null) };
-  const agencyRef = { findUnique: jest.fn().mockResolvedValue(null) };
+  const agencyRef = {
+    findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
+  };
   const advert = {
     findMany: jest.fn().mockResolvedValue([]),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -105,6 +109,9 @@ function makeDeps() {
     presignedUploadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/uploads/x?mock=1'),
     assertFileUrlAllowed: jest.fn(),
     resolveCreativeFileUrl: jest.fn((s: string) => s),
+    isConfigured: true,
+    extractKeyFromUrl: jest.fn((s: string) => s.replace(/^https?:\/\/[^/]+\//, '')),
+    getObjectSize: jest.fn().mockResolvedValue(1024),
   };
   const service = new CreativeService(
     prisma as never,
@@ -171,6 +178,41 @@ describe('CreativeService.findAll', () => {
     creative.findMany.mockResolvedValue([]);
     await service.findAll({ ...pageQuery, status: 'ALL' } as never);
     expect(creative.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+  });
+
+  it('enriches list rows with brand logo and agency name/location', async () => {
+    const { service, creative, agencyRef } = makeDeps();
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: {
+          ...brandRow,
+          logoUrl: 'https://cdn.example.com/brand1.png',
+          upstreamAgencyId: 'ag1',
+        },
+        createdAt: new Date('2026-01-01'),
+        versions: [],
+      },
+    ]);
+    agencyRef.findMany.mockResolvedValue([
+      {
+        upstreamAgencyId: 'ag1',
+        agencyName: 'Test Agency',
+        city: 'Bengaluru',
+        address: '12 MG Road',
+      },
+    ]);
+    const result = await service.findAll({ ...pageQuery } as never);
+    expect(agencyRef.findMany).toHaveBeenCalledWith({
+      where: { upstreamAgencyId: { in: ['ag1'] } },
+    });
+    expect(result.items[0].brand.logo_url).toBe('https://cdn.example.com/brand1.png');
+    expect(result.items[0].agency).toMatchObject({
+      upstream_agency_id: 'ag1',
+      agency_name: 'Test Agency',
+      city: 'Bengaluru',
+      address: '12 MG Road',
+    });
   });
 
   it('embeds approval threads with include=history in one batched query', async () => {
@@ -363,6 +405,21 @@ describe('CreativeService.createCreative', () => {
     ).rejects.toThrow(BadRequestException);
     expect(creative.create).not.toHaveBeenCalled();
   });
+
+  it('translates a brand FK race into 404 instead of 500', async () => {
+    const { service, brand, creative } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
+        code: 'P2003',
+        clientVersion: '6.19.3',
+      }),
+    );
+
+    await expect(
+      service.createCreative({ brand_id: 'brand1', creative_name: 'X' }, 'u1'),
+    ).rejects.toThrow(NotFoundException);
+  });
 });
 
 describe('CreativeService.uploadVersion', () => {
@@ -518,6 +575,40 @@ describe('CreativeService.takeAction', () => {
 
     expect(advert.findMany).not.toHaveBeenCalled();
     expect(advert.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('includes the recorded action in the response trail', async () => {
+    const { service, creativeVersion, user } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'APPROVED',
+      actions: [
+        {
+          id: 'ra1',
+          versionId: 'v1',
+          actorId: 'reviewer1',
+          action: 'APPROVE',
+          comments: 'Compliant',
+          createdAt: new Date('2026-10-19T06:00:00Z'),
+        },
+      ],
+    });
+    user.findMany.mockResolvedValue([{ id: 'reviewer1', firstName: 'Rita', lastName: 'Reviewer' }]);
+
+    const result = await service.takeAction(
+      'v1',
+      { action: 'APPROVE', comments: 'Compliant' },
+      'reviewer1',
+    );
+
+    expect(creativeVersion.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      include: { actions: { orderBy: { createdAt: 'asc' } } },
+    });
+    expect(result.latest_action).toMatchObject({ action: 'APPROVE', actor_name: 'Rita Reviewer' });
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions?.[0]).toMatchObject({ action: 'APPROVE', comments: 'Compliant' });
   });
 
   it('writes the audit-trail row for every decision', async () => {
@@ -915,6 +1006,52 @@ describe('CreativeService.finalizeUpload', () => {
         }),
       }),
     );
+  });
+
+  it('derives media_name from the s3_key file name', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findUnique.mockResolvedValue({ ...creativeRow, brand: brandRow });
+    creativeVersion.findFirst.mockResolvedValue(null);
+    creativeVersion.create.mockResolvedValue({ ...versionRow, id: 'v3', versionNumber: 3 });
+    creative.update.mockResolvedValue(creativeRow);
+
+    await service.finalizeUpload(
+      { creative_id: 'c1', s3_key: 'creatives/diwali%20film%2015s.png', media_type: 'Image' },
+      'u1',
+    );
+
+    expect(creativeVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mediaName: 'diwali film 15s.png' }),
+      }),
+    );
+  });
+
+  it('rejects finalize when the object was never uploaded', async () => {
+    const { service, storage } = makeDeps();
+    storage.getObjectSize.mockRejectedValue({
+      name: 'NotFound',
+      $metadata: { httpStatusCode: 404 },
+    });
+
+    await expect(
+      service.finalizeUpload(
+        { creative_id: 'c1', s3_key: 'creatives/ghost.png', media_type: 'Image' },
+        'u1',
+      ),
+    ).rejects.toThrow(/No file uploaded yet/);
+  });
+
+  it('rejects finalize when the uploaded object is empty', async () => {
+    const { service, storage } = makeDeps();
+    storage.getObjectSize.mockResolvedValue(0);
+
+    await expect(
+      service.finalizeUpload(
+        { creative_id: 'c1', s3_key: 'creatives/empty.png', media_type: 'Image' },
+        'u1',
+      ),
+    ).rejects.toThrow(/empty/);
   });
 });
 

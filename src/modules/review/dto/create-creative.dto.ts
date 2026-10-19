@@ -14,6 +14,12 @@ export class InitialVersionDto {
   @Length(1, 50)
   media_type!: string;
 
+  @ApiPropertyOptional({ description: 'Display name of the media file', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  media_name?: string;
+
   @ApiPropertyOptional({
     description: 'Optional reviewer notes attached to the upload',
     maxLength: 2000,

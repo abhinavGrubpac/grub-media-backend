@@ -5,11 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { Prisma, ReviewStatus } from '@prisma/client';
+import { AgencyRef, Prisma, ReviewStatus } from '@prisma/client';
 import { StandardMeta, standardMeta, toSkipTake } from '../../../common/utils/paginate';
 import { PrismaService } from '../../../database/prisma.service';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
-import { StorageService } from '../../../common/storage/storage.service';
+import { isS3NotFound, StorageService } from '../../../common/storage/storage.service';
 import { assertBrandActive } from '../../../common/utils/brand';
 import { AdvertService } from '../../advert/services/advert.service';
 import { EventOutboxService } from '../../events/event.outbox';
@@ -247,6 +247,9 @@ export class CreativeService {
       threadsByCreative.set(version.creativeId, list);
     }
 
+    const agencies = await this.fetchAgencies(
+      creatives.map((creative) => creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId),
+    );
     const actorNames = await this.resolveActorNames([
       ...this.collectActorIds([
         ...creatives.flatMap((creative) => creative.versions),
@@ -255,7 +258,7 @@ export class CreativeService {
       ...this.collectRowIds(creatives),
     ]);
     const data = creatives.map((creative) => {
-      const response = this.toCreativeResponse(creative, actorNames);
+      const response = this.toCreativeResponse(creative, actorNames, agencies);
       const latestAction = creative.versions[0]?.actions[0];
       return {
         ...response,
@@ -294,13 +297,24 @@ export class CreativeService {
       throw new BadRequestException('schedule needs initial_version: nothing to book yet');
     }
     const { creative, version } = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.creative.create({
-        data: {
-          brandId: dto.brand_id,
-          creativeName: dto.creative_name,
-          externalRefId: dto.external_ref_id ?? null,
-        },
-      });
+      let created;
+      try {
+        created = await tx.creative.create({
+          data: {
+            brandId: dto.brand_id,
+            creativeName: dto.creative_name,
+            externalRefId: dto.external_ref_id ?? null,
+          },
+        });
+      } catch (err) {
+        // Brand deleted between the existence check and the write (or a
+        // caller-supplied id that resolved differently) surfaces as P2003 —
+        // translate it to 404 instead of leaking a 500.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+          throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
+        }
+        throw err;
+      }
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.creativeCreated,
         entityType: 'Creative',
@@ -322,6 +336,7 @@ export class CreativeService {
           versionNumber: 1,
           mediaUrl: dto.initial_version.media_url,
           mediaType: dto.initial_version.media_type,
+          mediaName: dto.initial_version.media_name ?? null,
           status: initialStatus,
           createdBy: actorId,
         },
@@ -342,6 +357,7 @@ export class CreativeService {
           version_number: 1,
           media_url: createdVersion.mediaUrl,
           media_type: createdVersion.mediaType,
+          media_name: createdVersion.mediaName ?? null,
           auto_approved: autoApprove,
           notes: dto.initial_version.notes ?? null,
         },
@@ -474,6 +490,7 @@ export class CreativeService {
           versionNumber: nextVersionNumber,
           mediaUrl: dto.media_url,
           mediaType: dto.media_type,
+          mediaName: dto.media_name ?? null,
           status,
           createdBy: actorId,
           upstreamVersionId: dto.upstream_version_id ?? null,
@@ -499,6 +516,7 @@ export class CreativeService {
           version_number: created.versionNumber,
           media_url: created.mediaUrl,
           media_type: created.mediaType,
+          media_name: created.mediaName ?? null,
           auto_approved: autoApprove,
           notes: dto.notes ?? null,
           upstream_version_id: dto.upstream_version_id ?? null,
@@ -661,10 +679,12 @@ export class CreativeService {
     // foreign hosts and malformed keys fail here instead of downstream.
     const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
     this.storage.assertFileUrlAllowed(fileUrl);
+    await this.assertUploadCompleted(fileUrl);
+    const mediaName = this.deriveMediaName(dto.s3_key);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
         dto.creative_id,
-        { media_url: fileUrl, media_type: dto.media_type },
+        { media_url: fileUrl, media_name: mediaName ?? undefined, media_type: dto.media_type },
         actorId,
       );
       return version;
@@ -676,10 +696,60 @@ export class CreativeService {
       {
         brand_id: dto.brand_id,
         creative_name: dto.name,
-        initial_version: { media_url: fileUrl, media_type: dto.media_type },
+        initial_version: {
+          media_url: fileUrl,
+          media_name: mediaName ?? undefined,
+          media_type: dto.media_type,
+        },
       },
       actorId,
     );
+  }
+
+  /**
+   * Confirms bytes actually landed in the bucket before a version is created:
+   * a key that was never uploaded (definitive S3 404) or an empty-bodied PUT
+   * (zero-byte object) must not become a version whose media 404s. Mock
+   * storage and unreachable S3 stay fail-open, matching the reference flow.
+   */
+  private async assertUploadCompleted(fileUrl: string): Promise<void> {
+    if (!this.storage.isConfigured) return;
+    const key = this.storage.extractKeyFromUrl(fileUrl);
+    if (!key) return;
+    let size: number | null;
+    try {
+      size = await this.storage.getObjectSize(key);
+    } catch (err) {
+      if (isS3NotFound(err)) {
+        throw new BadRequestException(
+          `No file uploaded yet for "${key}" — PUT the file bytes to upload_url first, then finalize`,
+        );
+      }
+      return; // storage unreachable: fail-open
+    }
+    if (size === 0) {
+      throw new BadRequestException(
+        `The uploaded file "${key}" is empty — PUT the file bytes to upload_url first, then finalize`,
+      );
+    }
+  }
+
+  /**
+   * Display name for finalize flows: the file name (last path segment of the
+   * s3 key), percent-decoded and length-capped — null when the key carries no
+   * usable name.
+   */
+  private deriveMediaName(s3Key: string): string | null {
+    const raw = s3Key.split('#')[0].split('?')[0];
+    const base = raw.split('/').pop()?.trim() ?? '';
+    if (!base) return null;
+    let name = base;
+    try {
+      name = decodeURIComponent(base);
+    } catch {
+      // keep the raw segment when the key isn't valid percent-encoding
+    }
+    return name.slice(0, 200) || null;
   }
 
   /**
@@ -713,7 +783,7 @@ export class CreativeService {
     assertValidTransition(version.status, newStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const saved = await tx.creativeVersion.update({
+      await tx.creativeVersion.update({
         where: { id: versionId },
         data: { status: newStatus },
       });
@@ -778,9 +848,13 @@ export class CreativeService {
           }
         }
       }
-      return saved;
+      return tx.creativeVersion.findUniqueOrThrow({
+        where: { id: versionId },
+        include: { actions: { orderBy: { createdAt: 'asc' } } },
+      });
     });
-    return this.toVersionResponse(updated, new Map());
+    const actorNames = await this.resolveActorNames(this.collectActorIds([updated]));
+    return this.toVersionResponse(updated, actorNames);
   }
 
   /**
@@ -1052,12 +1126,25 @@ export class CreativeService {
     return new Map(rows.map((row) => [row.id, row.wkt]));
   }
 
+  /** Batched agency lookup for list rows, keyed by upstream agency id. */
+  private async fetchAgencies(upstreamIds: Array<string | null>): Promise<Map<string, AgencyRef>> {
+    const ids = [...new Set(upstreamIds.filter((id): id is string => Boolean(id)))];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.client.agencyRef.findMany({
+      where: { upstreamAgencyId: { in: ids } },
+    });
+    return new Map(rows.map((row) => [row.upstreamAgencyId, row]));
+  }
+
   private toCreativeResponse(
     creative: CreativeWithBrandAndVersions,
     actorNames: Map<string, string>,
+    agencies: Map<string, AgencyRef> = new Map(),
   ): CreativeResponseDto {
     const latestVersion = creative.versions[0];
     const latestAction = latestVersion?.actions[0];
+    const agencyId = creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId;
+    const agency = agencyId ? (agencies.get(agencyId) ?? null) : null;
     return plainToInstance(
       CreativeResponseDto,
       {
@@ -1066,6 +1153,7 @@ export class CreativeService {
         brand: {
           id: creative.brand.id,
           brand_name: creative.brand.brandName,
+          logo_url: creative.brand.logoUrl ?? null,
           is_flagged: creative.brand.isFlagged,
           industry_category: creative.brand.industryCategory ?? null,
           flagged_by:
@@ -1086,6 +1174,16 @@ export class CreativeService {
         viewed_minutes_ago: creative.lastViewedAt
           ? Math.max(0, Math.round((Date.now() - creative.lastViewedAt.getTime()) / 60000))
           : null,
+        ...(agency
+          ? {
+              agency: {
+                upstream_agency_id: agency.upstreamAgencyId,
+                agency_name: agency.agencyName,
+                city: agency.city ?? null,
+                address: agency.address ?? null,
+              },
+            }
+          : {}),
       },
       { excludeExtraneousValues: true },
     );
@@ -1109,6 +1207,7 @@ export class CreativeService {
         version_number: version.versionNumber,
         media_url: version.mediaUrl,
         media_type: version.mediaType,
+        media_name: version.mediaName ?? null,
         status: version.status,
         created_by: version.createdBy,
         created_by_name: actorNames.get(version.createdBy) ?? null,
