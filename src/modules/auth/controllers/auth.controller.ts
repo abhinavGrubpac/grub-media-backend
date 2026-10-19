@@ -1,9 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { LogType } from '@prisma/client';
 import type { Request } from 'express';
 import { AuthService } from '../services/auth.service';
-import { LogsService } from '../../logs/services/logs.service';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { LoginDto } from '../dto/login.dto';
 import { OtpRequestDto } from '../dto/otp-request.dto';
@@ -15,9 +13,6 @@ import { Public } from '../decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
-import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
-import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
-import { ChangePasswordDto } from '../dto/change-password.dto';
 
 function ctxOf(req: Request): { ip?: string; userAgent?: string } {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
@@ -26,10 +21,7 @@ function ctxOf(req: Request): { ip?: string; userAgent?: string } {
 @ApiTags('Authentication')
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly logs: LogsService,
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Public()
   @Post('login')
@@ -102,44 +94,7 @@ export class AuthController {
   @Get('me')
   @ApiOperation({ summary: 'Get the current authenticated user' })
   @ResponseMessage('Current user')
-  async me(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
-    const profile = await this.auth.me(user.id);
-    await this.logs.record({
-      typeEnum: LogType.ACTIVITY,
-      categoryName: 'Profile',
-      actionName: 'View Profile',
-      actionText: 'Viewed the profile of the signed-in user',
-      userId: user.id,
-      target: user.id,
-    });
-    return profile;
-  }
-
-  @ApiBearerAuth()
-  @Post('profile/otp-request')
-  requestProfileOtp(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: ProfileOtpRequestDto,
-  ): Promise<null> {
-    return this.auth.requestProfileOtp(user.id, dto).then(() => null);
-  }
-
-  @ApiBearerAuth()
-  @Post('profile/otp-verify')
-  verifyProfileOtp(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: ProfileOtpVerifyDto,
-  ): Promise<UserResponseDto> {
-    return this.auth.verifyProfileOtp(user.id, dto);
-  }
-
-  @ApiBearerAuth()
-  @Post('profile/password')
-  async changePassword(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: ChangePasswordDto,
-  ): Promise<null> {
-    await this.auth.changePassword(user.id, dto);
-    return null;
+  me(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+    return this.auth.me(user.id);
   }
 }

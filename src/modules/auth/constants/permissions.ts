@@ -6,11 +6,10 @@ import { UserRole } from '@prisma/client';
  * The role→permission mapping lives in code now; migrating it to the database is
  * additive and does not change the guard/decorator API.
  */
-export type Permission =
-  'users.read' | 'users.create' | 'users.update' | 'users.delete' | 'logs.read';
+export type Permission = 'users.read' | 'users.create' | 'users.update' | 'users.delete';
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
-  SUPER_ADMIN: ['users.read', 'users.create', 'users.update', 'users.delete', 'logs.read'],
-  ADMIN: ['users.read', 'users.create', 'users.update', 'users.delete', 'logs.read'],
+  SUPER_ADMIN: ['users.read', 'users.create', 'users.update', 'users.delete'],
+  ADMIN: ['users.read', 'users.create', 'users.update', 'users.delete'],
   EMPLOYEE: ['users.read'],
 };
