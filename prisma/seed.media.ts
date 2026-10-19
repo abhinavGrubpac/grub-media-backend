@@ -461,7 +461,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-10-01',
     endDate: '2026-12-31',
     createdAt: '2026-09-22',
-    imageHash: '3f7a2b9c1d4e5f6081a2b3c4d5e6f7089a0b1c2d3e4f5061728394a5b6c7d8e9',
+    imageHash: '5e2d9f8a7b6c5d4e',
   },
   {
     upstreamAdvertId: 'upadv-mcgm-andheri-001',
@@ -477,7 +477,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-09-15',
     endDate: '2026-12-15',
     createdAt: '2026-09-01',
-    imageHash: '8b1c4d7e0f2a3b5c6d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e',
+    imageHash: '8b1c4d7e0f2a3b5c',
   },
   {
     upstreamAdvertId: 'upadv-mtdc-pune-001',
@@ -493,7 +493,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-10-05',
     endDate: '2027-01-05',
     createdAt: '2026-09-24',
-    imageHash: '5e2d9f8a7b6c5d4e3f2a1b0c9d8e7f6051423324150f9e8d7c6b5a4938271605',
+    imageHash: '3f7a2b9c1d4e5f60',
   },
   {
     upstreamAdvertId: 'upadv-mtdc-nashik-001',
@@ -509,7 +509,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-11-01',
     endDate: '2027-02-28',
     createdAt: '2026-10-10',
-    imageHash: 'c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6',
+    imageHash: '3f7a2b9c1d4e5f60',
   },
   {
     upstreamAdvertId: 'upadv-msedcl-nagpur-001',
@@ -525,7 +525,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-07-01',
     endDate: '2026-09-30',
     createdAt: '2026-06-15',
-    imageHash: '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
+    imageHash: 'c1d2e3f4a5b6c7d8',
   },
   {
     upstreamAdvertId: 'upadv-msedcl-csn-001',
@@ -541,7 +541,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-09-01',
     endDate: '2026-11-30',
     createdAt: '2026-08-18',
-    imageHash: '2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c',
+    imageHash: 'c1d2e3f4a5b6c7d8',
   },
   {
     upstreamAdvertId: 'upadv-mtdc-gateway-001',
@@ -557,7 +557,7 @@ const ADVERTS: AdvertSeed[] = [
     startDate: '2026-05-01',
     endDate: '2026-07-31',
     createdAt: '2026-04-12',
-    imageHash: '7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e',
+    imageHash: '9a8b7c6d5e4f3a2b',
   },
 ];
 
