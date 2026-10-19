@@ -20,8 +20,9 @@ describe('UsersController (thin delegation)', () => {
     const service = { list: jest.fn().mockResolvedValue({ data: [], meta: {} }) } as never;
     const ctrl = new UsersController(service);
     const query = { page: 2, limit: 10, sortOrder: 'asc' };
-    await ctrl.list(query as never);
-    expect((service as { list: jest.Mock }).list).toHaveBeenCalledWith(query);
+    const actor = { role: 'ADMIN' } as never;
+    await ctrl.list(query as never, actor);
+    expect((service as { list: jest.Mock }).list).toHaveBeenCalledWith(query, 'ADMIN');
   });
 
   it('remove delegates to softDelete with actor id and role', async () => {

@@ -31,6 +31,7 @@ import { ResponseMessage } from '../../../common/decorators/response-message.dec
 import { ProfileOtpRequestDto } from '../../auth/dto/profile-otp-request.dto';
 import { ProfileOtpVerifyDto } from '../../auth/dto/profile-otp-verify.dto';
 import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
+import { SetPasswordDto } from '../../auth/dto/set-password.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -95,6 +96,19 @@ export class UsersController {
     return null;
   }
 
+  @Post('profile/set-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Set or replace password without requiring the current one',
+    description:
+      'Intended for users who authenticated via OTP and have no password yet, or need to set a new one without knowing the old one. Invalidates all other active sessions.',
+  })
+  @ResponseMessage('Password set successfully')
+  async setPassword(@CurrentUser() user: AuthUser, @Body() dto: SetPasswordDto): Promise<null> {
+    await this.users.setPassword(user.id, dto);
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
   // Admin CRUD
   // ---------------------------------------------------------------------------
@@ -113,8 +127,11 @@ export class UsersController {
   @Get()
   @ApiOperation({ summary: 'List users (paginated, admin only)' })
   @ResponseMessage('Users fetched successfully')
-  list(@Query() query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
-    return this.users.list(query);
+  list(
+    @Query() query: UserQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<Paginated<UserResponseDto>> {
+    return this.users.list(query, actor.role);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)

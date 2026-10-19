@@ -178,7 +178,7 @@ export class AccessService {
     }
     const validUserIds = validAssignments.map((a) => a.userId);
 
-    const { deleted } = await this.prisma.client.$transaction(async (tx) => {
+    const { deleted } = await this.prisma.$transaction(async (tx) => {
       const deleted = await tx.userBundle.deleteMany({
         where: { bundleId: fromBundleId, userId: { in: validUserIds } },
       });
