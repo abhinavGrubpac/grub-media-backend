@@ -60,6 +60,7 @@ function makeDeps() {
   };
   const creativeVersion = {
     findUnique: jest.fn().mockResolvedValue(null),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({ ...versionRow, actions: [] }),
     findFirst: jest.fn().mockResolvedValue(null),
     findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
@@ -571,6 +572,40 @@ describe('CreativeService.takeAction', () => {
 
     expect(advert.findMany).not.toHaveBeenCalled();
     expect(advert.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('includes the recorded action in the response trail', async () => {
+    const { service, creativeVersion, user } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'APPROVED',
+      actions: [
+        {
+          id: 'ra1',
+          versionId: 'v1',
+          actorId: 'reviewer1',
+          action: 'APPROVE',
+          comments: 'Compliant',
+          createdAt: new Date('2026-10-19T06:00:00Z'),
+        },
+      ],
+    });
+    user.findMany.mockResolvedValue([{ id: 'reviewer1', firstName: 'Rita', lastName: 'Reviewer' }]);
+
+    const result = await service.takeAction(
+      'v1',
+      { action: 'APPROVE', comments: 'Compliant' },
+      'reviewer1',
+    );
+
+    expect(creativeVersion.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      include: { actions: { orderBy: { createdAt: 'asc' } } },
+    });
+    expect(result.latest_action).toMatchObject({ action: 'APPROVE', actor_name: 'Rita Reviewer' });
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions?.[0]).toMatchObject({ action: 'APPROVE', comments: 'Compliant' });
   });
 
   it('writes the audit-trail row for every decision', async () => {

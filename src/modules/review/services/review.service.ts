@@ -754,7 +754,7 @@ export class CreativeService {
     assertValidTransition(version.status, newStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const saved = await tx.creativeVersion.update({
+      await tx.creativeVersion.update({
         where: { id: versionId },
         data: { status: newStatus },
       });
@@ -819,9 +819,13 @@ export class CreativeService {
           }
         }
       }
-      return saved;
+      return tx.creativeVersion.findUniqueOrThrow({
+        where: { id: versionId },
+        include: { actions: { orderBy: { createdAt: 'asc' } } },
+      });
     });
-    return this.toVersionResponse(updated, new Map());
+    const actorNames = await this.resolveActorNames(this.collectActorIds([updated]));
+    return this.toVersionResponse(updated, actorNames);
   }
 
   /**
