@@ -212,20 +212,20 @@ model AuditLog {
 
 model Brand {
   id               String     @id @default(cuid())
-  brandName        String     @unique
-  industryCategory String?
-  contactEmail     String?
+  brandName        String     @unique @map("brand_name")
+  industryCategory String?    @map("industry_category")
+  contactEmail     String?    @map("contact_email")
   logoUrl          String?
   address          String?
-  isActive         Boolean    @default(true)
-  autoApprove      Boolean    @default(false)
+  isActive         Boolean    @default(true) @map("is_active")
+  autoApprove      Boolean    @default(false) @map("auto_approve")
   isFlagged        Boolean    @default(false)
   flaggedBy        String?
   flaggedOn        DateTime?
-  upstreamBrandId  String?    @unique
-  upstreamAgencyId String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  upstreamBrandId  String?    @unique @map("upstream_brand_id")
+  upstreamAgencyId String?    @map("upstream_agency_id")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
   creatives        Creative[]
 
   @@index([upstreamAgencyId])
@@ -269,15 +269,15 @@ enum ActionType {
 
 model Creative {
   id                 String            @id @default(cuid())
-  brandId            String
+  brandId            String            @map("brand_id")
   brand              Brand             @relation(fields: [brandId], references: [id], onDelete: Restrict)
-  creativeName       String
-  externalRefId      String?
-  currentVersionId   String?
-  upstreamCreativeId String?           @unique
-  upstreamAgencyId   String?
-  campaignRef        String?
-  createdAt          DateTime          @default(now())
+  creativeName       String            @map("creative_name")
+  externalRefId      String?           @map("external_ref_id")
+  currentVersionId   String?           @map("current_version_id")
+  upstreamCreativeId String?           @unique @map("upstream_creative_id")
+  upstreamAgencyId   String?           @map("upstream_agency_id")
+  campaignRef        String?           @map("campaign_ref")
+  createdAt          DateTime          @default(now()) @map("created_at")
   lastViewedBy       String?
   lastViewedAt       DateTime?
   versions           CreativeVersion[]
@@ -287,16 +287,16 @@ model Creative {
 
 model CreativeVersion {
   id                String              @id @default(cuid())
-  creativeId        String
+  creativeId        String              @map("creative_id")
   creative          Creative            @relation(fields: [creativeId], references: [id], onDelete: Cascade)
-  versionNumber     Int
-  mediaUrl          String
-  mediaType         String
+  versionNumber     Int                 @map("version_number")
+  mediaUrl          String              @map("media_url")
+  mediaType         String              @map("media_type")
   status            ReviewStatus        @default(PENDING)
-  createdBy         String
-  upstreamVersionId String?             @unique
-  submittedAt       DateTime?
-  createdAt         DateTime            @default(now())
+  createdBy         String              @map("created_by")
+  upstreamVersionId String?             @unique @map("upstream_version_id")
+  submittedAt       DateTime?           @map("submitted_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
   adminApprovedBy   String?
   adminApprovedAt   DateTime?
   adminComments     String?
@@ -310,12 +310,12 @@ model CreativeVersion {
 
 model ReviewAction {
   id        String          @id @default(cuid())
-  versionId String
+  versionId String          @map("version_id")
   version   CreativeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  actorId   String
+  actorId   String          @map("actor_id")
   action    ActionType
   comments  String?
-  createdAt DateTime        @default(now())
+  createdAt DateTime        @default(now()) @map("created_at")
 
   @@index([versionId])
 }
@@ -327,15 +327,15 @@ model ReviewAction {
 model ReferenceDoc {
   id            String              @id @default(cuid())
   title         String
-  fileUrl       String
+  fileUrl       String              @map("file_url")
   fileSizeBytes Int?
   category      String
   description   String?
-  publishedOn   DateTime?
-  isArchived    Boolean             @default(false)
-  archivedOn    DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  publishedOn   DateTime?           @map("published_on")
+  isArchived    Boolean             @default(false) @map("is_archived")
+  archivedOn    DateTime?           @map("archived_on")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
   creativeLinks CreativeReference[]
 
   @@index([category])
@@ -344,9 +344,9 @@ model ReferenceDoc {
 }
 
 model CreativeReference {
-  versionId String
+  versionId String          @map("version_id")
   version   CreativeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  docId     String
+  docId     String          @map("doc_id")
   doc       ReferenceDoc    @relation(fields: [docId], references: [id], onDelete: Cascade)
 
   @@id([versionId, docId])
@@ -357,6 +357,9 @@ model CreativeReference {
 // create/update rows with Unsupported columns, writes go through raw SQL)
 // ---------------------------------------------------------------------------
 
+// NOTE: the upstream Agency portal's own terminal statuses (COMPLETED/CANCELLED)
+// are normalized to EXPIRED by our validators at the intake boundary and never
+// stored in our flow. Our enum stays 5 values.
 enum AdvertStatus {
   SCHEDULED
   LIVE
@@ -367,19 +370,19 @@ enum AdvertStatus {
 
 model Advert {
   id               String                               @id
-  versionId        String
+  versionId        String                               @map("version_id")
   version          CreativeVersion                      @relation(fields: [versionId], references: [id], onDelete: Cascade)
   location         Unsupported("geometry(Point, 4326)")
-  addressText      String?
-  radiusKm         Float?
+  addressText      String?                              @map("address_text")
+  radiusKm         Float?                               @map("radius_km")
   status           AdvertStatus                         @default(SCHEDULED)
-  startDate        DateTime
-  endDate          DateTime
-  imageHash        String?
-  upstreamAdvertId String?                              @unique
-  cityName         String?
-  zoneName         String?
-  createdAt        DateTime                             @default(now())
+  startDate        DateTime                             @map("start_date")
+  endDate          DateTime                             @map("end_date")
+  imageHash        String?                              @map("image_hash")
+  upstreamAdvertId String?                              @unique @map("upstream_advert_id")
+  cityName         String?                              @map("city_name")
+  zoneName         String?                              @map("zone_name")
+  createdAt        DateTime                             @default(now()) @map("created_at")
 
   @@index([versionId])
   @@index([status])
