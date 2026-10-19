@@ -42,7 +42,24 @@ export class AccessService {
     return this.prisma.client.permissionBundle.findMany({
       include: {
         permissions: { include: { permission: true } },
-        _count: { select: { users: true } },
+        users: {
+          where: { user: { deletedAt: null } },
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+                employeeId: true,
+                jurisdiction: true,
+                joiningDate: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -65,6 +82,7 @@ export class AccessService {
             employeeId: true,
             jurisdiction: true,
             joiningDate: true,
+            updatedAt: true,
           },
         },
       },
@@ -132,7 +150,9 @@ export class AccessService {
     fromBundleId: string,
     dto: ReassignBundleDto,
   ) {
-    await this.assertNotSelfBundle(actorId, actorRole, fromBundleId);
+    if (actorRole !== UserRole.SUPER_ADMIN && dto.userIds.includes(actorId)) {
+      throw new ForbiddenException('Cannot reassign yourself to a different bundle');
+    }
 
     const [fromBundle, targetBundle] = await Promise.all([
       this.prisma.client.permissionBundle.findUnique({
