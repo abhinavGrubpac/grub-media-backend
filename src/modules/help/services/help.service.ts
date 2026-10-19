@@ -5,7 +5,7 @@ import {
   HelpFaqNotFoundException,
 } from '../../../common/exceptions/domain.exceptions';
 import { Paginated } from '../../../common/dto/paginated';
-import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
+import { buildMeta } from '../../../common/utils/paginate';
 import { HelpCategoryFaqQueryDto } from '../dto/help-category-faq-query.dto';
 import {
   HelpCategoriesList,
@@ -47,7 +47,7 @@ export class HelpService {
   ): Promise<Paginated<HelpFaqListItem>> {
     await this.requireActiveCategory(categoryId);
     const where = { isActive: true, categoryId };
-    const { skip, take } = toSkipTake(query);
+    const skip = (query.page - 1) * query.limit;
     const [total, data] = await Promise.all([
       this.prisma.client.helpFaq.count({ where }),
       this.prisma.client.helpFaq.findMany({
@@ -55,7 +55,7 @@ export class HelpService {
         select: { id: true, question: true },
         orderBy: [...HelpService.BY_DISPLAY_ORDER],
         skip,
-        take,
+        take: query.limit,
       }),
     ]);
     return { data, meta: buildMeta(total, query.page, query.limit) };

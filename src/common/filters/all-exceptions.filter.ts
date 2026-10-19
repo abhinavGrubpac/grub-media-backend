@@ -7,7 +7,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ERROR_CODES } from '../constants/error-codes';
-import { requestAuditAls } from '../audit/request-audit';
 
 interface ErrorEnvelope {
   success: false;
@@ -49,12 +48,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = http.getRequest<{ url: string; id?: string }>();
 
     const { status, message, errorCode } = this.resolve(exception);
-
-    // Surface the resolved detail to the failure auditor (best-effort). The
-    // generic 'Request Failed' row is only written when no row was recorded
-    // for this request (e.g. validation errors or guard rejections).
-    const audit = requestAuditAls.getStore();
-    if (audit) audit.failure = { message, errorCode };
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
@@ -98,18 +91,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? (response as Record<string, unknown>)
         : { message: response };
     const rawMessage = body.message ?? exception.message;
-    // class-validator errors surface as a 400 whose `message` is an array of
-    // per-field strings (ValidationPipe). The pipe sets no `errorCode`, so map
-    // that shape to VALIDATION_ERROR. Domain 400s carry a string message and
-    // set errorCode explicitly, so they never match here.
-    const isValidationError = Array.isArray(rawMessage);
-    const message = isValidationError ? (rawMessage as string[]).join(', ') : String(rawMessage);
+    const message = Array.isArray(rawMessage)
+      ? (rawMessage as string[]).join(', ')
+      : String(rawMessage);
     const errorCode =
-      typeof body.errorCode === 'string'
-        ? body.errorCode
-        : isValidationError
-          ? ERROR_CODES.VALIDATION_ERROR
-          : this.statusToCode(status);
+      typeof body.errorCode === 'string' ? body.errorCode : this.statusToCode(status);
     return { status, message, errorCode };
   }
 

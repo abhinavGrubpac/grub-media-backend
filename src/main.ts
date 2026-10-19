@@ -5,15 +5,9 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { failureAuditMiddleware } from './common/middleware/failure-audit.middleware';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-
-  // Failed-request auditor (SYSTEM/'Request Failed'). Registered before any
-  // other middleware so the entire chain — including the body-parser and
-  // express-level rejections — runs inside the audit ALS context.
-  app.use(failureAuditMiddleware);
 
   // Structured logging (pino) as the app logger.
   app.useLogger(app.get(Logger));
