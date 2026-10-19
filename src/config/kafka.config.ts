@@ -6,6 +6,9 @@ import { registerAs } from '@nestjs/config';
  * as the other GrubMedia portals).
  */
 export default registerAs('kafka', () => ({
+  enabled:
+    process.env.KAFKA_ENABLED === 'true' ||
+    (process.env.KAFKA_ENABLED !== 'false' && Boolean(process.env.REDPANDA_BROKERS)),
   brokers: (process.env.REDPANDA_BROKERS ?? 'localhost:9092')
     .split(',')
     .map((broker) => broker.trim())

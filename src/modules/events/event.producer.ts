@@ -8,17 +8,22 @@ export interface TopicMessages {
 }
 
 /**
- * kafkajs producer wrapper (idempotent, acks=all). A broker that is down at
- * boot never crashes the API: the failure is logged and reconnect happens
- * lazily on the next publish attempt.
+ * kafkajs producer wrapper (idempotent, acks=all). When Kafka is disabled
+ * (kafka.enabled = false) all methods are no-ops so the app starts cleanly
+ * without a broker. When enabled, a broker that is down at boot never crashes
+ * the API: the failure is logged and reconnect happens lazily on next publish.
  */
 @Injectable()
 export class EventProducer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventProducer.name);
-  private readonly producer: Producer;
+  private producer?: Producer;
   private connected = false;
+  private readonly enabled: boolean;
 
   constructor(config: ConfigService) {
+    this.enabled = config.get<boolean>('kafka.enabled') ?? false;
+    if (!this.enabled) return;
+
     const saslUsername = config.get<string | undefined>('kafka.saslUsername');
     const sasl = saslUsername
       ? {
@@ -39,6 +44,7 @@ export class EventProducer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    if (!this.enabled || !this.producer) return;
     try {
       await this.producer.connect();
       this.connected = true;
@@ -53,6 +59,7 @@ export class EventProducer implements OnModuleInit, OnModuleDestroy {
   }
 
   async publishBatch(topicMessages: TopicMessages[]): Promise<void> {
+    if (!this.enabled || !this.producer) return;
     if (!this.connected) {
       await this.producer.connect();
       this.connected = true;
@@ -70,6 +77,7 @@ export class EventProducer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (!this.enabled || !this.producer) return;
     await this.producer.disconnect();
   }
 }
