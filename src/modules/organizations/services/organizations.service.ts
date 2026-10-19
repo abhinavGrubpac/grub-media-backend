@@ -4,10 +4,11 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { Prisma, OrgStatus, UserRole } from '@prisma/client';
+import { Prisma, OrgStatus, UserRole, LogType } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { PrismaService } from '../../../database/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { LogsService } from '../../logs/services/logs.service';
 import { Paginated } from '../../../common/dto/paginated';
 import { buildMeta, toSkipTake } from '../../../common/utils/paginate';
 import { ERROR_CODES } from '../../../common/constants/error-codes';
@@ -26,6 +27,7 @@ export class OrganizationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly logs: LogsService,
   ) {}
 
   private toDto(org: OrgWithCount): OrganizationResponseDto {
@@ -70,6 +72,20 @@ export class OrganizationsService {
           createdBy: actorId,
         },
         include: { _count: { select: { users: true } } },
+      });
+      await this.logs.record({
+        typeEnum: LogType.EMPLOYEE,
+        categoryName: 'Organizations',
+        actionName: 'Create Organization',
+        actionText: `Organization ${org.name} was created`,
+        userId: actorId,
+        target: String(org.id),
+        newDetail: {
+          name: org.name,
+          regNumber: org.regNumber,
+          logoUrl: org.logoUrl,
+          jurisdiction: org.jurisdiction,
+        },
       });
       return this.toDto(org);
     } catch (e) {
@@ -143,13 +159,37 @@ export class OrganizationsService {
         },
         include: { _count: { select: { users: true } } },
       });
+      await this.logs.record({
+        typeEnum: LogType.EMPLOYEE,
+        categoryName: 'Organizations',
+        actionName: 'Update Organization',
+        actionText: `The details of organization ${updated.name} were updated`,
+        userId: actorId,
+        target: String(updated.id),
+        oldDetail: {
+          name: org.name,
+          regNumber: org.regNumber,
+          logoUrl: org.logoUrl,
+          jurisdiction: org.jurisdiction,
+        },
+        newDetail: {
+          name: updated.name,
+          regNumber: updated.regNumber,
+          logoUrl: updated.logoUrl,
+          jurisdiction: updated.jurisdiction,
+        },
+      });
       return this.toDto(updated);
     } catch (e) {
       this.handleUniqueViolation(e);
     }
   }
 
-  async uploadLogo(id: string, file: Express.Multer.File): Promise<OrganizationResponseDto> {
+  async uploadLogo(
+    id: string,
+    file: Express.Multer.File,
+    actorId: string,
+  ): Promise<OrganizationResponseDto> {
     const org = await this.getOrThrow(id);
 
     if (org.logoUrl) {
@@ -161,6 +201,16 @@ export class OrganizationsService {
       where: { id },
       data: { logoUrl },
       include: { _count: { select: { users: true } } },
+    });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Organizations',
+      actionName: 'Upload Logo',
+      actionText: `The logo of organization ${updated.name} was replaced`,
+      userId: actorId,
+      target: String(updated.id),
+      oldDetail: { logoUrl: org.logoUrl },
+      newDetail: { logoUrl: updated.logoUrl },
     });
     return this.toDto(updated);
   }
@@ -184,6 +234,16 @@ export class OrganizationsService {
       data: { status: OrgStatus.SUSPENDED, updatedBy: actorId },
       include: { _count: { select: { users: true } } },
     });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Organizations',
+      actionName: 'Suspend Organization',
+      actionText: `Organization ${updated.name} was suspended`,
+      userId: actorId,
+      target: String(updated.id),
+      oldDetail: { status: org.status },
+      newDetail: { status: updated.status },
+    });
     return this.toDto(updated);
   }
 
@@ -202,15 +262,38 @@ export class OrganizationsService {
       data: { status: OrgStatus.ACTIVE, updatedBy: actorId },
       include: { _count: { select: { users: true } } },
     });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Organizations',
+      actionName: 'Activate Organization',
+      actionText: `Organization ${updated.name} was activated`,
+      userId: actorId,
+      target: String(updated.id),
+      oldDetail: { status: org.status },
+      newDetail: { status: updated.status },
+    });
     return this.toDto(updated);
   }
 
   async softDelete(id: string, actorId: string): Promise<void> {
-    await this.getOrThrow(id);
+    const org = await this.getOrThrow(id);
 
     await this.prisma.client.organization.update({
       where: { id },
       data: { deletedAt: new Date(), updatedBy: actorId },
+    });
+    await this.logs.record({
+      typeEnum: LogType.EMPLOYEE,
+      categoryName: 'Organizations',
+      actionName: 'Delete Organization',
+      actionText: `Organization ${org.name} was removed`,
+      userId: actorId,
+      target: String(org.id),
+      oldDetail: {
+        name: org.name,
+        regNumber: org.regNumber,
+        jurisdiction: org.jurisdiction,
+      },
     });
   }
 }
