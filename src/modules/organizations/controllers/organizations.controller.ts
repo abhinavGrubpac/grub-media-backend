@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { UserRole, LogType } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { memoryStorage } from 'multer';
 import { OrganizationsService } from '../services/organizations.service';
 import { CreateOrganizationDto } from '../dto/create-organization.dto';
@@ -26,27 +26,11 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { ImageFileValidationPipe } from '../../../common/pipes/image-file-validation.pipe';
-import { LogsService } from '../../logs/services/logs.service';
-
 @ApiTags('Organizations')
 @ApiBearerAuth()
 @Controller({ path: 'organizations', version: '1' })
 export class OrganizationsController {
-  constructor(
-    private readonly orgs: OrganizationsService,
-    private readonly logs: LogsService,
-  ) {}
-
-  /** Audit a read of the organisation data (EMPLOYEE / Organizations). */
-  private auditRead(u: AuthUser, actionName: string, actionText: string): Promise<void> {
-    return this.logs.record({
-      typeEnum: LogType.EMPLOYEE,
-      categoryName: 'Organizations',
-      actionName,
-      actionText,
-      userId: u.id,
-    });
-  }
+  constructor(private readonly orgs: OrganizationsService) {}
 
   // ---------------------------------------------------------------------------
   // CRUD
@@ -67,26 +51,16 @@ export class OrganizationsController {
   @Get()
   @ApiOperation({ summary: 'List organisations (paginated, Admin+)' })
   @ResponseMessage('Organisations fetched successfully')
-  async list(
-    @Query() query: OrgQueryDto,
-    @CurrentUser() actor: AuthUser,
-  ): Promise<Paginated<OrganizationResponseDto>> {
-    const page = await this.orgs.list(query);
-    await this.auditRead(actor, 'View Organizations', 'The organisation directory was viewed');
-    return page;
+  async list(@Query() query: OrgQueryDto): Promise<Paginated<OrganizationResponseDto>> {
+    return this.orgs.list(query);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Get(':id')
   @ApiOperation({ summary: 'Get an organisation by ID (Admin+)' })
   @ResponseMessage('Organisation fetched successfully')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() actor: AuthUser,
-  ): Promise<OrganizationResponseDto> {
-    const org = await this.orgs.findById(id);
-    await this.auditRead(actor, 'View Organization', `The organisation ${org.name} was viewed`);
-    return org;
+  findOne(@Param('id') id: string): Promise<OrganizationResponseDto> {
+    return this.orgs.findById(id);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)

@@ -10,12 +10,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { LogType } from '@prisma/client';
 import { memoryStorage } from 'multer';
 import { StorageService } from '../storage/storage.service';
 import { UsersService } from '../users/services/users.service';
-import { OrganizationsService } from '../organizations/services/organizations.service';
-import { LogsService } from '../logs/services/logs.service';
+
 import { CurrentUser, AuthUser } from '../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ImageFileValidationPipe } from '../../common/pipes/image-file-validation.pipe';
@@ -28,8 +26,6 @@ export class UploadController {
   constructor(
     private readonly storage: StorageService,
     private readonly users: UsersService,
-    private readonly orgs: OrganizationsService,
-    private readonly logs: LogsService,
   ) {}
 
   /**
@@ -89,26 +85,6 @@ export class UploadController {
     }
     const url = await this.storage.uploadImage('org-logos', dto.targetId, file);
 
-    // Audit row — best-effort org name so the sentence never carries a raw id;
-    // an unknown target must not fail the upload (behaviour stays as before).
-    // No old/new detail: this branch only stores the file — the FK write lives
-    // in POST /organizations/:id/logo, which logs its own row.
-    let orgName: string | null = null;
-    try {
-      orgName = (await this.orgs.findById(dto.targetId)).name;
-    } catch {
-      // stays null — unknown target must not fail the upload
-    }
-    await this.logs.record({
-      typeEnum: LogType.EMPLOYEE,
-      categoryName: 'Organizations',
-      actionName: 'Upload Logo Image',
-      actionText: orgName
-        ? `A logo image for organization ${orgName} was uploaded`
-        : 'A logo image for an organisation was uploaded',
-      userId: actor.id,
-      target: dto.targetId,
-    });
     return { url };
   }
 }

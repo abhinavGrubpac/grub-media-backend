@@ -153,6 +153,8 @@ async function seedOrganizations(superAdminId: string): Promise<string> {
   return org.id;
 }
 
+// superadmin@grubpac.com / SuperAdmin@123456
+
 async function seedAdmins(superAdminId: string, orgId: string): Promise<string[]> {
   const admins = [
     {

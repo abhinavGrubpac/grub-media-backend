@@ -108,34 +108,6 @@ export class UsersService {
     return this.toDto(user);
   }
 
-  /** Replace the user's avatar image in object storage (org-era upload flow). */
-  async uploadAvatar(userId: string, file: Express.Multer.File): Promise<UserResponseDto> {
-    const user = await this.getOrThrow(userId);
-
-    // Best-effort removal of the old object — never block the new upload.
-    if (user.avatarUrl) {
-      void this.storage?.deleteByUrl(user.avatarUrl);
-    }
-
-    const avatarUrl = await this.storage!.uploadImage('avatars', userId, file);
-    const updated = await this.prisma.client.user.update({
-      where: { id: userId },
-      data: { avatarUrl },
-    });
-    await this.logs.record({
-      typeEnum: LogType.ACTIVITY,
-      categoryName: 'Profile',
-      actionName: 'Upload Avatar',
-      actionText: `The avatar of ${user.email} was uploaded`,
-      userId,
-      empId: user.id,
-      target: logRefOf(user),
-      oldDetail: { avatarUrl: user.avatarUrl },
-      newDetail: { avatarUrl: updated.avatarUrl },
-    });
-    return this.toDto(updated);
-  }
-
   /** Raw row incl. passwordHash — for the auth module only. */
   async findByEmailWithHash(
     email: string,
@@ -423,15 +395,16 @@ export class UsersService {
       data: { usedAt: new Date() },
     });
 
-    const code = String(Math.floor(1000 + Math.random() * 9000));
+    const isDev = this.config.get<string>('app.nodeEnv') === 'development';
+    const code = isDev ? DEV_OTP_BYPASS : String(Math.floor(1000 + Math.random() * 9000));
     await this.prisma.otpCode.create({
       data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
     });
 
-    if (dto.type === 'email') {
-      await this.mailer.sendOtp(dto.value, code);
-    } else {
-      this.logger.log(`[DEV] Profile phone OTP for user ${userId}: ${code}`);
+    if (!isDev) {
+      if (dto.type === 'email') {
+        await this.mailer.sendOtp(dto.value, code);
+      }
     }
   }
 
