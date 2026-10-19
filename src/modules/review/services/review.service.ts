@@ -248,7 +248,7 @@ export class CreativeService {
     }
 
     const agencies = await this.fetchAgencies(
-      creatives.map((creative) => creative.brand.upstreamAgencyId),
+      creatives.map((creative) => creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId),
     );
     const actorNames = await this.resolveActorNames([
       ...this.collectActorIds([
@@ -1110,9 +1110,8 @@ export class CreativeService {
   ): CreativeResponseDto {
     const latestVersion = creative.versions[0];
     const latestAction = latestVersion?.actions[0];
-    const agency = creative.brand.upstreamAgencyId
-      ? (agencies.get(creative.brand.upstreamAgencyId) ?? null)
-      : null;
+    const agencyId = creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId;
+    const agency = agencyId ? (agencies.get(agencyId) ?? null) : null;
     return plainToInstance(
       CreativeResponseDto,
       {
