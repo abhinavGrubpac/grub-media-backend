@@ -109,7 +109,7 @@ export class AdvertResponseDto {
   location?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Coverage radius in kilometres for map display',
+    description: 'Coverage radius in kilometres for map display (null until a radius is set)',
     nullable: true,
   })
   @Expose()
@@ -136,7 +136,8 @@ export class AdvertResponseDto {
   industry?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Hamming distance to the uploaded image (by-image search only)',
+    description:
+      'Distance in kilometres from the searched lat/lng to the advert site (radius/geo search only)',
     nullable: true,
   })
   @Expose()
