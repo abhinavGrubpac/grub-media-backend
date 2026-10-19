@@ -70,7 +70,10 @@ function makeDeps() {
     findMany: jest.fn().mockResolvedValue([]),
   };
   const brand = { findUnique: jest.fn().mockResolvedValue(null) };
-  const agencyRef = { findUnique: jest.fn().mockResolvedValue(null) };
+  const agencyRef = {
+    findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
+  };
   const advert = {
     findMany: jest.fn().mockResolvedValue([]),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -171,6 +174,41 @@ describe('CreativeService.findAll', () => {
     creative.findMany.mockResolvedValue([]);
     await service.findAll({ ...pageQuery, status: 'ALL' } as never);
     expect(creative.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+  });
+
+  it('enriches list rows with brand logo and agency name/location', async () => {
+    const { service, creative, agencyRef } = makeDeps();
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: {
+          ...brandRow,
+          logoUrl: 'https://cdn.example.com/brand1.png',
+          upstreamAgencyId: 'ag1',
+        },
+        createdAt: new Date('2026-01-01'),
+        versions: [],
+      },
+    ]);
+    agencyRef.findMany.mockResolvedValue([
+      {
+        upstreamAgencyId: 'ag1',
+        agencyName: 'Test Agency',
+        city: 'Bengaluru',
+        address: '12 MG Road',
+      },
+    ]);
+    const result = await service.findAll({ ...pageQuery } as never);
+    expect(agencyRef.findMany).toHaveBeenCalledWith({
+      where: { upstreamAgencyId: { in: ['ag1'] } },
+    });
+    expect(result.items[0].brand.logo_url).toBe('https://cdn.example.com/brand1.png');
+    expect(result.items[0].agency).toMatchObject({
+      upstream_agency_id: 'ag1',
+      agency_name: 'Test Agency',
+      city: 'Bengaluru',
+      address: '12 MG Road',
+    });
   });
 
   it('embeds approval threads with include=history in one batched query', async () => {

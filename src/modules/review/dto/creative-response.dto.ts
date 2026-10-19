@@ -19,6 +19,10 @@ export class CreativeBrandSummaryDto {
   @Expose()
   industry_category!: string | null;
 
+  @ApiPropertyOptional({ description: 'Brand logo URL', nullable: true })
+  @Expose()
+  logo_url!: string | null;
+
   @ApiPropertyOptional({ description: 'Display name of the flagging reviewer', nullable: true })
   @Expose()
   flagged_by!: string | null;

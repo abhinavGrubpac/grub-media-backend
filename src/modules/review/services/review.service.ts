@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { Prisma, ReviewStatus } from '@prisma/client';
+import { AgencyRef, Prisma, ReviewStatus } from '@prisma/client';
 import { StandardMeta, standardMeta, toSkipTake } from '../../../common/utils/paginate';
 import { PrismaService } from '../../../database/prisma.service';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
@@ -247,6 +247,9 @@ export class CreativeService {
       threadsByCreative.set(version.creativeId, list);
     }
 
+    const agencies = await this.fetchAgencies(
+      creatives.map((creative) => creative.brand.upstreamAgencyId),
+    );
     const actorNames = await this.resolveActorNames([
       ...this.collectActorIds([
         ...creatives.flatMap((creative) => creative.versions),
@@ -255,7 +258,7 @@ export class CreativeService {
       ...this.collectRowIds(creatives),
     ]);
     const data = creatives.map((creative) => {
-      const response = this.toCreativeResponse(creative, actorNames);
+      const response = this.toCreativeResponse(creative, actorNames, agencies);
       const latestAction = creative.versions[0]?.actions[0];
       return {
         ...response,
@@ -1090,12 +1093,26 @@ export class CreativeService {
     return new Map(rows.map((row) => [row.id, row.wkt]));
   }
 
+  /** Batched agency lookup for list rows, keyed by upstream agency id. */
+  private async fetchAgencies(upstreamIds: Array<string | null>): Promise<Map<string, AgencyRef>> {
+    const ids = [...new Set(upstreamIds.filter((id): id is string => Boolean(id)))];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.client.agencyRef.findMany({
+      where: { upstreamAgencyId: { in: ids } },
+    });
+    return new Map(rows.map((row) => [row.upstreamAgencyId, row]));
+  }
+
   private toCreativeResponse(
     creative: CreativeWithBrandAndVersions,
     actorNames: Map<string, string>,
+    agencies: Map<string, AgencyRef> = new Map(),
   ): CreativeResponseDto {
     const latestVersion = creative.versions[0];
     const latestAction = latestVersion?.actions[0];
+    const agency = creative.brand.upstreamAgencyId
+      ? (agencies.get(creative.brand.upstreamAgencyId) ?? null)
+      : null;
     return plainToInstance(
       CreativeResponseDto,
       {
@@ -1104,6 +1121,7 @@ export class CreativeService {
         brand: {
           id: creative.brand.id,
           brand_name: creative.brand.brandName,
+          logo_url: creative.brand.logoUrl ?? null,
           is_flagged: creative.brand.isFlagged,
           industry_category: creative.brand.industryCategory ?? null,
           flagged_by:
@@ -1124,6 +1142,16 @@ export class CreativeService {
         viewed_minutes_ago: creative.lastViewedAt
           ? Math.max(0, Math.round((Date.now() - creative.lastViewedAt.getTime()) / 60000))
           : null,
+        ...(agency
+          ? {
+              agency: {
+                upstream_agency_id: agency.upstreamAgencyId,
+                agency_name: agency.agencyName,
+                city: agency.city ?? null,
+                address: agency.address ?? null,
+              },
+            }
+          : {}),
       },
       { excludeExtraneousValues: true },
     );
