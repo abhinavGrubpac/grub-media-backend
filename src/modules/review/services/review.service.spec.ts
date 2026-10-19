@@ -931,6 +931,25 @@ describe('CreativeService.finalizeUpload', () => {
       }),
     );
   });
+
+  it('derives media_name from the s3_key file name', async () => {
+    const { service, creative, creativeVersion } = makeDeps();
+    creative.findUnique.mockResolvedValue({ ...creativeRow, brand: brandRow });
+    creativeVersion.findFirst.mockResolvedValue(null);
+    creativeVersion.create.mockResolvedValue({ ...versionRow, id: 'v3', versionNumber: 3 });
+    creative.update.mockResolvedValue(creativeRow);
+
+    await service.finalizeUpload(
+      { creative_id: 'c1', s3_key: 'creatives/diwali%20film%2015s.png', media_type: 'Image' },
+      'u1',
+    );
+
+    expect(creativeVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mediaName: 'diwali film 15s.png' }),
+      }),
+    );
+  });
 });
 
 describe('filterOptions', () => {

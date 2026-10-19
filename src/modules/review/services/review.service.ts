@@ -676,10 +676,11 @@ export class CreativeService {
     // foreign hosts and malformed keys fail here instead of downstream.
     const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
     this.storage.assertFileUrlAllowed(fileUrl);
+    const mediaName = this.deriveMediaName(dto.s3_key);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
         dto.creative_id,
-        { media_url: fileUrl, media_type: dto.media_type },
+        { media_url: fileUrl, media_name: mediaName ?? undefined, media_type: dto.media_type },
         actorId,
       );
       return version;
@@ -691,10 +692,32 @@ export class CreativeService {
       {
         brand_id: dto.brand_id,
         creative_name: dto.name,
-        initial_version: { media_url: fileUrl, media_type: dto.media_type },
+        initial_version: {
+          media_url: fileUrl,
+          media_name: mediaName ?? undefined,
+          media_type: dto.media_type,
+        },
       },
       actorId,
     );
+  }
+
+  /**
+   * Display name for finalize flows: the file name (last path segment of the
+   * s3 key), percent-decoded and length-capped — null when the key carries no
+   * usable name.
+   */
+  private deriveMediaName(s3Key: string): string | null {
+    const raw = s3Key.split('#')[0].split('?')[0];
+    const base = raw.split('/').pop()?.trim() ?? '';
+    if (!base) return null;
+    let name = base;
+    try {
+      name = decodeURIComponent(base);
+    } catch {
+      // keep the raw segment when the key isn't valid percent-encoding
+    }
+    return name.slice(0, 200) || null;
   }
 
   /**
