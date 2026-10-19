@@ -93,6 +93,112 @@ export class AuthService {
     return this.users.findById(userId);
   }
 
+  async requestProfileOtp(userId: string, dto: ProfileOtpRequestDto): Promise<void> {
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    if (!user) throw new InvalidCredentialsException();
+    if (dto.type === 'email' && !/^\S+@\S+\.\S+$/.test(dto.value))
+      throw new BadRequestException('Invalid email');
+    // The DTO's per-type @ValidateIf conditions cancel each other out for
+    // phone values, so enforce the same rule here where it can't be skipped.
+    if (dto.type === 'phone' && !/^\+[1-9]\d{7,14}$/.test(dto.value))
+      throw new BadRequestException('Invalid phone number');
+    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    await this.prisma.client.otpCode.create({
+      data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
+    });
+    // Never log the code itself: application logs are readable far beyond the
+    // device that requested the change (aggregators, support, backups).
+    this.logger.log(`Profile ${dto.type} OTP issued for ${userId}`);
+
+    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'OTP Requested',
+      actionText: `A one-time code was requested to change the ${typeWord} of ${logRefOf(user)}`,
+      userId,
+      target: logRefOf(user),
+    });
+  }
+
+  async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
+    const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
+    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
+    const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    const who = logRefOf(before ?? { id: userId, email: null, employeeId: null });
+    const claim = await this.prisma.client.otpCode.updateMany({
+      where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (!claim.count) {
+      // Audit the failed verification alongside the profile flow's other rows
+      // (ACTIVITY/Profile), so rejected OTP attempts are visible to admins.
+      await this.logs.record({
+        typeEnum: LogType.ACTIVITY,
+        categoryName: 'Profile',
+        actionName: 'Failed OTP',
+        actionText: `The one-time code entered to change the ${typeWord} of ${who} was wrong or expired`,
+        userId,
+        target: userId,
+      });
+      throw new BadRequestException('Invalid or expired OTP');
+    }
+    const oldField = dto.type === 'email' ? before?.email : before?.phoneNumber;
+    if (dto.type === 'email') {
+      const existing = await this.prisma.client.user.findUnique({ where: { email: dto.value } });
+      if (existing && existing.id !== userId) throw new ConflictException('Email already in use');
+      await this.prisma.client.user.update({ where: { id: userId }, data: { email: dto.value } });
+    } else
+      await this.prisma.client.user.update({
+        where: { id: userId },
+        data: { phoneNumber: dto.value },
+      });
+    await this.logs.record({
+      typeEnum: LogType.ACTIVITY,
+      categoryName: 'Profile',
+      actionName: 'Update Profile',
+      actionText: `The ${typeWord} of ${who} was changed to ${dto.value}`,
+      userId,
+      empId: userId,
+      target: who,
+      oldDetail: { [dto.type]: oldField ?? null },
+      newDetail: { [dto.type]: dto.value },
+    });
+    return this.users.findById(userId);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.users.findByEmailWithHash(
+      (await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } })).email,
+    );
+    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+      throw new InvalidCredentialsException();
+    }
+    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
+      throw new BadRequestException({
+        message: 'New password must differ from the current password',
+        errorCode: ERROR_CODES.BAD_REQUEST,
+      });
+    }
+    await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
+    });
+    await this.logs.record({
+      ...AUTH_LOG,
+      actionName: 'Password Changed',
+      actionText: `Password changed for ${user.email}`,
+      userId,
+      empId: userId,
+      target: logRefOf(user),
+      // The secret itself never enters the log; the columns still record that
+      // the field changed, in the same shape as every other edit.
+      oldDetail: { password: '<redacted: previous value>' },
+      newDetail: { password: '<redacted: new value>' },
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // OTP login
   // ---------------------------------------------------------------------------
@@ -147,7 +253,10 @@ export class AuthService {
       });
     }
 
-    const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
+    const user = await this.prisma.client.user.findFirst({
+      where: { email: dto.email },
+      include: { organization: true },
+    });
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new InvalidCredentialsException();
     }

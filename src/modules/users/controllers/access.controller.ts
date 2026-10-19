@@ -1,10 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { AccessService } from '../services/access.service';
-import { AssignAdminDto, AssignBundleDto, BundleDto, PermissionDto } from '../dto/access.dto';
+import {
+  AssignAdminDto,
+  AssignBundleDto,
+  BundleDto,
+  PermissionDto,
+  ReassignBundleDto,
+  UpdateBundleDto,
+} from '../dto/access.dto';
 @ApiTags('Access Management')
 @ApiBearerAuth()
 @Controller({ path: 'access', version: '1' })
@@ -22,6 +29,30 @@ export class AccessController {
   }
   @Post('bundles') bundle(@CurrentUser() u: AuthUser, @Body() dto: BundleDto) {
     return this.access.createBundle(u.id, dto);
+  }
+
+  @Get('bundles/:id/users')
+  bundleUsers(@Param('id') id: string) {
+    return this.access.bundleUsers(id);
+  }
+
+  @Patch('bundles/:id')
+  updateBundle(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() dto: UpdateBundleDto) {
+    return this.access.updateBundle(u.id, u.role, id, dto);
+  }
+
+  @Delete('bundles/:id')
+  deleteBundle(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.access.deleteBundle(u.id, u.role, id);
+  }
+
+  @Post('bundles/:id/reassign')
+  reassignBundle(
+    @CurrentUser() u: AuthUser,
+    @Param('id') fromBundleId: string,
+    @Body() dto: ReassignBundleDto,
+  ) {
+    return this.access.reassignBundle(u.id, u.role, fromBundleId, dto);
   }
   @Post('employees/:employeeId/bundles') assign(
     @CurrentUser() u: AuthUser,
