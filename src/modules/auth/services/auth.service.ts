@@ -345,7 +345,10 @@ export class AuthService {
       });
     }
 
-    const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
+    const user = await this.prisma.client.user.findFirst({
+      where: { email: dto.email },
+      include: { organization: true },
+    });
     if (!user || user.status !== UserStatus.ACTIVE) {
       await this.recordFailedLogin(dto.email, ctx, 'otp');
       throw new InvalidCredentialsException();

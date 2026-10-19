@@ -2,7 +2,7 @@ import { Optional, Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
-import { UserStatus, LogType, type User } from '@prisma/client';
+import { UserStatus, LogType, type User, type Organization } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { describeActor, logRefOf } from '../../../common/utils/log-ref';
 import { StorageService } from '../../storage/storage.service';
@@ -36,7 +36,7 @@ export class UsersService {
     @Optional() private readonly storage?: StorageService,
   ) {}
 
-  private toDto(user: User): UserResponseDto {
+  private toDto(user: User & { organization?: Organization | null }): UserResponseDto {
     return plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true });
   }
 
@@ -90,8 +90,10 @@ export class UsersService {
   }
 
   /** Raw row incl. passwordHash — for the auth module only. */
-  async findByEmailWithHash(email: string): Promise<User | null> {
-    return this.prisma.client.user.findFirst({ where: { email } });
+  async findByEmailWithHash(
+    email: string,
+  ): Promise<(User & { organization?: Organization | null }) | null> {
+    return this.prisma.client.user.findFirst({ where: { email }, include: { organization: true } });
   }
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -275,8 +277,11 @@ export class UsersService {
     ].join('\n');
   }
 
-  private async getOrThrow(id: string): Promise<User> {
-    const user = await this.prisma.client.user.findFirst({ where: { id } });
+  private async getOrThrow(id: string): Promise<User & { organization?: Organization | null }> {
+    const user = await this.prisma.client.user.findFirst({
+      where: { id },
+      include: { organization: true },
+    });
     if (!user) {
       throw new UserNotFoundException();
     }
