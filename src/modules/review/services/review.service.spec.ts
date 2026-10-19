@@ -5,7 +5,7 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { ReviewStatus } from '@prisma/client';
+import { Prisma, ReviewStatus } from '@prisma/client';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { CreativeService } from './review.service';
 import { ReviewController } from '../controllers/review.controller';
@@ -362,6 +362,21 @@ describe('CreativeService.createCreative', () => {
       service.createCreative({ brand_id: 'brand1', creative_name: 'X' }, 'u1'),
     ).rejects.toThrow(BadRequestException);
     expect(creative.create).not.toHaveBeenCalled();
+  });
+
+  it('translates a brand FK race into 404 instead of 500', async () => {
+    const { service, brand, creative } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
+        code: 'P2003',
+        clientVersion: '6.19.3',
+      }),
+    );
+
+    await expect(
+      service.createCreative({ brand_id: 'brand1', creative_name: 'X' }, 'u1'),
+    ).rejects.toThrow(NotFoundException);
   });
 });
 

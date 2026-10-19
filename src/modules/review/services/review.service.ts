@@ -294,13 +294,24 @@ export class CreativeService {
       throw new BadRequestException('schedule needs initial_version: nothing to book yet');
     }
     const { creative, version } = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.creative.create({
-        data: {
-          brandId: dto.brand_id,
-          creativeName: dto.creative_name,
-          externalRefId: dto.external_ref_id ?? null,
-        },
-      });
+      let created;
+      try {
+        created = await tx.creative.create({
+          data: {
+            brandId: dto.brand_id,
+            creativeName: dto.creative_name,
+            externalRefId: dto.external_ref_id ?? null,
+          },
+        });
+      } catch (err) {
+        // Brand deleted between the existence check and the write (or a
+        // caller-supplied id that resolved differently) surfaces as P2003 —
+        // translate it to 404 instead of leaking a 500.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+          throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
+        }
+        throw err;
+      }
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.creativeCreated,
         entityType: 'Creative',

@@ -18,7 +18,7 @@ import {
 } from '../dto/reference-list-query.dto';
 import { ReferenceUpdateDto } from '../dto/reference-update.dto';
 import { ReferenceUploadUrlDto } from '../dto/reference-upload-url.dto';
-import { REFERENCE_MAX_FILE_BYTES, StorageService } from './storage.service';
+import { REFERENCE_MAX_FILE_BYTES, StorageService, isS3NotFound } from './storage.service';
 
 export interface ReferenceCreateInput {
   title: string;
@@ -167,11 +167,24 @@ export class ReferenceService {
     this.storage.assertFileUrlAllowed(fileUrl);
     this.storage.assertFileSizeAllowed(dto.file_size_bytes);
 
-    // Authoritative 99 MB check: declared size is validated above; when S3 is
-    // configured the stored object is HEADed so spoofed sizes cannot bypass.
+    // Authoritative check against the stored object: declared size is
+    // validated above, and the object MUST exist — finalizing a key that was
+    // never uploaded used to create ghost rows whose download 404s (NoSuchKey).
+    // Unreachable S3 stays fail-open (existing behavior); only a definitive
+    // 404 is rejected.
     const key = this.storage.extractKeyFromUrl(fileUrl);
-    if (key) {
-      const actual = await this.storage.getObjectSize(key).catch(() => null);
+    if (key && this.storage.isConfigured) {
+      let actual: number | null;
+      try {
+        actual = await this.storage.getObjectSize(key);
+      } catch (err) {
+        if (isS3NotFound(err)) {
+          throw new BadRequestException(
+            `No file uploaded yet for "${key}" — PUT the PDF to upload_url first, then finalize`,
+          );
+        }
+        actual = null;
+      }
       if (actual !== null && actual > REFERENCE_MAX_FILE_BYTES) {
         throw new BadRequestException(
           `file must be 99 MB or less (stored object is ${actual} bytes)`,
@@ -213,6 +226,11 @@ export class ReferenceService {
   async update(id: string, dto: ReferenceUpdateDto): Promise<ReferenceDocResponseDto> {
     const existing = await this.prisma.client.referenceDoc.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException(`Reference document ${id} not found`);
+    // Archived docs are read-only history for past review decisions — restore
+    // first so edits cannot rewrite the justification record in place.
+    if (existing.isArchived) {
+      throw new ConflictException(`Reference document ${id} is archived; restore before editing`);
+    }
 
     if (dto.title !== undefined) this.requireTrimmed(dto.title, 'title');
     if (dto.category !== undefined) this.requireTrimmed(dto.category, 'category');
@@ -263,6 +281,9 @@ export class ReferenceService {
     const doc = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.referenceDoc.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Reference document ${id} not found`);
+      if (existing.isArchived) {
+        throw new ConflictException(`Reference document ${id} is already archived`);
+      }
       const archived = await tx.referenceDoc.update({
         where: { id },
         data: { isArchived: true, archivedOn: new Date() },
@@ -287,6 +308,9 @@ export class ReferenceService {
     const doc = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.referenceDoc.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Reference document ${id} not found`);
+      if (!existing.isArchived) {
+        throw new ConflictException(`Reference document ${id} is not archived`);
+      }
       const restored = await tx.referenceDoc.update({
         where: { id },
         data: { isArchived: false, archivedOn: null },
@@ -357,6 +381,13 @@ export class ReferenceService {
     await this.prisma.$transaction(async (tx) => {
       const existing = await tx.referenceDoc.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Reference document ${id} not found`);
+      // Permanent deletes run from the archived list only — archive first so
+      // active library docs cannot be destroyed in one call.
+      if (!existing.isArchived) {
+        throw new ConflictException(
+          `Reference document ${id} must be archived before permanent deletion`,
+        );
+      }
       const links = await tx.creativeReference.count({ where: { docId: id } });
       if (links > 0) {
         throw new ConflictException(

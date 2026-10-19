@@ -35,7 +35,10 @@ export const ADVERT_TRANSITIONS: Record<
   govt: {
     SCHEDULED: [AdvertStatus.PAUSED, AdvertStatus.REVOKED],
     LIVE: [AdvertStatus.PAUSED, AdvertStatus.REVOKED],
-    PAUSED: [AdvertStatus.LIVE, AdvertStatus.REVOKED],
+    // Resume restores the pre-pause state: SCHEDULED when the flight has not
+    // started yet, LIVE once the window is open. The service layer enforces
+    // the date split — the matrix only opens both targets.
+    PAUSED: [AdvertStatus.SCHEDULED, AdvertStatus.LIVE, AdvertStatus.REVOKED],
     EXPIRED: [],
     REVOKED: [],
   },

@@ -39,6 +39,7 @@ function makeDeps() {
     emit: jest.fn().mockResolvedValue(undefined),
   };
   const storage = {
+    isConfigured: true,
     buildKey: jest.fn().mockReturnValue('references/1-guidelines.pdf'),
     presignedUploadUrl: jest
       .fn()
@@ -290,6 +291,22 @@ describe('ReferenceService.archive / restore', () => {
     );
   });
 
+  it('rejects archiving an already-archived document', async () => {
+    const { service, referenceDoc } = makeDeps();
+    referenceDoc.findUnique.mockResolvedValue({ ...docRow, isArchived: true });
+
+    await expect(service.archive('doc1')).rejects.toThrow(/already archived/);
+    expect(referenceDoc.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects restoring a document that is not archived', async () => {
+    const { service, referenceDoc } = makeDeps();
+    referenceDoc.findUnique.mockResolvedValue(docRow);
+
+    await expect(service.restore('doc1')).rejects.toThrow(/not archived/);
+    expect(referenceDoc.update).not.toHaveBeenCalled();
+  });
+
   it('bulk-restore unarchives a selection at once', async () => {
     const { service, referenceDoc, outbox } = makeDeps();
     referenceDoc.updateMany.mockResolvedValue({ count: 2 });
@@ -331,9 +348,9 @@ describe('ReferenceService.archive / restore', () => {
 });
 
 describe('ReferenceService.hardDelete', () => {
-  it('permanently deletes unlinked documents', async () => {
+  it('permanently deletes archived, unlinked documents', async () => {
     const { service, referenceDoc, creativeReference, outbox } = makeDeps();
-    referenceDoc.findUnique.mockResolvedValue(docRow);
+    referenceDoc.findUnique.mockResolvedValue({ ...docRow, isArchived: true });
     creativeReference.count.mockResolvedValue(0);
 
     await service.hardDelete('doc1');
@@ -345,12 +362,32 @@ describe('ReferenceService.hardDelete', () => {
     );
   });
 
-  it('blocks deletes that would orphan review justifications', async () => {
+  it('rejects permanent deletes of active documents (archive first)', async () => {
     const { service, referenceDoc, creativeReference } = makeDeps();
     referenceDoc.findUnique.mockResolvedValue(docRow);
+    creativeReference.count.mockResolvedValue(0);
+
+    await expect(service.hardDelete('doc1')).rejects.toThrow(/archived before permanent/);
+  });
+
+  it('blocks deletes that would orphan review justifications', async () => {
+    const { service, referenceDoc, creativeReference } = makeDeps();
+    referenceDoc.findUnique.mockResolvedValue({ ...docRow, isArchived: true });
     creativeReference.count.mockResolvedValue(2);
 
     await expect(service.hardDelete('doc1')).rejects.toThrow(ConflictException);
+  });
+});
+
+describe('ReferenceService.update', () => {
+  it('rejects edits while the document is archived', async () => {
+    const { service, referenceDoc } = makeDeps();
+    referenceDoc.findUnique.mockResolvedValue({ ...docRow, isArchived: true });
+
+    await expect(service.update('doc1', { title: 'New' })).rejects.toThrow(
+      /archived; restore before editing/,
+    );
+    expect(referenceDoc.update).not.toHaveBeenCalled();
   });
 });
 

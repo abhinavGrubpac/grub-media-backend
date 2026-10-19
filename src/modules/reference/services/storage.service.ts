@@ -24,6 +24,12 @@ export function stripUrlQuery(value: string): string {
   }
 }
 
+/** True when an S3 error means "no object at this key" (vs S3 unreachable). */
+export function isS3NotFound(err: unknown): boolean {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404;
+}
+
 /**
  * Media storage abstraction. Without S3 credentials the service runs in local
  * mock mode so the API is fully usable in development. With credentials it
@@ -87,6 +93,10 @@ export class StorageService {
           accessKeyId: this.config.get<string>('storage.accessKeyId') || '',
           secretAccessKey: this.config.get<string>('storage.secretAccessKey') || '',
         },
+        // Presigned PUTs must work with plain Content-Type uploads (Postman /
+        // curl / browsers). The SDK default (WHEN_SUPPORTED) bakes CRC32
+        // checksum headers into the signature, failing uploads that omit them.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
       });
     }
     return this.s3;
