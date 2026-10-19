@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { UsersService } from './users.service';
 import {
   EmailAlreadyExistsException,
@@ -178,7 +179,10 @@ describe('UsersService', () => {
 
   it('list returns paginated DTOs without passwordHash and correct meta', async () => {
     const svc = new UsersService(prismaMock(), mailerMock, configMock, storageMock);
-    const page = await svc.list({ page: 1, limit: 20, sortOrder: 'desc' } as never);
+    const page = await svc.list(
+      { page: 1, limit: 20, sortOrder: 'desc' } as never,
+      UserRole.SUPER_ADMIN,
+    );
     expect(page.meta).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
     expect(page.data[0]).not.toHaveProperty('passwordHash');
     expect(page.data[0].email).toBe('a@b.c');

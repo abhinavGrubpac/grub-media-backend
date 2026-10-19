@@ -30,6 +30,7 @@ import { ProfileUpdateDto } from '../dto/profile-update.dto';
 import { ProfileOtpRequestDto } from '../../auth/dto/profile-otp-request.dto';
 import { ProfileOtpVerifyDto } from '../../auth/dto/profile-otp-verify.dto';
 import { ChangePasswordDto } from '../../auth/dto/change-password.dto';
+import { SetPasswordDto } from '../../auth/dto/set-password.dto';
 
 const OTP_TTL_MINUTES = 10;
 const DEV_OTP_BYPASS = '1234';
@@ -266,11 +267,21 @@ export class UsersService {
   // Bulk / admin utilities
   // ---------------------------------------------------------------------------
 
-  async list(query: UserQueryDto): Promise<Paginated<UserResponseDto>> {
+  async list(query: UserQueryDto, actorRole: UserRole): Promise<Paginated<UserResponseDto>> {
+    const isRestricted = actorRole !== UserRole.SUPER_ADMIN;
+
+    // ADMIN asked to filter by SUPER_ADMIN → nothing is visible to them
+    if (isRestricted && query.role === UserRole.SUPER_ADMIN) {
+      return { data: [], meta: buildMeta(0, query.page, query.limit) };
+    }
+
+    // For non-SUPER_ADMINs, always exclude SUPER_ADMIN accounts
+    const roleWhere = isRestricted ? (query.role ?? { not: UserRole.SUPER_ADMIN }) : query.role;
+
     const search = query.search?.trim();
     const where = {
       deletedAt: null,
-      role: query.role,
+      role: roleWhere,
       status: query.status,
       ...(search
         ? {
@@ -459,6 +470,13 @@ export class UsersService {
         errorCode: ERROR_CODES.BAD_REQUEST,
       });
     }
+    await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
+    });
+  }
+
+  async setPassword(userId: string, dto: SetPasswordDto): Promise<void> {
     await this.prisma.client.user.update({
       where: { id: userId },
       data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
