@@ -44,18 +44,23 @@ const storageMock = {
 } as never;
 
 function prismaMock(overrides: Record<string, jest.Mock> = {}) {
+  const userMock = {
+    findFirst: jest.fn().mockResolvedValue(userRow),
+    findUniqueOrThrow: jest.fn().mockResolvedValue(userRow),
+    create: jest.fn().mockResolvedValue(userRow),
+    count: jest.fn().mockResolvedValue(1),
+    findMany: jest.fn().mockResolvedValue([userRow]),
+    update: jest.fn().mockResolvedValue(userRow),
+    ...overrides,
+  };
+  const userBundleMock = { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) };
   return {
-    client: {
-      user: {
-        findFirst: jest.fn().mockResolvedValue(userRow),
-        findUniqueOrThrow: jest.fn().mockResolvedValue(userRow),
-        create: jest.fn().mockResolvedValue(userRow),
-        count: jest.fn().mockResolvedValue(1),
-        findMany: jest.fn().mockResolvedValue([userRow]),
-        update: jest.fn().mockResolvedValue(userRow),
-        ...overrides,
-      },
-    },
+    client: { user: userMock },
+    $transaction: jest
+      .fn()
+      .mockImplementation((cb: (tx: unknown) => unknown) =>
+        cb({ user: userMock, userBundle: userBundleMock }),
+      ),
     otpCode: {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -74,23 +79,26 @@ function build(
     nodeEnv?: string;
   } = {},
 ) {
+  const buildUserMock = {
+    findFirst: jest
+      .fn()
+      .mockResolvedValue(opts.prismaUser !== undefined ? opts.prismaUser : userRow),
+    findUniqueOrThrow: jest
+      .fn()
+      .mockResolvedValue(opts.prismaUser !== undefined ? (opts.prismaUser ?? userRow) : userRow),
+    create: jest.fn().mockResolvedValue(userRow),
+    count: jest.fn().mockResolvedValue(1),
+    findMany: jest.fn().mockResolvedValue([userRow]),
+    update: jest.fn().mockResolvedValue(userRow),
+  };
+  const buildUserBundleMock = { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) };
   const prisma = {
-    client: {
-      user: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue(opts.prismaUser !== undefined ? opts.prismaUser : userRow),
-        findUniqueOrThrow: jest
-          .fn()
-          .mockResolvedValue(
-            opts.prismaUser !== undefined ? (opts.prismaUser ?? userRow) : userRow,
-          ),
-        create: jest.fn().mockResolvedValue(userRow),
-        count: jest.fn().mockResolvedValue(1),
-        findMany: jest.fn().mockResolvedValue([userRow]),
-        update: jest.fn().mockResolvedValue(userRow),
-      },
-    },
+    client: { user: buildUserMock },
+    $transaction: jest
+      .fn()
+      .mockImplementation((cb: (tx: unknown) => unknown) =>
+        cb({ user: buildUserMock, userBundle: buildUserBundleMock }),
+      ),
     otpCode: {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),

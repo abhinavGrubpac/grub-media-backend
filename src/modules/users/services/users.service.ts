@@ -161,20 +161,27 @@ export class UsersService {
     const target = await this.getOrThrow(id);
     this.assertHierarchy(actorRole, target.role, dto.role);
 
-    const user = await this.prisma.client.user.update({
-      where: { id },
-      data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phoneNumber: dto.phoneNumber,
-        employeeId: dto.employeeId,
-        jurisdiction: dto.jurisdiction,
-        joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
-        organizationId: dto.organizationId,
-        role: dto.role,
-        updatedBy: actorId,
-      },
-      include: { organization: true },
+    const roleChanging = dto.role !== undefined && dto.role !== target.role;
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      if (roleChanging) {
+        await tx.userBundle.deleteMany({ where: { userId: id } });
+      }
+      return tx.user.update({
+        where: { id },
+        data: {
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phoneNumber: dto.phoneNumber,
+          employeeId: dto.employeeId,
+          jurisdiction: dto.jurisdiction,
+          joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
+          organizationId: dto.organizationId,
+          role: dto.role,
+          updatedBy: actorId,
+        },
+        include: { organization: true },
+      });
     });
     return this.toDto(user);
   }
