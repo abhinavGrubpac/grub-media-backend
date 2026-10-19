@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpPurpose, UserStatus } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
@@ -20,6 +26,9 @@ import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { OtpRequestDto } from '../dto/otp-request.dto';
 import { OtpVerifyDto } from '../dto/otp-verify.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
+import { ProfileOtpRequestDto } from '../dto/profile-otp-request.dto';
+import { ProfileOtpVerifyDto } from '../dto/profile-otp-verify.dto';
 import { AuthResponseDto, TokenResponseDto } from '../dto/auth-response.dto';
 
 interface RequestCtx {
@@ -46,6 +55,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
   ) {}
+
+  private readonly logger = new Logger(AuthService.name);
 
   async login(dto: LoginDto, ctx: RequestCtx): Promise<AuthResponseDto> {
     const key = `login:${dto.email}:${ctx.ip ?? 'unknown'}`;
@@ -110,41 +121,17 @@ export class AuthService {
     // Never log the code itself: application logs are readable far beyond the
     // device that requested the change (aggregators, support, backups).
     this.logger.log(`Profile ${dto.type} OTP issued for ${userId}`);
-
-    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
-    await this.logs.record({
-      typeEnum: LogType.ACTIVITY,
-      categoryName: 'Profile',
-      actionName: 'OTP Requested',
-      actionText: `A one-time code was requested to change the ${typeWord} of ${logRefOf(user)}`,
-      userId,
-      target: logRefOf(user),
-    });
   }
 
   async verifyProfileOtp(userId: string, dto: ProfileOtpVerifyDto): Promise<UserResponseDto> {
     const purpose = dto.type === 'email' ? OtpPurpose.PROFILE_EMAIL : OtpPurpose.PROFILE_PHONE;
-    const typeWord = dto.type === 'email' ? 'email address' : 'phone number';
-    const before = await this.prisma.client.user.findUnique({ where: { id: userId } });
-    const who = logRefOf(before ?? { id: userId, email: null, employeeId: null });
     const claim = await this.prisma.client.otpCode.updateMany({
       where: { userId, code: dto.code, purpose, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() },
     });
     if (!claim.count) {
-      // Audit the failed verification alongside the profile flow's other rows
-      // (ACTIVITY/Profile), so rejected OTP attempts are visible to admins.
-      await this.logs.record({
-        typeEnum: LogType.ACTIVITY,
-        categoryName: 'Profile',
-        actionName: 'Failed OTP',
-        actionText: `The one-time code entered to change the ${typeWord} of ${who} was wrong or expired`,
-        userId,
-        target: userId,
-      });
       throw new BadRequestException('Invalid or expired OTP');
     }
-    const oldField = dto.type === 'email' ? before?.email : before?.phoneNumber;
     if (dto.type === 'email') {
       const existing = await this.prisma.client.user.findUnique({ where: { email: dto.value } });
       if (existing && existing.id !== userId) throw new ConflictException('Email already in use');
@@ -154,17 +141,6 @@ export class AuthService {
         where: { id: userId },
         data: { phoneNumber: dto.value },
       });
-    await this.logs.record({
-      typeEnum: LogType.ACTIVITY,
-      categoryName: 'Profile',
-      actionName: 'Update Profile',
-      actionText: `The ${typeWord} of ${who} was changed to ${dto.value}`,
-      userId,
-      empId: userId,
-      target: who,
-      oldDetail: { [dto.type]: oldField ?? null },
-      newDetail: { [dto.type]: dto.value },
-    });
     return this.users.findById(userId);
   }
 
@@ -184,18 +160,6 @@ export class AuthService {
     await this.prisma.client.user.update({
       where: { id: userId },
       data: { passwordHash: await argon2.hash(dto.newPassword), tokenVersion: { increment: 1 } },
-    });
-    await this.logs.record({
-      ...AUTH_LOG,
-      actionName: 'Password Changed',
-      actionText: `Password changed for ${user.email}`,
-      userId,
-      empId: userId,
-      target: logRefOf(user),
-      // The secret itself never enters the log; the columns still record that
-      // the field changed, in the same shape as every other edit.
-      oldDetail: { password: '<redacted: previous value>' },
-      newDetail: { password: '<redacted: new value>' },
     });
   }
 
