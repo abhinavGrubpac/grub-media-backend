@@ -7,6 +7,15 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
+  // Boot banner: which database this instance talks to (host only, never the
+  // secret). Prisma Client loads root .env at import time, so this is the only
+  // reliable way to confirm dev-vs-prod wiring — check it on every boot.
+  const dbHost = (process.env.DATABASE_URL ?? '').replace(
+    /^(\w+:\/\/([^:]+):[^@]+@)?([^:/]+).*$/,
+    '$3',
+  );
+
+  console.log(`[boot] db=${dbHost || 'MISSING'} cwd=${process.cwd()}`);
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   // Structured logging (pino) as the app logger.

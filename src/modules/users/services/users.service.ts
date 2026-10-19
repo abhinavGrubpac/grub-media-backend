@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
+import * as bcrypt from 'bcrypt';
 import { OtpPurpose, Organization, UserRole, UserStatus, type User } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../database/prisma.service';
@@ -159,7 +160,7 @@ export class UsersService {
     actorRole: UserRole,
   ): Promise<UserResponseDto> {
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role, dto.role);
+    this.assertHierarchy(actorRole, target.role as UserRole, dto.role);
 
     const roleChanging = dto.role !== undefined && dto.role !== target.role;
 
@@ -198,7 +199,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.SUSPENDED) {
       throw new BadRequestException({
@@ -216,7 +217,7 @@ export class UsersService {
 
   async activate(id: string, actorId: string, actorRole: UserRole): Promise<UserResponseDto> {
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.ACTIVE) {
       throw new BadRequestException({
@@ -241,7 +242,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.INACTIVE) {
       throw new BadRequestException({
@@ -265,7 +266,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     await this.prisma.client.user.update({ where: { id }, data: { deletedAt: new Date() } });
   }
@@ -464,14 +465,37 @@ export class UsersService {
   // Password change (requires current password)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Dual-algorithm verify for the shared database: argon2 primary, bcrypt
+   * fallback for legacy hashes. Verify-only on legacy rows — the password
+   * column is shared with the sibling backend, so we never rewrite it here.
+   */
+  async verifyPassword(hash: string, password: string): Promise<boolean> {
+    try {
+      if (await argon2.verify(hash, password)) return true;
+    } catch {
+      // Not an argon2 hash — fall through to the legacy check.
+    }
+    try {
+      return await bcrypt.compare(password, hash);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Legacy bcrypt hashes ($2a$/$2b$/$2y$) predate the argon2 cutover. */
+  isLegacyHash(hash: string): boolean {
+    return /^\$2[aby]\$/.test(hash);
+  }
+
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
     const user = await this.findByEmailWithHash(
       (await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } })).email,
     );
-    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+    if (!user || !(await this.verifyPassword(user.passwordHash, dto.currentPassword))) {
       throw new InvalidCredentialsException();
     }
-    if (await argon2.verify(user.passwordHash, dto.newPassword)) {
+    if (await this.verifyPassword(user.passwordHash, dto.newPassword)) {
       throw new BadRequestException({
         message: 'New password must differ from the current password',
         errorCode: ERROR_CODES.BAD_REQUEST,

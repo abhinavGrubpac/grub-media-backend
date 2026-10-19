@@ -72,6 +72,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       return this.fromHttpException(exception);
     }
+    const multer = this.fromMulterError(exception);
+    if (multer) {
+      return multer;
+    }
     const prisma = this.fromPrismaError(exception);
     if (prisma) {
       return prisma;
@@ -97,6 +101,28 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const errorCode =
       typeof body.errorCode === 'string' ? body.errorCode : this.statusToCode(status);
     return { status, message, errorCode };
+  }
+
+  private fromMulterError(exception: unknown): ResolvedError | null {
+    if (typeof exception !== 'object' || exception === null) return null;
+    const err = exception as { name?: unknown; code?: unknown; field?: unknown };
+    if (err.name !== 'MulterError' || typeof err.code !== 'string') return null;
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      const field = typeof err.field === 'string' ? err.field : 'file';
+      return {
+        status: 400,
+        message: `Attach exactly one file under field '${field}'`,
+        errorCode: ERROR_CODES.BAD_REQUEST,
+      };
+    }
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return {
+        status: 400,
+        message: 'Uploaded file is too large',
+        errorCode: ERROR_CODES.BAD_REQUEST,
+      };
+    }
+    return { status: 400, message: 'Invalid file upload', errorCode: ERROR_CODES.BAD_REQUEST };
   }
 
   private fromPrismaError(exception: unknown): ResolvedError | null {

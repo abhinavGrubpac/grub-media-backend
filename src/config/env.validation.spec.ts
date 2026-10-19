@@ -45,4 +45,16 @@ describe('validate', () => {
     const result = validate({ ...base, REDIS_PASSWORD: '', LOG_LEVEL: undefined });
     expect(result.REDIS_HOST).toBe('localhost');
   });
+
+  it('accepts optional Redpanda settings and keeps them as strings', () => {
+    const result = validate({
+      ...base,
+      REDPANDA_BROKERS: 'redpanda-1:9092, redpanda-2:9092',
+      REDPANDA_CLIENT_ID: 'grub-media-backend',
+      REDPANDA_SASL_USERNAME: '',
+      REDPANDA_SASL_PASSWORD: undefined,
+    });
+    expect(result.REDPANDA_BROKERS).toBe('redpanda-1:9092, redpanda-2:9092');
+    expect(result.REDPANDA_CLIENT_ID).toBe('grub-media-backend');
+  });
 });

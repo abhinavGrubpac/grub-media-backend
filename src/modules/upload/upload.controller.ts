@@ -13,7 +13,6 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nes
 import { memoryStorage } from 'multer';
 import { StorageService } from '../storage/storage.service';
 import { UsersService } from '../users/services/users.service';
-
 import { CurrentUser, AuthUser } from '../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ImageFileValidationPipe } from '../../common/pipes/image-file-validation.pipe';
@@ -84,7 +83,6 @@ export class UploadController {
       throw new BadRequestException('targetId (org ID) is required for org-logo uploads');
     }
     const url = await this.storage.uploadImage('org-logos', dto.targetId, file);
-
     return { url };
   }
 }

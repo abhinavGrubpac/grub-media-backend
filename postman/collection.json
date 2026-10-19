@@ -6,9 +6,64 @@
   },
   "auth": {
     "type": "bearer",
-    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
   },
-  "variable": [{ "key": "baseUrl", "value": "http://localhost:3000" }],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "brandId",
+      "value": ""
+    },
+    {
+      "key": "creativeId",
+      "value": ""
+    },
+    {
+      "key": "versionId",
+      "value": ""
+    },
+    {
+      "key": "advertId",
+      "value": ""
+    },
+    {
+      "key": "docId",
+      "value": ""
+    },
+    {
+      "key": "orgId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "bundleId",
+      "value": ""
+    },
+    {
+      "key": "adminId",
+      "value": ""
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "faqId",
+      "value": ""
+    }
+  ],
   "item": [
     {
       "name": "Authentication",
@@ -16,79 +71,294 @@
         {
           "name": "Login — Password",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@grubpac.com\",\n  \"password\": \"Str0ngPass1\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@grubpac.com\",\n  \"password\": \"Str0ngPass1\"\n}"
+            }
           },
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('login returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Refresh Tokens",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "refresh"] },
-            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
           },
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('refresh returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login — Request OTP",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-request"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login/otp-request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                "otp-request"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@grubpac.com\"\n}"
+            },
             "description": "Requests a 4-digit login code by email. The response is the same whether or not the account exists."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Login — Verify OTP",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/login/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login", "otp-verify"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\",\n  \"code\": \"1234\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login/otp-verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                "otp-verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@grubpac.com\",\n  \"code\": \"1234\"\n}"
+            }
           },
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('OTP login returns 200', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data?.accessToken) pm.environment.set('accessToken', data.accessToken);", "if (data?.refreshToken) pm.environment.set('refreshToken', data.refreshToken);"] } }]
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('auth ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data?.accessToken) pm.collectionVariables.set('accessToken', data.accessToken);",
+                  "if (data?.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Forgot Password",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "forgot-password"] },
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@grubpac.com\"\n}" },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@grubpac.com\"\n}"
+            },
             "description": "Requests a password reset link. The response does not reveal whether the account exists."
           }
         },
         {
           "name": "Reset Password",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "reset-password"] },
-            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<token-from-email-link>\",\n  \"password\": \"NewStr0ngPass1\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "reset-password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"<token-from-email-link>\",\n  \"password\": \"NewStr0ngPass1\"\n}"
+            }
           }
         },
         {
           "name": "Get Current User",
-          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"] } }
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            }
+          }
         },
         {
           "name": "Request Profile Verification OTP",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "otp-request"] },
-            "body": { "mode": "raw", "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\"\n}" },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/profile/otp-request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "profile",
+                "otp-request"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\"\n}"
+            },
             "description": "Request a verification code for a new email or phone number. Set type to email or phone."
           }
         },
@@ -96,23 +366,2642 @@
           "name": "Verify Profile OTP",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "otp-verify"] },
-            "body": { "mode": "raw", "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\",\n  \"code\": \"1234\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/profile/otp-verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "profile",
+                "otp-verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\",\n  \"code\": \"1234\"\n}"
+            }
           }
         },
         {
           "name": "Change Password",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/auth/profile/password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "profile", "password"] },
-            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"Str0ngPass1\",\n  \"newPassword\": \"NewStr0ngPass1\"\n}" }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/profile/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "profile",
+                "password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Str0ngPass1\",\n  \"newPassword\": \"NewStr0ngPass1\"\n}"
+            }
           }
         },
         {
           "name": "Logout",
-          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"] } }
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Creative Review",
+      "description": "Creative review endpoints. NOTE: static GET routes (export, filter-options) must stay registered before :id/history and :id in ReviewController, or filter-options is captured as :id.",
+      "item": [
+        {
+          "name": "List Creatives",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "disabled": true
+                },
+                {
+                  "key": "brand_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paginated list. Filters: status, brand_id, search, industry, startDate, endDate, actor_id, sortBy, include=history, ids."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Creatives CSV",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "export"
+              ]
+            },
+            "description": "Returns text/csv attachment."
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Options",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/filter-options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "filter-options"
+              ]
+            },
+            "description": "Filter-modal data: distinct locations, actioner names, per-creative geo. Requires only view access."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Creative",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/{{creativeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "{{creativeId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Request Upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "upload"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_id\": \"{{brandId}}\",\n  \"name\": \"Festive Ad\",\n  \"media_type\": \"Image\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "brand_id*, name*, media_type* (always Image)"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.file_key ?? data.s3_key !== undefined) pm.collectionVariables.set('fileKey', data.file_key ?? data.s3_key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finalize Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/finalize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "finalize"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_id\": \"{{brandId}}\",\n  \"name\": \"Festive Ad\",\n  \"s3_key\": \"{{fileKey}}\",\n  \"media_type\": \"Image\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "creative_id OR brand_id+name, plus s3_key*, media_type*"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.version ?? data).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? data).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Creative",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_id\": \"{{brandId}}\",\n  \"creative_name\": \"Festive Ad\",\n  \"external_ref_id\": \"EXT-001\",\n  \"initial_version\": {\n    \"media_url\": \"https://bucket/creatives/123.png\",\n    \"media_type\": \"Image\",\n    \"notes\": \"First version\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "brand_id*, creative_name*, external_ref_id, initial_version{media_url, media_type, notes}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.creative ?? data).id !== undefined) pm.collectionVariables.set('creativeId', (data.creative ?? data).id);",
+                  "if ((data.version ?? {}).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? {}).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload Version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/{{creativeId}}/version",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "{{creativeId}}",
+                "version"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"media_url\": \"https://bucket/creatives/124.png\",\n  \"media_type\": \"Image\",\n  \"notes\": \"Round 2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "media_url*, media_type*, notes"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.version ?? data).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? data).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Take Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/{{versionId}}/action",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "{{versionId}}",
+                "action"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"APPROVE\",\n  \"comments\": \"Compliant\",\n  \"expectedVersion\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "action* (APPROVE|REJECT|HOLD|REQUEST_CHANGES|RESUME); comments mandatory for REJECT/REQUEST_CHANGES; expectedVersion optimistic lock"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Brand Options (for creative)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/options?search=Acme&activity=active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "options"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Acme"
+                },
+                {
+                  "key": "activity",
+                  "value": "active"
+                }
+              ]
+            },
+            "description": "Minimal unpaginated brand list for creative create/filter dropdowns: id, brand_name, industry_category, is_active. Optional ?search= (name) &activity=active|stopped. Full detail lives under Brands."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Adverts",
+      "description": "Advert monitoring endpoints. Deployments originate upstream (intake); government side monitors and changes status.",
+      "item": [
+        {
+          "name": "Radius Search",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/search?lat=28.6139&lng=77.209&radius=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "28.6139"
+                },
+                {
+                  "key": "lng",
+                  "value": "77.209"
+                },
+                {
+                  "key": "radius",
+                  "value": "5",
+                  "description": "km, needs lat+lng"
+                },
+                {
+                  "key": "brand_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "industry",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Without lat/lng falls back to a plain filtered list."
+          },
+          "response": []
+        },
+        {
+          "name": "Recent Searches",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/searches/recent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "searches",
+                "recent"
+              ]
+            },
+            "description": "7-day revisit window: this operator's recent searches, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "List Adverts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "brand_id",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Filters: status, brand_id/brandId, search, industry, dates, brand_status, city, zone, group_by=brand."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Adverts CSV",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "export"
+              ]
+            },
+            "description": "Returns text/csv attachment."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/{{advertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "{{advertId}}",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Advert",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/{{advertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "{{advertId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Status (alias)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/{{advertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "{{advertId}}"
+              ]
+            },
+            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Search by Image (file or hash)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/search/by-image?max_distance=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "search",
+                "by-image"
+              ],
+              "query": [
+                {
+                  "key": "max_distance",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Single image-search endpoint. EITHER attach a file (multipart form-data, field name MUST be \"image\", PNG/JPEG, 5MB max — a present file always wins) OR send query params only: image_hash (16 hex chars) / advert_id plus optional max_distance/status/brand_id/page/limit. Needs one of the two, never a binary/raw body.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": "",
+                  "description": "Attach file here, or leave empty and use query params"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "References",
+      "item": [
+        {
+          "name": "List Documents (search+sort)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references?archived=false&search=CPC&sortBy=name&sortOrder=asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references"
+              ],
+              "query": [
+                {
+                  "key": "archived",
+                  "value": "false"
+                },
+                {
+                  "key": "search",
+                  "value": "CPC"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "name"
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "asc"
+                }
+              ]
+            },
+            "description": "search=title contains; sortBy=name|published|archived|uploaded"
+          }
+        },
+        {
+          "name": "Get Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Download Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}",
+                "download"
+              ]
+            },
+            "description": "presigned S3 GET with file_url fallback"
+          }
+        },
+        {
+          "name": "Request Upload URL (99MB max)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/upload-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "upload-url"
+              ]
+            },
+            "description": "title*, category*, description, published_on, file_size_bytes (99MB max)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ad Policy 2026\",\n  \"category\": \"policy\",\n  \"description\": \"Central rates\",\n  \"published_on\": \"2026-01-15\",\n  \"file_size_bytes\": 1048576\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.file_key ?? data.s3_key !== undefined) pm.collectionVariables.set('fileKey', data.file_key ?? data.s3_key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT PDF Bytes to S3 (step 2/3)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/pdf"
+              }
+            ],
+            "url": {
+              "raw": "{{uploadUrl}}",
+              "host": [
+                "{{uploadUrl}}"
+              ],
+              "path": []
+            },
+            "description": "Paste upload_url from step 1 as the {{uploadUrl}} variable (or directly as the URL), Body tab -> binary -> select the PDF. No auth header — the URL is pre-signed. Then run Finalize Upload.",
+            "body": {
+              "mode": "file",
+              "file": {}
+            }
+          }
+        },
+        {
+          "name": "Finalize Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/finalize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "finalize"
+              ]
+            },
+            "description": "title*, category*, file_key and/or file_url*, file_size_bytes, description, published_on",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ad Policy 2026\",\n  \"category\": \"policy\",\n  \"file_key\": \"{{fileKey}}\",\n  \"file_url\": \"https://bucket/references/123-Ad-Policy-2026.pdf\",\n  \"file_size_bytes\": 1048576,\n  \"description\": \"Central rates\",\n  \"published_on\": \"2026-01-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('docId', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit Details",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}"
+              ]
+            },
+            "description": "All optional: title / category / file_url / description (empty clears) / published_on.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ad Policy 2026 (rev 2)\",\n  \"category\": \"policy\",\n  \"file_url\": \"https://bucket/references/123-Ad-Policy-2026.pdf\",\n  \"description\": \"Updated notes\",\n  \"published_on\": \"2026-02-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive (soft delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Unarchive (single)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}",
+                "restore"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Unarchive Selection (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/bulk-restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "bulk-restore"
+              ]
+            },
+            "description": "ids* — unarchive a selection at once",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unarchive All",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/restore-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "restore-all"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Permanent Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/{{docId}}/permanent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "{{docId}}",
+                "permanent"
+              ]
+            },
+            "description": "blocked with 409 while linked to review decisions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Brands",
+      "item": [
+        {
+          "name": "List Brands (search+filter+sort)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands?search=Acme&flag_status=flagged&auto_approval=on&activity=active&industry=Food&sortBy=name&sortOrder=asc&page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Acme"
+                },
+                {
+                  "key": "flag_status",
+                  "value": "flagged"
+                },
+                {
+                  "key": "auto_approval",
+                  "value": "on"
+                },
+                {
+                  "key": "activity",
+                  "value": "active"
+                },
+                {
+                  "key": "industry",
+                  "value": "Food"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "name"
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "asc"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "flag_status=flagged|unflagged; auto_approval=on|off; activity=active|stopped; sortBy=name|updated"
+          }
+        },
+        {
+          "name": "Industry List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/industries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "industries"
+              ]
+            },
+            "description": "distinct industry_category values for the filter dropdown"
+          }
+        },
+        {
+          "name": "Export Brands CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/export/csv?flag_status=flagged",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "export",
+                "csv"
+              ],
+              "query": [
+                {
+                  "key": "flag_status",
+                  "value": "flagged"
+                }
+              ]
+            },
+            "description": "same filters as list; columns include activity/auto_approval/flag_status/agency_name"
+          }
+        },
+        {
+          "name": "Get Brand",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}"
+              ]
+            },
+            "description": "includes logo_url, address, agency{agency_name,city,address}"
+          }
+        },
+        {
+          "name": "Create Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands"
+              ]
+            },
+            "description": "brand_name*, industry_category, contact_email, logo_url, address, is_active, auto_approve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_name\": \"Acme\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme.png\",\n  \"address\": \"MG Road, Bengaluru\",\n  \"is_active\": true,\n  \"auto_approve\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.brand ?? data).id !== undefined) pm.collectionVariables.set('brandId', (data.brand ?? data).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Brand",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}"
+              ]
+            },
+            "description": "All optional incl. logo_url and address",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_name\": \"Acme (rev 2)\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme-v2.png\",\n  \"address\": \"Brigade Road\",\n  \"is_active\": true,\n  \"auto_approve\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Flag Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}/flag",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}",
+                "flag"
+              ]
+            },
+            "description": "is_flagged* (defaults true)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_flagged\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unflag Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}/flag",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}",
+                "flag"
+              ]
+            },
+            "description": "is_flagged* = false",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_flagged\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Stop Activity (kill)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}/kill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}",
+                "kill"
+              ]
+            },
+            "description": "is_active* = false — cascades non-revoked adverts to REVOKED",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Resume Activity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/{{brandId}}/kill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "{{brandId}}",
+                "kill"
+              ]
+            },
+            "description": "is_active* = true — does not resurrect adverts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile"
+              ]
+            },
+            "description": "Current user profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile"
+              ]
+            },
+            "description": "firstName, lastName, avatarUrl (https), jurisdiction — all optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Ishani\",\n  \"lastName\": \"Reddy\",\n  \"avatarUrl\": \"https://cdn.example.com/a.png\",\n  \"jurisdiction\": \"Maharashtra\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create User (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "email*, password* (8+, upper+lower+number), firstName*, lastName*, phoneNumber, role, organizationId",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new@grubpac.com\",\n  \"password\": \"Temp@123456\",\n  \"firstName\": \"New\",\n  \"lastName\": \"User\",\n  \"phoneNumber\": \"+919876543210\",\n  \"role\": \"EMPLOYEE\",\n  \"organizationId\": \"{{orgId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('userId', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Users (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users?page=1&limit=20"
+              ]
+            },
+            "description": "Filters: ?search= &role= &status=, sort via sortBy/sortOrder"
+          }
+        },
+        {
+          "name": "Export Users CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "export",
+                "csv"
+              ]
+            },
+            "description": "Same filters as list"
+          }
+        },
+        {
+          "name": "Bulk Activate",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/bulk-activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "bulk-activate"
+              ]
+            },
+            "description": "ids* — lifts SUSPENDED/INACTIVE to ACTIVE",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{userId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Updatable: everything except password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"New\",\n  \"lastName\": \"Name\",\n  \"role\": \"EMPLOYEE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Suspend User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "suspend"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Activate User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "activate"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Dismiss User",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/dismiss",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}",
+                "dismiss"
+              ]
+            },
+            "description": "Sets INACTIVE — persists, login blocked"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Soft-delete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Access Management",
+      "item": [
+        {
+          "name": "List Permissions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "permissions"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create Permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "permissions"
+              ]
+            },
+            "description": "module*, page*, action*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"module\": \"brands\",\n  \"page\": \"list\",\n  \"action\": \"read\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List Bundles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "bundles"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create Bundle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "bundles"
+              ]
+            },
+            "description": "name*, description, permissionIds*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Content Manager\",\n  \"description\": \"Media + help\",\n  \"permissionIds\": [\n    \"{{permissionId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('bundleId', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assign Bundle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "bundles"
+              ]
+            },
+            "description": "bundleId*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bundleId\": \"{{bundleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove Bundle",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles/{{bundleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "bundles",
+                "{{bundleId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Assign Admin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "admin"
+              ]
+            },
+            "description": "adminId*",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminId\": \"{{adminId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unassign Admin",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "employees",
+                "{{employeeId}}",
+                "admin"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List Assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "access",
+                "assignments"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload",
+      "item": [
+        {
+          "name": "Upload Image (avatar/org logo)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "upload"
+              ]
+            },
+            "description": "Multipart: file* (jpeg/png/webp, 5MB) + type* (avatar|org-logo) + targetId (org ID, required for org-logo). Avatar replaces your own picture; org-logo returns URL.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a file"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Organizations",
+      "item": [
+        {
+          "name": "Create Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations"
+              ]
+            },
+            "description": "name*, regNumber, logoUrl (https), jurisdiction",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"GrubPac Foods Pvt Ltd\",\n  \"regNumber\": \"GRUB-ORG-001\",\n  \"logoUrl\": \"https://cdn.example.com/org.png\",\n  \"jurisdiction\": \"Maharashtra\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.id !== undefined) pm.collectionVariables.set('orgId', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations?page=1&limit=20"
+              ]
+            },
+            "description": "Filters: ?search= &status="
+          }
+        },
+        {
+          "name": "Get Organization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": "All optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New Name\",\n  \"jurisdiction\": \"Delhi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Upload Org Logo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/logo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "logo"
+              ]
+            },
+            "description": "Multipart file* (jpeg/png/webp, 5MB).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a file"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Suspend Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "suspend"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Activate Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}",
+                "activate"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "{{orgId}}"
+              ]
+            },
+            "description": "Soft-delete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Help",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "categories"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Category FAQs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories/{{categoryId}}/faqs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "categories",
+                "{{categoryId}}",
+                "faqs"
+              ]
+            },
+            "description": "categoryId is an integer"
+          }
+        },
+        {
+          "name": "Get FAQ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/faqs/{{faqId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "faqs",
+                "{{faqId}}"
+              ]
+            },
+            "description": "faq id is an integer"
+          }
+        },
+        {
+          "name": "Search Help",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/search?q=attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "search?q=attendance"
+              ]
+            },
+            "description": "?q=* required; optional &categoryId="
+          }
+        },
+        {
+          "name": "Contact Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/contact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "help",
+                "contact"
+              ]
+            },
+            "description": "Support mailto details"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Intake (test)",
+      "item": [
+        {
+          "name": "Register Agency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/agencies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "agencies"
+              ]
+            },
+            "description": "upstream_agency_id*, agency_name*, city, address",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"upstream_agency_id\": \"agency-001\",\n  \"agency_name\": \"Dentsu\",\n  \"city\": \"Mumbai\",\n  \"address\": \"BKC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Create Test Brand",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/brands",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "brands"
+              ]
+            },
+            "description": "brand_name* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_name\": \"Test Brand\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"upstream_brand_id\": \"ub-001\",\n  \"upstream_agency_id\": \"agency-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.brand ?? data).id !== undefined) pm.collectionVariables.set('brandId', (data.brand ?? data).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Test Creative",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/creatives",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "creatives"
+              ]
+            },
+            "description": "creative_name*, media_url*, media_type* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"creative_name\": \"Test Creative\",\n  \"media_url\": \"https://bucket/agency/x.png\",\n  \"media_type\": \"Image\",\n  \"campaign_ref\": \"DIWALI-26\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.creative ?? data).id !== undefined) pm.collectionVariables.set('creativeId', (data.creative ?? data).id);",
+                  "if ((data.version ?? {}).id !== undefined) pm.collectionVariables.set('versionId', (data.version ?? {}).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Schedule Test Advert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "schedule"
+              ]
+            },
+            "description": "lat*, lng*, address_text*, start_date*, end_date* + optionals",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 12.9716,\n  \"lng\": 77.5946,\n  \"address_text\": \"MG Road\",\n  \"start_date\": \"2026-11-01\",\n  \"end_date\": \"2026-11-30\",\n  \"city_name\": \"Bengaluru\",\n  \"radius\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if ((data.advert ?? data).id !== undefined) pm.collectionVariables.set('advertId', (data.advert ?? data).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bootstrap Test Flow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/bootstrap",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "bootstrap"
+              ]
+            },
+            "description": "One-call agency→schedule flow; approve_immediately, schedule, admin_approval optional",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approve_immediately\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('captures ids', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json().data;",
+                  "if (data.brand?.id !== undefined) pm.collectionVariables.set('brandId', data.brand?.id);",
+                  "if (data.creative?.id !== undefined) pm.collectionVariables.set('creativeId', data.creative?.id);",
+                  "if (data.version?.id !== undefined) pm.collectionVariables.set('versionId', data.version?.id);",
+                  "if (data.advert?.id !== undefined) pm.collectionVariables.set('advertId', data.advert?.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Go-Live Sync",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intake/test/go-live-sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intake",
+                "test",
+                "go-live-sync"
+              ]
+            },
+            "description": "No body — promotes due schedules"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Liveness probe (no auth)."
+          }
+        },
+        {
+          "name": "Health Check (versioned)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ]
+            },
+            "description": "Liveness probe (no auth)."
+          }
         }
       ]
     }
