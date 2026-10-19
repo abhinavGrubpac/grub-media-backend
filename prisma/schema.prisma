@@ -93,6 +93,7 @@ model Permission {
   module            String
   page              String
   action            String
+  label             String?
   custom            Boolean            @default(false)
   createdAt         DateTime           @default(now())
   bundlePermissions BundlePermission[]

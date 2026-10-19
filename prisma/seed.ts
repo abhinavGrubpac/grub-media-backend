@@ -15,55 +15,83 @@ async function hashPassword(plain: string): Promise<string> {
 // Permissions
 // ---------------------------------------------------------------------------
 
-const PERMISSION_DEFS: { module: string; page: string; action: string }[] = [
-  // Users module
-  { module: 'users', page: 'list', action: 'read' },
-  { module: 'users', page: 'list', action: 'export' },
-  { module: 'users', page: 'detail', action: 'read' },
-  { module: 'users', page: 'detail', action: 'update' },
-  { module: 'users', page: 'detail', action: 'delete' },
-  { module: 'users', page: 'create', action: 'create' },
-  // Permissions module
-  { module: 'permissions', page: 'bundles', action: 'read' },
-  { module: 'permissions', page: 'bundles', action: 'create' },
-  { module: 'permissions', page: 'bundles', action: 'update' },
-  { module: 'permissions', page: 'bundles', action: 'delete' },
-  { module: 'permissions', page: 'assign', action: 'create' },
-  // Help module
-  { module: 'help', page: 'categories', action: 'read' },
-  { module: 'help', page: 'categories', action: 'create' },
-  { module: 'help', page: 'categories', action: 'update' },
-  { module: 'help', page: 'categories', action: 'delete' },
-  { module: 'help', page: 'faqs', action: 'read' },
-  { module: 'help', page: 'faqs', action: 'create' },
-  { module: 'help', page: 'faqs', action: 'update' },
-  { module: 'help', page: 'faqs', action: 'delete' },
-  // Audit module
-  { module: 'audit', page: 'logs', action: 'read' },
-  { module: 'audit', page: 'logs', action: 'export' },
-  // Dashboard
-  { module: 'dashboard', page: 'overview', action: 'read' },
-  // Media module
-  { module: 'media', page: 'library', action: 'read' },
-  { module: 'media', page: 'library', action: 'create' },
-  { module: 'media', page: 'library', action: 'update' },
-  { module: 'media', page: 'library', action: 'delete' },
-  { module: 'media', page: 'library', action: 'export' },
+const PERMISSION_DEFS: { module: string; page: string; action: string; label: string }[] = [
+  // ── Dashboard (2) ──────────────────────────────────────────────────────────
+  { module: 'dashboard', page: 'overview', action: 'read', label: 'View dashboard' },
+  { module: 'dashboard', page: 'overview', action: 'export', label: 'Export dashboard' },
+
+  // ── Employees (10) ─────────────────────────────────────────────────────────
+  { module: 'employees', page: 'list', action: 'view_active', label: 'View active employees' },
+  {
+    module: 'employees',
+    page: 'list',
+    action: 'view_suspended',
+    label: 'View suspended employees',
+  },
+  {
+    module: 'employees',
+    page: 'list',
+    action: 'view_dismissed',
+    label: 'View dismissed employees',
+  },
+  { module: 'employees', page: 'list', action: 'view_logs', label: 'View employee logs' },
+  { module: 'employees', page: 'list', action: 'create', label: 'Add employees' },
+  { module: 'employees', page: 'list', action: 'export', label: 'Export employees' },
+  { module: 'employees', page: 'detail', action: 'update', label: 'Edit employees' },
+  { module: 'employees', page: 'detail', action: 'delete', label: 'Delete employees' },
+  { module: 'employees', page: 'detail', action: 'suspend', label: 'Suspend employees' },
+  { module: 'employees', page: 'detail', action: 'activate', label: 'Activate employees' },
+
+  // ── Roles (4) ──────────────────────────────────────────────────────────────
+  { module: 'roles', page: 'list', action: 'read', label: 'View roles' },
+  { module: 'roles', page: 'list', action: 'create', label: 'Create roles' },
+  { module: 'roles', page: 'detail', action: 'update', label: 'Edit roles' },
+  { module: 'roles', page: 'detail', action: 'delete', label: 'Delete roles' },
+
+  // ── Clients (6) ────────────────────────────────────────────────────────────
+  { module: 'clients', page: 'list', action: 'read', label: 'View clients' },
+  { module: 'clients', page: 'list', action: 'create', label: 'Add clients' },
+  { module: 'clients', page: 'list', action: 'export', label: 'Export clients' },
+  { module: 'clients', page: 'detail', action: 'update', label: 'Edit clients' },
+  { module: 'clients', page: 'detail', action: 'delete', label: 'Delete clients' },
+  { module: 'clients', page: 'detail', action: 'suspend', label: 'Suspend clients' },
+
+  // ── Support (14) ───────────────────────────────────────────────────────────
+  { module: 'support', page: 'categories', action: 'read', label: 'View help categories' },
+  { module: 'support', page: 'categories', action: 'create', label: 'Create help categories' },
+  { module: 'support', page: 'categories', action: 'update', label: 'Edit help categories' },
+  { module: 'support', page: 'categories', action: 'delete', label: 'Delete help categories' },
+  { module: 'support', page: 'faqs', action: 'read', label: 'View help FAQs' },
+  { module: 'support', page: 'faqs', action: 'create', label: 'Create help FAQs' },
+  { module: 'support', page: 'faqs', action: 'update', label: 'Edit help FAQs' },
+  { module: 'support', page: 'faqs', action: 'delete', label: 'Delete help FAQs' },
+  { module: 'support', page: 'tickets', action: 'read', label: 'View support tickets' },
+  { module: 'support', page: 'tickets', action: 'create', label: 'Create support tickets' },
+  { module: 'support', page: 'tickets', action: 'update', label: 'Edit support tickets' },
+  { module: 'support', page: 'tickets', action: 'delete', label: 'Delete support tickets' },
+  { module: 'support', page: 'tickets', action: 'close', label: 'Close support tickets' },
+  { module: 'support', page: 'tickets', action: 'export', label: 'Export support tickets' },
 ];
 
 async function seedPermissions(): Promise<Map<string, string>> {
-  const permissionIdMap = new Map<string, string>();
+  // Wipe the old catalog (non-custom only). BundlePermission rows cascade-delete.
+  await prisma.permission.deleteMany({ where: { custom: false } });
 
+  const permissionIdMap = new Map<string, string>();
   for (const def of PERMISSION_DEFS) {
-    const perm = await prisma.permission.upsert({
-      where: { module_page_action: def },
-      update: {},
-      create: { ...def },
+    const perm = await prisma.permission.create({
+      data: {
+        module: def.module,
+        page: def.page,
+        action: def.action,
+        label: def.label,
+        custom: false,
+      },
     });
     permissionIdMap.set(`${def.module}:${def.page}:${def.action}`, perm.id);
   }
 
-  console.log(`  Upserted ${PERMISSION_DEFS.length} permissions`);
+  console.log(`  Created ${PERMISSION_DEFS.length} permissions`);
   return permissionIdMap;
 }
 
@@ -124,6 +152,8 @@ async function seedOrganizations(superAdminId: string): Promise<string> {
   console.log(`  Organisation: ${org.name} (${org.id})`);
   return org.id;
 }
+
+// superadmin@grubpac.com / SuperAdmin@123456
 
 async function seedAdmins(superAdminId: string, orgId: string): Promise<string[]> {
   const admins = [
@@ -261,47 +291,47 @@ async function seedBundles(
       description: 'Read-only access across all modules',
       createdBy: superAdminId,
       permKeys: [
-        'users:list:read',
-        'users:detail:read',
-        'help:categories:read',
-        'help:faqs:read',
         'dashboard:overview:read',
-        'media:library:read',
-        'audit:logs:read',
+        'employees:list:view_active',
+        'roles:list:read',
+        'clients:list:read',
+        'support:categories:read',
+        'support:faqs:read',
+        'support:tickets:read',
       ],
     },
     {
       name: 'HR Manager',
-      description: 'Manage users and view audit logs',
+      description: 'Manage employees and view audit logs',
       createdBy: superAdminId,
       permKeys: [
-        'users:list:read',
-        'users:list:export',
-        'users:detail:read',
-        'users:detail:update',
-        'users:create:create',
         'dashboard:overview:read',
-        'audit:logs:read',
-        'audit:logs:export',
+        'dashboard:overview:export',
+        'employees:list:view_active',
+        'employees:list:view_suspended',
+        'employees:list:view_dismissed',
+        'employees:list:view_logs',
+        'employees:list:create',
+        'employees:list:export',
+        'employees:detail:update',
+        'employees:detail:suspend',
+        'employees:detail:activate',
       ],
     },
     {
       name: 'Content Manager',
-      description: 'Full access to media library and help content',
+      description: 'Full access to support/help content',
       createdBy: adminIds[0] ?? superAdminId,
       permKeys: [
-        'media:library:read',
-        'media:library:create',
-        'media:library:update',
-        'media:library:delete',
-        'media:library:export',
-        'help:categories:read',
-        'help:categories:create',
-        'help:categories:update',
-        'help:faqs:read',
-        'help:faqs:create',
-        'help:faqs:update',
         'dashboard:overview:read',
+        'support:categories:read',
+        'support:categories:create',
+        'support:categories:update',
+        'support:categories:delete',
+        'support:faqs:read',
+        'support:faqs:create',
+        'support:faqs:update',
+        'support:faqs:delete',
       ],
     },
     {
@@ -325,17 +355,22 @@ async function seedBundles(
     bundleIdMap.set(def.name, bundle.id);
 
     // Attach permissions
+    let attached = 0;
     for (const key of def.permKeys) {
       const permId = permMap.get(key);
-      if (!permId) continue;
+      if (!permId) {
+        console.warn(`  WARNING: permission key "${key}" not found in catalog — skipped`);
+        continue;
+      }
       await prisma.bundlePermission.upsert({
         where: { bundleId_permissionId: { bundleId: bundle.id, permissionId: permId } },
         update: {},
         create: { bundleId: bundle.id, permissionId: permId },
       });
+      attached++;
     }
 
-    console.log(`  Bundle "${def.name}": ${def.permKeys.length} permissions (id: ${bundle.id})`);
+    console.log(`  Bundle "${def.name}": ${attached} permissions (id: ${bundle.id})`);
   }
 
   return bundleIdMap;

@@ -110,8 +110,10 @@ export class UsersService {
   }
 
   /** Raw row incl. passwordHash — for the auth module only. */
-  async findByEmailWithHash(email: string): Promise<User | null> {
-    return this.prisma.client.user.findFirst({ where: { email } });
+  async findByEmailWithHash(
+    email: string,
+  ): Promise<(User & { organization?: Organization | null }) | null> {
+    return this.prisma.client.user.findFirst({ where: { email }, include: { organization: true } });
   }
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -394,15 +396,16 @@ export class UsersService {
       data: { usedAt: new Date() },
     });
 
-    const code = String(Math.floor(1000 + Math.random() * 9000));
+    const isDev = this.config.get<string>('app.nodeEnv') === 'development';
+    const code = isDev ? DEV_OTP_BYPASS : String(Math.floor(1000 + Math.random() * 9000));
     await this.prisma.otpCode.create({
       data: { userId, code, purpose, expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60000) },
     });
 
-    if (dto.type === 'email') {
-      await this.mailer.sendOtp(dto.value, code);
-    } else {
-      this.logger.log(`[DEV] Profile phone OTP for user ${userId}: ${code}`);
+    if (!isDev) {
+      if (dto.type === 'email') {
+        await this.mailer.sendOtp(dto.value, code);
+      }
     }
   }
 

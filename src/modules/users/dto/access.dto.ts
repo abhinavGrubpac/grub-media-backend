@@ -1,4 +1,4 @@
-import { IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 export class PermissionDto {
   @IsString() @MinLength(1) module!: string;
   @IsString() @MinLength(1) page!: string;
@@ -14,4 +14,13 @@ export class AssignBundleDto {
 }
 export class AssignAdminDto {
   @IsString() adminId!: string;
+}
+export class UpdateBundleDto {
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(100) name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) @ArrayMinSize(1) permissionIds?: string[];
+}
+export class ReassignBundleDto {
+  @IsArray() @IsString({ each: true }) @ArrayMinSize(1) userIds!: string[];
+  @IsString() targetBundleId!: string;
 }

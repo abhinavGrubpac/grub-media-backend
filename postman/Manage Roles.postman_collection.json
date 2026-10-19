@@ -1,0 +1,244 @@
+{
+  "info": {
+    "name": "grub-media-backend — Manage Roles",
+    "_postman_id": "grubpac-manage-roles-v1",
+    "description": "Full CRUD for permission bundles (roles) and employee assignment.\n\n**Setup:**\n1. Import `GrubPac Media - Local.postman_environment.json`\n2. Run Login from the Auth collection to populate `accessToken`\n3. Run «List Bundles» — copy a bundle id into `{{bundleId}}`\n4. Run «List Users in Bundle» — copy a user id into `{{employeeId}}`\n\n**Role rules:**\n- `SUPER_ADMIN` — full access to all endpoints\n- `ADMIN` — all endpoints EXCEPT modifying a bundle they are currently assigned to (403)\n- `EMPLOYEE` — no access (403 on all endpoints)\n\n**Self-edit guard:** An ADMIN cannot PATCH, DELETE, or reassign from a bundle they are assigned to. SUPER_ADMIN bypasses this check.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",    "value": "http://localhost:3000", "type": "string" },
+    { "key": "bundleId",   "value": "", "type": "string", "description": "Auto-set by Create Bundle test script; or paste manually from List Bundles" },
+    { "key": "employeeId", "value": "", "type": "string", "description": "Target employee id for assignment endpoints" },
+    { "key": "adminId",    "value": "", "type": "string", "description": "Admin user id for admin-assignment endpoints" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Permissions",
+      "description": "Read and create individual permissions in the catalog.\n\nThe catalog ships 36 seeded permissions (5 modules). Custom permissions (`custom: true`) can be added here; they are never overwritten by the seed.",
+      "item": [
+        {
+          "name": "List Permission Catalog",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "permissions"]
+            },
+            "description": "Returns all permissions ordered by module → page → action.\n\nEach row: `{ id, module, page, action, label, custom, createdAt }`\n\n✅ 200  array of 36+ permissions\n❌ 401  missing / expired token\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Create Custom Permission",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "permissions"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"module\": \"clients\",\n  \"page\": \"detail\",\n  \"action\": \"archive\"\n}"
+            },
+            "description": "Creates a custom permission (`custom: true`). Uses upsert — sending an existing key is a no-op (returns the existing row).\n\nCustom permissions are never wiped by the seed.\n\n✅ 201  the created/existing permission row\n❌ 400  missing module / page / action\n❌ 403  EMPLOYEE role"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bundles",
+      "description": "CRUD for permission bundles (roles).\n\nBundles group permissions and are assigned to employees. The seed ships 4 bundles: Viewer (7), HR Manager (11), Content Manager (9), Admin Full Access (36).",
+      "item": [
+        {
+          "name": "List Bundles",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles"]
+            },
+            "description": "Returns all bundles with their nested permissions and assigned user count.\n\nEach bundle: `{ id, name, description, createdBy, createdAt, updatedAt, permissions: [...], _count: { users: N } }`\n\n✅ 200  array of bundles ordered by name\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Create Bundle",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('bundleId', body.id);",
+                  "  console.log('bundleId set to', body.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Client Viewer\",\n  \"description\": \"Read-only access to the Clients module\",\n  \"permissionIds\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a new bundle. `permissionIds` is an array of `Permission.id` values (get them from «List Permission Catalog»). `createdBy` is set to the caller's id server-side.\n\nThe test script saves the new bundle's id as `{{bundleId}}`.\n\n✅ 201  bundle with nested permissions\n❌ 400  missing name / invalid permissionIds\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Edit Bundle Permissions",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles/{{bundleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles", "{{bundleId}}"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Client Viewer\",\n  \"description\": \"Read-only access to Clients and Dashboard\",\n  \"permissionIds\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Replaces the bundle's permission set (not a merge — sends the full new list). All three fields are optional; omit a field to leave it unchanged.\n\n`permissionIds` must be non-empty if provided (`@ArrayMinSize(1)`) — sending `[]` returns 400.\n\nReturns `{ bundle, affectedUserCount }` so the UI can show a confirmation dialog before calling.\n\n**Self-edit guard:** An ADMIN cannot PATCH a bundle they are currently assigned to (403). SUPER_ADMIN bypasses.\n\n✅ 200  { bundle: {...}, affectedUserCount: N }\n❌ 400  empty permissionIds array\n❌ 403  caller is ADMIN assigned to this bundle\n❌ 404  bundle not found"
+          }
+        },
+        {
+          "name": "Delete Bundle",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles/{{bundleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles", "{{bundleId}}"]
+            },
+            "description": "Deletes a bundle. `UserBundle` rows for all assigned employees are cascade-deleted. `affectedUserCount` in the response tells you how many employees lost this bundle.\n\n**Self-edit guard:** An ADMIN cannot DELETE a bundle they are currently assigned to (403). SUPER_ADMIN bypasses.\n\n✅ 200  { id, name, affectedUserCount }\n❌ 403  caller is ADMIN assigned to this bundle\n❌ 404  bundle not found"
+          }
+        },
+        {
+          "name": "List Users in Bundle",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles/{{bundleId}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles", "{{bundleId}}", "users"]
+            },
+            "description": "Returns all non-deleted employees currently holding this bundle, ordered by assignment date.\n\nEach row: `{ userId, bundleId, assignedBy, createdAt, user: { id, firstName, lastName, email, phoneNumber, employeeId, jurisdiction, joiningDate } }`\n\nSoft-deleted users (`deletedAt != null`) are excluded.\n\n✅ 200  array of assignment rows with embedded user\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Reassign Users to Another Bundle",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/bundles/{{bundleId}}/reassign",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "bundles", "{{bundleId}}", "reassign"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\"{{employeeId}}\"],\n  \"targetBundleId\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Bulk-moves employees from the source bundle (`:id`) to a target bundle in a single transaction. Only users actually assigned to the source bundle are moved — userIds not in the source are silently ignored in the validated set (the endpoint throws 400 if none match).\n\nThe response `reassigned` count reflects the actual number of rows deleted/created, not the input length.\n\n**Self-edit guard:** An ADMIN cannot reassign from a bundle they are assigned to (403). SUPER_ADMIN bypasses.\n\n✅ 200  { reassigned: N, fromBundleId, targetBundleId }\n❌ 400  userIds is empty, or none are in the source bundle\n❌ 403  caller is ADMIN assigned to source bundle\n❌ 404  source or target bundle not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Employee Assignments",
+      "description": "Assign / remove bundles and admin relationships on individual employees.",
+      "item": [
+        {
+          "name": "Assign Bundle to Employee",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "employees", "{{employeeId}}", "bundles"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bundleId\": \"{{bundleId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Assigns (or re-assigns) a bundle to an employee. Uses upsert — calling it twice for the same pair updates `assignedBy` only.\n\n✅ 201  UserBundle row\n❌ 400  missing bundleId\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Remove Bundle from Employee",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/bundles/{{bundleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "employees", "{{employeeId}}", "bundles", "{{bundleId}}"]
+            },
+            "description": "Removes a specific bundle from an employee.\n\n✅ 200  the deleted UserBundle row\n❌ 404  assignment not found\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Assign Admin to Employee",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "employees", "{{employeeId}}", "admin"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminId\": \"{{adminId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Assigns (or replaces) the admin responsible for an employee. Validates that `employeeId` is an `EMPLOYEE` and `adminId` is `ADMIN` or `SUPER_ADMIN`.\n\nUpsert — replaces an existing admin assignment.\n\n✅ 200  AdminEmployeeAssignment row\n❌ 404  employee or admin not found / wrong roles\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "Unassign Admin from Employee",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/employees/{{employeeId}}/admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "employees", "{{employeeId}}", "admin"]
+            },
+            "description": "Removes the admin–employee relationship.\n\n✅ 200  the deleted assignment row\n❌ 404  no assignment found\n❌ 403  EMPLOYEE role"
+          }
+        },
+        {
+          "name": "List All Admin–Employee Assignments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/access/assignments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "access", "assignments"]
+            },
+            "description": "Returns all admin→employee assignments with name/email for both sides.\n\nEach row: `{ employeeId, adminId, assignedBy, createdAt, admin: { id, email, firstName, lastName }, employee: { id, email, firstName, lastName } }`\n\n✅ 200  array\n❌ 403  EMPLOYEE role"
+          }
+        }
+      ]
+    }
+  ]
+}

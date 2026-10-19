@@ -127,14 +127,17 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
 
-    const code = String(Math.floor(1000 + Math.random() * 9000));
+    const isDev = this.config.get<string>('app.nodeEnv') === 'development';
+    const code = isDev ? DEV_OTP_BYPASS : String(Math.floor(1000 + Math.random() * 9000));
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
     await this.prisma.otpCode.create({
       data: { userId: user.id, code, purpose: OtpPurpose.LOGIN, expiresAt },
     });
 
-    await this.mailer.sendOtp(user.email, code);
+    if (!isDev) {
+      await this.mailer.sendOtp(user.email, code);
+    }
   }
 
   async verifyOtpLogin(dto: OtpVerifyDto, ctx: RequestCtx): Promise<AuthResponseDto> {
@@ -147,7 +150,10 @@ export class AuthService {
       });
     }
 
-    const user = await this.prisma.client.user.findFirst({ where: { email: dto.email } });
+    const user = await this.prisma.client.user.findFirst({
+      where: { email: dto.email },
+      include: { organization: true },
+    });
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new InvalidCredentialsException();
     }

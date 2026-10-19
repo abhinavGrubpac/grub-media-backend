@@ -1,0 +1,282 @@
+{
+  "info": {
+    "name": "grub-media-backend — Help Management",
+    "_postman_id": "grubpac-help-management-v1",
+    "description": "Read-only help centre endpoints: categories, FAQs, search, and support contact.\n\nAll 5 endpoints are authored by Sahil Kumar and merged into the `dev` branch.\n\n**Setup:**\n1. Import `GrubPac Media - Local.postman_environment.json`\n2. Run Login from the Auth collection to populate `accessToken`\n3. All requests use `{{accessToken}}` via collection-level bearer auth\n\n**Seeded data (via `npm run prisma:seed`):**\n- 5 categories: Getting Started (id:1), Account & Profile (id:2), Permissions & Access (id:3), Media Library (id:4), Billing & Support (id:5, inactive)\n- 11 FAQs spread across the 4 active categories\n\n**Role rules:**\n- `SUPER_ADMIN`, `ADMIN`, `EMPLOYEE` — all authenticated roles have read access\n- Unauthenticated requests → 401",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "categoryId", "value": "1", "type": "string",
+      "description": "Help category id — 1=Getting Started, 2=Account & Profile, 3=Permissions & Access, 4=Media Library" },
+    { "key": "faqId", "value": "1", "type": "string",
+      "description": "Help FAQ id — auto-set by test script in Get FAQs by Category" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "List Active Categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('has categories array', () => pm.expect(json.data.categories).to.be.an('array'));",
+                  "pm.test('only active categories returned', () => {",
+                  "  json.data.categories.forEach(c => pm.expect(c).to.have.all.keys('id','name','description','icon','displayOrder'));",
+                  "});",
+                  "if (json.data?.categories?.length) {",
+                  "  pm.collectionVariables.set('categoryId', json.data.categories[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "categories"]
+            },
+            "description": "Returns all categories where `isActive = true`, ordered by `displayOrder` ASC (nulls last), then by `id` ASC.\n\nSeeded: Getting Started, Account & Profile, Permissions & Access, Media Library (4 active). Billing & Support is inactive and will NOT appear.\n\nTest script saves first category id as `{{categoryId}}`.\n\n✅ 200  { data: { categories: [{ id, name, description, icon, displayOrder }] } }\n❌ 401  Missing or invalid token"
+          }
+        }
+      ]
+    },
+    {
+      "name": "FAQs",
+      "item": [
+        {
+          "name": "Get FAQs by Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('paginated response', () => {",
+                  "  pm.expect(json.data.data).to.be.an('array');",
+                  "  pm.expect(json.data.meta).to.have.all.keys('page','limit','total','totalPages');",
+                  "});",
+                  "if (json.data?.data?.length) {",
+                  "  pm.collectionVariables.set('faqId', json.data.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories/{{categoryId}}/faqs?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "categories", "{{categoryId}}", "faqs"],
+              "query": [
+                { "key": "page",  "value": "1",  "description": "1-based page number (default: 1)" },
+                { "key": "limit", "value": "20", "description": "Items per page, 1–100 (default: 20)" }
+              ]
+            },
+            "description": "Returns paginated FAQ questions (id + question only, no answer) for the given active category, ordered by `displayOrder` ASC.\n\nTest script saves first FAQ id as `{{faqId}}`.\n\n✅ 200  { data: { data: [{ id, question }], meta: { page, limit, total, totalPages } } }\n❌ 404  Category not found or inactive\n❌ 401  Missing or invalid token"
+          }
+        },
+        {
+          "name": "Get FAQs by Category — page 2",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/categories/{{categoryId}}/faqs?page=2&limit=2",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "categories", "{{categoryId}}", "faqs"],
+              "query": [
+                { "key": "page",  "value": "2" },
+                { "key": "limit", "value": "2" }
+              ]
+            },
+            "description": "Demonstrates pagination with limit=2. Use category 1 (Getting Started) which has 3 FAQs."
+          }
+        },
+        {
+          "name": "Get FAQ Detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('FAQ has id, question, answer, category', () => {",
+                  "  pm.expect(json.data).to.have.all.keys('id','question','answer','category');",
+                  "  pm.expect(json.data.category).to.have.all.keys('id','name');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/faqs/{{faqId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "faqs", "{{faqId}}"]
+            },
+            "description": "Returns the full FAQ including `answer` and the parent `category` (id + name).\n\n✅ 200  { data: { id, question, answer, category: { id, name } } }\n❌ 404  FAQ not found or inactive\n❌ 401  Missing or invalid token"
+          }
+        },
+        {
+          "name": "Get FAQ Detail — not found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/faqs/99999",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "faqs", "99999"]
+            },
+            "description": "❌ 404  Help FAQ not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Global Search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('results array present', () => pm.expect(json.data.results).to.be.an('array'));",
+                  "pm.test('max 10 results', () => pm.expect(json.data.results.length).to.be.at.most(10));",
+                  "pm.test('each result has type', () => json.data.results.forEach(r => {",
+                  "  pm.expect(['faq','category']).to.include(r.type);",
+                  "}));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/search?q=password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "search"],
+              "query": [
+                { "key": "q", "value": "password",
+                  "description": "Required. Matches category names AND FAQ questions globally. Max 200 chars, must not be blank." },
+                { "key": "categoryId", "value": "", "disabled": true,
+                  "description": "Optional. Scopes search to FAQ questions inside this category only." }
+              ]
+            },
+            "description": "Searches category names and FAQ questions across the entire help centre.\nReturns at most 10 results (mixed `type: 'category'` and `type: 'faq'`).\n\nResult shape:\n- `type = 'faq'`:      `{ type, id, question, category: { id, name } }`\n- `type = 'category'`: `{ type, id, name }`\n\n✅ 200  { data: { results: [...] } }\n❌ 400  `q` is blank or missing\n❌ 401  Missing or invalid token"
+          }
+        },
+        {
+          "name": "Search within Category",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/search?q=profile&categoryId={{categoryId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "search"],
+              "query": [
+                { "key": "q", "value": "profile",
+                  "description": "Search term — scoped to FAQ questions in the given category" },
+                { "key": "categoryId", "value": "{{categoryId}}",
+                  "description": "Scope search to this category (FAQ questions only)" }
+              ]
+            },
+            "description": "Scoped search: only FAQ questions inside `{{categoryId}}` are searched.\nCategory names are not matched when `categoryId` is supplied.\n\n✅ 200  { data: { results: [{ type:'faq', id, question }] } }\n❌ 404  Category not found or inactive\n❌ 400  `q` blank or missing\n❌ 401  Missing or invalid token"
+          }
+        },
+        {
+          "name": "Search — blank q (validation error)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/search?q=   ",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "search"],
+              "query": [
+                { "key": "q", "value": "   ", "description": "Whitespace-only — must trigger 400" }
+              ]
+            },
+            "description": "❌ 400  `q must not be blank`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact",
+      "item": [
+        {
+          "name": "Get Support Contact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('has email and mailto', () => {",
+                  "  pm.expect(json.data).to.have.property('email');",
+                  "  pm.expect(json.data).to.have.property('mailto');",
+                  "  pm.expect(json.data.mailto).to.match(/^mailto:/);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/help/contact",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "help", "contact"]
+            },
+            "description": "Returns the support email address and a prefilled `mailto:` URI for the frontend to open in the user's mail client. No email is sent by the backend.\n\nValue comes from `app.supportEmail` config key (defaults to `support@grubpac.com`).\n\n✅ 200  { data: { email: \"support@grubpac.com\", mailto: \"mailto:support@grubpac.com\" } }\n❌ 401  Missing or invalid token"
+          }
+        }
+      ]
+    }
+  ]
+}

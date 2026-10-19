@@ -1,0 +1,490 @@
+{
+  "info": {
+    "name": "grub-media-backend — System Logs",
+    "_postman_id": "grubpac-system-logs-v2",
+    "description": "Log System V2 endpoints (see `logs Grubmedia .drawio.pdf`).\n\nThree independent log streams: **SYSTEM**, **ACTIVITY**, **EMPLOYEE**.\nAll routes require a valid JWT and the `logs.read` permission (SUPER_ADMIN / ADMIN).\n\n**Setup:**\n1. Import `GrubPac Media - Local.postman_environment.json`\n2. Run Login from the Auth collection as SUPER_ADMIN or ADMIN with `logs.read` bundle\n3. All requests use `{{accessToken}}` via collection-level bearer auth\n\n**Endpoints:**\n1. `GET /logs/filters?logtype=`        — categories + actions for the filter panel\n2. `GET /logs/search`                  — paginated search with date range + category/action filters\n3. `GET /logs/export`                  — same filters as search → CSV download (current page only)\n4. `GET /logs/:logtype`                — list one stream, newest first (page, limit)\n\n**Note:** Every read is itself recorded as a SYSTEM log row under the `Log Access` category — the audit appears in later requests, not in the response that triggered it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Filter Panel",
+      "item": [
+        {
+          "name": "Get Filters — SYSTEM",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('has categories and actions arrays', () => {",
+                  "  pm.expect(json.data.categories).to.be.an('array');",
+                  "  pm.expect(json.data.actions).to.be.an('array');",
+                  "});",
+                  "pm.test('all categories are SYSTEM type', () => {",
+                  "  json.data.categories.forEach(c => pm.expect(c.typeEnum).to.equal('SYSTEM'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/filters?logtype=SYSTEM",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "filters"],
+              "query": [
+                { "key": "logtype", "value": "SYSTEM",
+                  "description": "Required. One of: SYSTEM, ACTIVITY, EMPLOYEE (case-insensitive)" }
+              ]
+            },
+            "description": "Returns all categories (with image) and distinct actionNames for the SYSTEM log stream.\nUse this to populate the filter panel dropdowns.\n\n✅ 200  { data: { categories: [{ id, typeEnum, name, image }], actions: [{ name, categoryId }] } }\n❌ 400  Invalid logtype\n❌ 401  Missing or invalid token\n❌ 403  Missing `logs.read` permission"
+          }
+        },
+        {
+          "name": "Get Filters — ACTIVITY",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/filters?logtype=ACTIVITY",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "filters"],
+              "query": [
+                { "key": "logtype", "value": "ACTIVITY" }
+              ]
+            },
+            "description": "Filter panel data for the ACTIVITY stream."
+          }
+        },
+        {
+          "name": "Get Filters — EMPLOYEE",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/filters?logtype=EMPLOYEE",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "filters"],
+              "query": [
+                { "key": "logtype", "value": "EMPLOYEE" }
+              ]
+            },
+            "description": "Filter panel data for the EMPLOYEE stream."
+          }
+        },
+        {
+          "name": "Get Filters — invalid logtype (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/filters?logtype=UNKNOWN",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "filters"],
+              "query": [
+                { "key": "logtype", "value": "UNKNOWN" }
+              ]
+            },
+            "description": "❌ 400  logtype must be one of: SYSTEM, ACTIVITY, EMPLOYEE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "List",
+      "item": [
+        {
+          "name": "List SYSTEM logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('paginated response', () => {",
+                  "  pm.expect(json.data.data).to.be.an('array');",
+                  "  pm.expect(json.data.meta).to.have.all.keys('page','limit','total','totalPages');",
+                  "});",
+                  "pm.test('all rows are SYSTEM type', () => {",
+                  "  json.data.data.forEach(r => pm.expect(r.typeEnum).to.equal('SYSTEM'));",
+                  "});",
+                  "pm.test('newest first (desc)', () => {",
+                  "  const dates = json.data.data.map(r => new Date(r.createdAt).getTime());",
+                  "  for (let i = 1; i < dates.length; i++) pm.expect(dates[i]).to.be.at.most(dates[i-1]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/SYSTEM?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "SYSTEM"],
+              "query": [
+                { "key": "page",  "value": "1",  "description": "1-based page number (default: 1)" },
+                { "key": "limit", "value": "20", "description": "Items per page, 1–100 (default: 20)" }
+              ]
+            },
+            "description": "Lists the SYSTEM log stream, sorted by `createdAt desc, id desc` (newest first).\n\nLog row shape:\n```\n{\n  id, typeEnum, category: { id, name } | null,\n  actionName, actionText, userId, empId,\n  oldDetail, newDetail, createdAt\n}\n```\n\n✅ 200  { data: { data: [LogResponseDTO], meta: { page, limit, total, totalPages } } }\n❌ 400  Invalid logtype\n❌ 401  Missing or invalid token\n❌ 403  Missing `logs.read` permission"
+          }
+        },
+        {
+          "name": "List ACTIVITY logs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/ACTIVITY?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "ACTIVITY"],
+              "query": [
+                { "key": "page",  "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "Lists the ACTIVITY stream — user-visible events (logins, profile edits, etc.)."
+          }
+        },
+        {
+          "name": "List EMPLOYEE logs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/EMPLOYEE?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "EMPLOYEE"],
+              "query": [
+                { "key": "page",  "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "Lists the EMPLOYEE stream — HR/admin actions on employees."
+          }
+        },
+        {
+          "name": "List — case-insensitive path param",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/system?page=1&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "system"],
+              "query": [
+                { "key": "page",  "value": "1" },
+                { "key": "limit", "value": "5" }
+              ]
+            },
+            "description": "Demonstrates that `system` (lowercase) is normalised to `SYSTEM` by ParseLogTypePipe.\n\n✅ 200  Same as List SYSTEM logs"
+          }
+        },
+        {
+          "name": "List — page 2",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/ACTIVITY?page=2&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "ACTIVITY"],
+              "query": [
+                { "key": "page",  "value": "2" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Demonstrates pagination on the ACTIVITY stream."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Search — free text (ACTIVITY)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('paginated response', () => {",
+                  "  pm.expect(json.data.data).to.be.an('array');",
+                  "  pm.expect(json.data.meta).to.include.keys('page','limit','total','totalPages');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=ACTIVITY&q=login&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype", "value": "ACTIVITY",
+                  "description": "Required. One of: SYSTEM, ACTIVITY, EMPLOYEE" },
+                { "key": "q",       "value": "login",
+                  "description": "Optional. Case-insensitive. Matches actionText, actionName, category name, userId, empId, oldDetail, newDetail" },
+                { "key": "page",    "value": "1" },
+                { "key": "limit",   "value": "20" },
+                { "key": "start_date", "value": "", "disabled": true,
+                  "description": "Optional. Inclusive UTC start date (YYYY-MM-DD)" },
+                { "key": "end_date",   "value": "", "disabled": true,
+                  "description": "Optional. Inclusive UTC end date (YYYY-MM-DD)" },
+                { "key": "categories", "value": "", "disabled": true,
+                  "description": "Optional. Comma-separated category ids, e.g. 1,3" },
+                { "key": "actions",    "value": "", "disabled": true,
+                  "description": "Optional. Comma-separated action names, e.g. Login,Logout" }
+              ]
+            },
+            "description": "Full-text search across the ACTIVITY stream. Matches against `actionText`, `actionName`, category name, `userId`, `empId`, `oldDetail`, and `newDetail`.\n\nResults sorted by `createdAt desc, id desc`.\n\n✅ 200  { data: { data: [LogResponseDTO], meta: { page, limit, total, totalPages } } }\n❌ 400  logtype missing/invalid, q is blank\n❌ 401  Missing or invalid token\n❌ 403  Missing `logs.read` permission"
+          }
+        },
+        {
+          "name": "Search — date range (SYSTEM)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=SYSTEM&start_date=2026-10-01&end_date=2026-10-16&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype",     "value": "SYSTEM" },
+                { "key": "start_date",  "value": "2026-10-01",
+                  "description": "UTC start of day (00:00:00.000Z)" },
+                { "key": "end_date",    "value": "2026-10-16",
+                  "description": "UTC end of day (23:59:59.999Z)" },
+                { "key": "page",        "value": "1" },
+                { "key": "limit",       "value": "20" }
+              ]
+            },
+            "description": "Returns SYSTEM logs between 2026-10-01 and 2026-10-16 (inclusive UTC days)."
+          }
+        },
+        {
+          "name": "Search — filter by category ids (EMPLOYEE)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=EMPLOYEE&categories=1,2&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype",    "value": "EMPLOYEE" },
+                { "key": "categories", "value": "1,2",
+                  "description": "Comma-separated category ids from GET /logs/filters" },
+                { "key": "page",       "value": "1" },
+                { "key": "limit",      "value": "20" }
+              ]
+            },
+            "description": "Scopes to EMPLOYEE log rows whose categoryId is in [1, 2]."
+          }
+        },
+        {
+          "name": "Search — filter by action names (SYSTEM)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=SYSTEM&actions=Login,Logout&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype", "value": "SYSTEM" },
+                { "key": "actions", "value": "Login,Logout",
+                  "description": "Comma-separated action names. Case-insensitive text match against `actionName`." },
+                { "key": "page",    "value": "1" },
+                { "key": "limit",   "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search — all filters combined (ACTIVITY)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=ACTIVITY&q=salary&start_date=2026-10-01&end_date=2026-10-16&categories=1&actions=Create Employee&page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype",    "value": "ACTIVITY" },
+                { "key": "q",          "value": "salary" },
+                { "key": "start_date", "value": "2026-10-01" },
+                { "key": "end_date",   "value": "2026-10-16" },
+                { "key": "categories", "value": "1" },
+                { "key": "actions",    "value": "Create Employee" },
+                { "key": "page",       "value": "1" },
+                { "key": "limit",      "value": "10" }
+              ]
+            },
+            "description": "Demonstrates all filters applied together: free text + date range + category + action."
+          }
+        },
+        {
+          "name": "Search — blank q (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=SYSTEM&q=   ",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype", "value": "SYSTEM" },
+                { "key": "q",       "value": "   ", "description": "Whitespace-only — must trigger 400" }
+              ]
+            },
+            "description": "❌ 400  `q must not be blank`"
+          }
+        },
+        {
+          "name": "Search — invalid date format (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/search?logtype=SYSTEM&start_date=16-10-2026",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "search"],
+              "query": [
+                { "key": "logtype",    "value": "SYSTEM" },
+                { "key": "start_date", "value": "16-10-2026", "description": "Wrong format — must be YYYY-MM-DD" }
+              ]
+            },
+            "description": "❌ 400  start_date must be YYYY-MM-DD"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Export (CSV)",
+      "item": [
+        {
+          "name": "Export ACTIVITY — current page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is text/csv', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+                  "});",
+                  "pm.test('Content-Disposition is attachment', () => {",
+                  "  const cd = pm.response.headers.get('Content-Disposition') || '';",
+                  "  pm.expect(cd).to.include('attachment');",
+                  "  pm.expect(cd).to.include('logs-activity-');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/export?logtype=ACTIVITY&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "export"],
+              "query": [
+                { "key": "logtype", "value": "ACTIVITY",
+                  "description": "Required. One of: SYSTEM, ACTIVITY, EMPLOYEE" },
+                { "key": "page",    "value": "1",
+                  "description": "Page shown in the UI — rows start from here" },
+                { "key": "limit",   "value": "20",
+                  "description": "Page size shown in the UI — rows per page in CSV" },
+                { "key": "q",          "value": "", "disabled": true },
+                { "key": "start_date", "value": "", "disabled": true },
+                { "key": "end_date",   "value": "", "disabled": true },
+                { "key": "categories", "value": "", "disabled": true },
+                { "key": "actions",    "value": "", "disabled": true }
+              ]
+            },
+            "description": "Downloads the ACTIVITY log rows for the given page as a CSV file.\nThe file is named `logs-activity-YYYY-MM-DD.csv`.\n\nImportant: exports ONLY the rows visible on the current page — not the full filtered set. Use the same `page` + `limit` values as the search request to get a matching CSV.\n\n✅ 200  CSV file (Content-Type: text/csv; charset=utf-8)\n        Content-Disposition: attachment; filename=\"logs-activity-YYYY-MM-DD.csv\"\n❌ 400  logtype missing/invalid, invalid date format, blank q\n❌ 401  Missing or invalid token\n❌ 403  Missing `logs.read` permission"
+          }
+        },
+        {
+          "name": "Export SYSTEM — with date range",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/export?logtype=SYSTEM&start_date=2026-10-01&end_date=2026-10-16&page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "export"],
+              "query": [
+                { "key": "logtype",    "value": "SYSTEM" },
+                { "key": "start_date", "value": "2026-10-01" },
+                { "key": "end_date",   "value": "2026-10-16" },
+                { "key": "page",       "value": "1" },
+                { "key": "limit",      "value": "50" }
+              ]
+            },
+            "description": "Downloads SYSTEM logs between two dates, up to 50 rows (page 1)."
+          }
+        },
+        {
+          "name": "Export EMPLOYEE — filtered by action",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/logs/export?logtype=EMPLOYEE&actions=Create Employee&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "logs", "export"],
+              "query": [
+                { "key": "logtype", "value": "EMPLOYEE" },
+                { "key": "actions", "value": "Create Employee" },
+                { "key": "page",    "value": "1" },
+                { "key": "limit",   "value": "20" }
+              ]
+            },
+            "description": "Exports only 'Create Employee' action rows from the EMPLOYEE stream."
+          }
+        }
+      ]
+    }
+  ]
+}

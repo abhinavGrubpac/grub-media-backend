@@ -149,7 +149,11 @@ export class OrganizationsService {
     }
   }
 
-  async uploadLogo(id: string, file: Express.Multer.File): Promise<OrganizationResponseDto> {
+  async uploadLogo(
+    id: string,
+    file: Express.Multer.File,
+    _actorId: string,
+  ): Promise<OrganizationResponseDto> {
     const org = await this.getOrThrow(id);
 
     if (org.logoUrl) {

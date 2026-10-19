@@ -26,7 +26,6 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../auth/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { ImageFileValidationPipe } from '../../../common/pipes/image-file-validation.pipe';
-
 @ApiTags('Organizations')
 @ApiBearerAuth()
 @Controller({ path: 'organizations', version: '1' })
@@ -52,7 +51,7 @@ export class OrganizationsController {
   @Get()
   @ApiOperation({ summary: 'List organisations (paginated, Admin+)' })
   @ResponseMessage('Organisations fetched successfully')
-  list(@Query() query: OrgQueryDto): Promise<Paginated<OrganizationResponseDto>> {
+  async list(@Query() query: OrgQueryDto): Promise<Paginated<OrganizationResponseDto>> {
     return this.orgs.list(query);
   }
 
@@ -100,8 +99,9 @@ export class OrganizationsController {
   uploadLogo(
     @Param('id') id: string,
     @UploadedFile(new ImageFileValidationPipe()) file: Express.Multer.File,
+    @CurrentUser() actor: AuthUser,
   ): Promise<OrganizationResponseDto> {
-    return this.orgs.uploadLogo(id, file);
+    return this.orgs.uploadLogo(id, file, actor.id);
   }
 
   // ---------------------------------------------------------------------------
