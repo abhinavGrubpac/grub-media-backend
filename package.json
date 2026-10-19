@@ -24,6 +24,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:seed:prod": "node dist/prisma/seed.js",
+    "prisma:seed:media": "ts-node prisma/seed.media.ts",
+    "prisma:seed:media:prod": "node dist/prisma/seed.media.js",
     "prisma:studio": "prisma studio",
     "prepare": "husky"
   },
