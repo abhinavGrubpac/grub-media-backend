@@ -15,9 +15,11 @@ function makeDeps() {
   const queryRaw = jest.fn().mockResolvedValue([]);
   const updateMany = jest.fn().mockResolvedValue({ count: 0 });
   const publishBatch = jest.fn().mockResolvedValue(undefined);
+  const config = { get: jest.fn().mockReturnValue(true) } as never;
   const relay = new OutboxRelayService(
     { client: { $queryRaw: queryRaw, outboxEvent: { updateMany } } } as never,
     { publishBatch } as never,
+    config,
   );
   return { relay, queryRaw, updateMany, publishBatch };
 }

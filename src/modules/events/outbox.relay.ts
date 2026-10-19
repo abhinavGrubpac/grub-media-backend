@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { Message } from 'kafkajs';
 import { PrismaService } from '../../database/prisma.service';
@@ -31,9 +32,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly producer: EventProducer,
+    private readonly config: ConfigService,
   ) {}
 
   onModuleInit(): void {
+    if (!this.config.get<boolean>('kafka.enabled')) return;
     this.timer = setInterval(() => void this.drain(), OutboxRelayService.POLL_INTERVAL_MS);
     this.timer.unref();
   }

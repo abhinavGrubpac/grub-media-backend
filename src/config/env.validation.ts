@@ -72,8 +72,14 @@ export class EnvironmentVariables {
   @IsInt()
   THROTTLE_LOGIN_LOCK_MAX?: number;
 
-  // KAFKA (Redpanda-compatible broker). All optional: safe local defaults live
-  // canonically in src/config/kafka.config.ts; SASL enables TLS when present.
+  // KAFKA (Redpanda-compatible broker). Set KAFKA_ENABLED=false (or omit
+  // REDPANDA_BROKERS) to run without Kafka — producer, relay, and consumers
+  // all become no-ops. Set KAFKA_ENABLED=true or provide REDPANDA_BROKERS
+  // to enable. Safe local defaults live in src/config/kafka.config.ts.
+  @IsOptional()
+  @IsString()
+  KAFKA_ENABLED?: string;
+
   @IsOptional()
   @IsString()
   REDPANDA_BROKERS?: string;

@@ -35,6 +35,7 @@ export abstract class BaseEventConsumer implements OnModuleInit, OnModuleDestroy
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!this.config.get<boolean>('kafka.enabled')) return;
     try {
       const kafka = new Kafka({
         brokers: this.config.get<string[]>('kafka.brokers') ?? ['localhost:9092'],
@@ -71,6 +72,7 @@ export abstract class BaseEventConsumer implements OnModuleInit, OnModuleDestroy
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (!this.config.get<boolean>('kafka.enabled')) return;
     await this.consumer?.disconnect();
   }
 
