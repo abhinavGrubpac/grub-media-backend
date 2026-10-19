@@ -292,6 +292,7 @@ model CreativeVersion {
   versionNumber     Int                 @map("version_number")
   mediaUrl          String              @map("media_url")
   mediaType         String              @map("media_type")
+  mediaName         String?             @map("media_name")
   status            ReviewStatus        @default(PENDING)
   createdBy         String              @map("created_by")
   upstreamVersionId String?             @unique @map("upstream_version_id")

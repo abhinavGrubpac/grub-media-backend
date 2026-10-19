@@ -130,6 +130,7 @@ export class TestIntakeService {
       {
         media_url: dto.media_url,
         media_type: dto.media_type,
+        media_name: dto.media_name,
         upstream_version_id: dto.upstream_version_id ?? `${upstreamCreativeId}-v1`,
         admin_approved_by: dto.admin_approval?.by ?? null,
         admin_approved_at: dto.admin_approval?.at ?? null,
@@ -224,6 +225,7 @@ export class TestIntakeService {
         creative_name: dto.creative.creative_name,
         media_url: dto.creative.media_url,
         media_type: dto.creative.media_type,
+        media_name: dto.creative.media_name,
         campaign_ref: dto.creative.campaign_ref,
         upstream_creative_id: creativeUpstreamId,
         upstream_version_id: dto.creative.upstream_version_id ?? `${creativeUpstreamId}-v1`,

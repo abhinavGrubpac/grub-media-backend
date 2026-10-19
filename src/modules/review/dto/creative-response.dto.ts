@@ -131,6 +131,10 @@ export class CreativeVersionResponseDto {
   @Expose()
   media_type!: string;
 
+  @ApiPropertyOptional({ description: 'Display name of the media file', nullable: true })
+  @Expose()
+  media_name?: string | null;
+
   @ApiProperty({ enum: ReviewStatus })
   @Expose()
   status!: ReviewStatus;
