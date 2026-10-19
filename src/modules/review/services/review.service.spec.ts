@@ -109,6 +109,9 @@ function makeDeps() {
     presignedUploadUrl: jest.fn().mockResolvedValue('https://mock-storage.local/uploads/x?mock=1'),
     assertFileUrlAllowed: jest.fn(),
     resolveCreativeFileUrl: jest.fn((s: string) => s),
+    isConfigured: true,
+    extractKeyFromUrl: jest.fn((s: string) => s.replace(/^https?:\/\/[^/]+\//, '')),
+    getObjectSize: jest.fn().mockResolvedValue(1024),
   };
   const service = new CreativeService(
     prisma as never,
@@ -1022,6 +1025,33 @@ describe('CreativeService.finalizeUpload', () => {
         data: expect.objectContaining({ mediaName: 'diwali film 15s.png' }),
       }),
     );
+  });
+
+  it('rejects finalize when the object was never uploaded', async () => {
+    const { service, storage } = makeDeps();
+    storage.getObjectSize.mockRejectedValue({
+      name: 'NotFound',
+      $metadata: { httpStatusCode: 404 },
+    });
+
+    await expect(
+      service.finalizeUpload(
+        { creative_id: 'c1', s3_key: 'creatives/ghost.png', media_type: 'Image' },
+        'u1',
+      ),
+    ).rejects.toThrow(/No file uploaded yet/);
+  });
+
+  it('rejects finalize when the uploaded object is empty', async () => {
+    const { service, storage } = makeDeps();
+    storage.getObjectSize.mockResolvedValue(0);
+
+    await expect(
+      service.finalizeUpload(
+        { creative_id: 'c1', s3_key: 'creatives/empty.png', media_type: 'Image' },
+        'u1',
+      ),
+    ).rejects.toThrow(/empty/);
   });
 });
 

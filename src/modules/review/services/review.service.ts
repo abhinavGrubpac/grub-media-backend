@@ -9,7 +9,7 @@ import { AgencyRef, Prisma, ReviewStatus } from '@prisma/client';
 import { StandardMeta, standardMeta, toSkipTake } from '../../../common/utils/paginate';
 import { PrismaService } from '../../../database/prisma.service';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
-import { StorageService } from '../../../common/storage/storage.service';
+import { isS3NotFound, StorageService } from '../../../common/storage/storage.service';
 import { assertBrandActive } from '../../../common/utils/brand';
 import { AdvertService } from '../../advert/services/advert.service';
 import { EventOutboxService } from '../../events/event.outbox';
@@ -679,6 +679,7 @@ export class CreativeService {
     // foreign hosts and malformed keys fail here instead of downstream.
     const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
     this.storage.assertFileUrlAllowed(fileUrl);
+    await this.assertUploadCompleted(fileUrl);
     const mediaName = this.deriveMediaName(dto.s3_key);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
@@ -703,6 +704,34 @@ export class CreativeService {
       },
       actorId,
     );
+  }
+
+  /**
+   * Confirms bytes actually landed in the bucket before a version is created:
+   * a key that was never uploaded (definitive S3 404) or an empty-bodied PUT
+   * (zero-byte object) must not become a version whose media 404s. Mock
+   * storage and unreachable S3 stay fail-open, matching the reference flow.
+   */
+  private async assertUploadCompleted(fileUrl: string): Promise<void> {
+    if (!this.storage.isConfigured) return;
+    const key = this.storage.extractKeyFromUrl(fileUrl);
+    if (!key) return;
+    let size: number | null;
+    try {
+      size = await this.storage.getObjectSize(key);
+    } catch (err) {
+      if (isS3NotFound(err)) {
+        throw new BadRequestException(
+          `No file uploaded yet for "${key}" — PUT the file bytes to upload_url first, then finalize`,
+        );
+      }
+      return; // storage unreachable: fail-open
+    }
+    if (size === 0) {
+      throw new BadRequestException(
+        `The uploaded file "${key}" is empty — PUT the file bytes to upload_url first, then finalize`,
+      );
+    }
   }
 
   /**

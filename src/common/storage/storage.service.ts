@@ -1,7 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
+/** True when the error is a definitive S3 "object does not exist" response. */
+export function isS3NotFound(err: unknown): boolean {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404;
+}
 
 /**
  * Shared media storage abstraction (cutover target for the per-module copies).
@@ -119,5 +125,31 @@ export class StorageService {
     if (!allowed.includes(host)) {
       throw new BadRequestException('file_url must point at the approved media bucket');
     }
+  }
+
+  /** Extracts the bucket key from a stored file URL (null when unparseable). */
+  extractKeyFromUrl(fileUrl: string): string | null {
+    try {
+      const path = new URL(fileUrl).pathname.replace(/^\/+/, '');
+      return path ? decodeURIComponent(path) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Authoritative size of the stored object (HEAD). Null in mock mode; a
+   * definitive 404 throws so callers can turn it into an "upload missing"
+   * error instead of creating a row whose media 404s downstream.
+   */
+  async getObjectSize(key: string): Promise<number | null> {
+    if (!this.isConfigured) return null;
+    const out = await this.client().send(
+      new HeadObjectCommand({
+        Bucket: this.config.get<string>('storage.bucket'),
+        Key: key,
+      }),
+    );
+    return typeof out.ContentLength === 'number' ? out.ContentLength : null;
   }
 }
