@@ -31,7 +31,9 @@ export class AdvertSearchQueryDto {
   lng?: number;
 
   @ApiPropertyOptional({
-    description: 'Radius in kilometres (needs lat+lng, cannot be searched alone)',
+    description:
+      'Radius in kilometres. Needs a center: lat+lng, or a place name via search ' +
+      '(e.g. search=Nashik&radius=5 — the place is geocoded; an unknown place falls back to text search). Cannot be used with no center at all.',
     minimum: 0.01,
     maximum: 500,
   })
@@ -44,7 +46,8 @@ export class AdvertSearchQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Text fallback when no coordinates are supplied: matches advert ID, address text, city, or zone (case-insensitive).',
+      'Text fallback when no coordinates are supplied: matches advert ID, address text, city, or zone (case-insensitive). ' +
+      'Together with radius, the text is first resolved as a place (forward geocoded) and the radius is centered on it.',
   })
   @IsOptional()
   @IsString()

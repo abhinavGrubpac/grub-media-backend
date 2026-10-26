@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { AdvertService } from './advert.service';
+import { Geocoder } from './geocoder';
 
 const brandRow = {
   id: 'brand1',
@@ -101,23 +102,36 @@ function makeDeps(configValues: Record<string, string | undefined> = {}) {
   // No storage bucket by default: image indexing returns null without
   // attempting a network fetch.
   const config = { get: jest.fn((key: string) => configValues[key]) };
+  const geocoder = new Geocoder();
+  (geocoder as unknown as { fetchImpl: jest.Mock }).fetchImpl = jest.fn().mockResolvedValue({
+    ok: false,
+    status: 503,
+    json: jest.fn(),
+  });
   const service = new AdvertService(
     prisma as never,
     outbox as never,
     new ActivityLogService(prisma as never),
     config as never,
+    geocoder,
   );
   return {
     service,
     client,
     advert,
     creativeVersion,
+
+    geocoder,
     executeRaw,
     queryRaw,
     advertSearchHistory,
     outbox,
     config,
   };
+}
+
+function okResponse(lat: string, lon: string): unknown {
+  return { ok: true, status: 200, json: async () => [{ lat, lon }] };
 }
 
 async function blackPng(): Promise<Buffer> {
@@ -791,6 +805,60 @@ describe('AdvertService.searchByRadius', () => {
     await service.searchByRadius({});
 
     expect(advertSearchHistory.create).not.toHaveBeenCalled();
+  });
+
+  it('centers the radius on a geocoded city name (search + radius, no lat/lng)', async () => {
+    const { service, geocoder, queryRaw } = makeDeps();
+    (geocoder as unknown as { fetchImpl: jest.Mock }).fetchImpl = jest
+      .fn()
+      .mockResolvedValue(okResponse('19.9975', '73.7898'));
+    queryRaw.mockResolvedValue([]);
+
+    const result = await service.searchByRadius({ search: 'Nashik', radius: 5 });
+
+    expect(result.search).toEqual(
+      expect.objectContaining({ lat: 19.9975, lng: 73.7898, radius_km: 5 }),
+    );
+    expect(result.meta.totalItems).toBe(0);
+  });
+
+  it('falls back to plain text search when the place cannot be geocoded', async () => {
+    const { service, geocoder, advert } = makeDeps();
+    (geocoder as unknown as { fetchImpl: jest.Mock }).fetchImpl = jest
+      .fn()
+      .mockRejectedValue(new Error('provider down'));
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+
+    const result = await service.searchByRadius({ search: 'Nowhereville', radius: 5 });
+
+    expect(result.search).toEqual(expect.objectContaining({ lat: null, lng: null }));
+    // The fallback ran the text search against the adverts table.
+    expect(advert.findMany).toHaveBeenCalled();
+  });
+
+  it('appends approved undeployed creatives as their own cards in the list', async () => {
+    const { service, advert, creativeVersion } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+    creativeVersion.findMany.mockResolvedValue([{ ...approvedVersion, imageHash: null }]);
+
+    const result = await service.searchByRadius({ actor_id: 'manager1' });
+
+    expect(creativeVersion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'APPROVED',
+          adverts: { none: {} },
+        }),
+      }),
+    );
+    expect(result.meta.totalItems).toBe(2);
+    const cards = result.items as Array<{ id: string; source: string; version_id: string }>;
+    expect(cards.map((row) => row.id)).toEqual(['a1', 'v1']);
+    expect(cards[1]).toEqual(
+      expect.objectContaining({ source: 'creative', version_id: 'v1', status: 'APPROVED' }),
+    );
   });
 });
 

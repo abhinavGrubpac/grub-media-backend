@@ -40,6 +40,7 @@ import {
 } from '../image-hash';
 import { allowedImageHosts, dHashFromImageUrl } from '../image-hash-indexer';
 import type { AdvertSearchSort, AdvertSortKey } from '../validators';
+import { Geocoder, type GeoPoint } from './geocoder';
 
 export interface AdvertUpstreamInput {
   upstream_advert_id: string;
@@ -365,6 +366,7 @@ export class AdvertService {
     private readonly outbox: EventOutboxService,
     private readonly activity: ActivityLogService,
     private readonly config: ConfigService,
+    private readonly geocoder: Geocoder,
   ) {}
 
   /**
@@ -472,7 +474,91 @@ export class AdvertService {
     return this.readEnriched(advertId);
   }
 
-  /** Radius search via PostGIS ST_DWithin; falls back to a plain filter query without coordinates. */
+  /**
+   * Approved versions with no Advert row yet — the "creatives" side of Advert
+   * Control. On approval a version lives only in CreativeVersion (plus its
+   * image hash); it becomes an Advert row only when booked at a site. Surfaced
+   * here (and in findAll) so approvals are immediately visible without a
+   * separate screen. Capped like the image-search candidate pool; results
+   * beyond the cap appear as newer adverts are scheduled/withdrawn.
+   */
+  private async approvedUndeployedCreatives(filters: {
+    search?: string;
+    industry?: string;
+    brand_id?: string;
+  }): Promise<AdvertResponseDto[]> {
+    const listFilters: Prisma.CreativeWhereInput = {
+      ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
+      ...(filters.industry
+        ? {
+            brand: {
+              is: { industryCategory: { equals: filters.industry, mode: 'insensitive' } },
+            },
+          }
+        : {}),
+    };
+    const search = filters.search?.trim();
+    const where: Prisma.CreativeVersionWhereInput = {
+      status: ReviewStatus.APPROVED,
+      adverts: { none: {} },
+      ...(Object.keys(listFilters).length || search
+        ? {
+            creative: {
+              ...listFilters,
+              ...(search
+                ? {
+                    OR: [
+                      { creativeName: { contains: search, mode: 'insensitive' } },
+                      {
+                        brand: { is: { brandName: { contains: search, mode: 'insensitive' } } },
+                      },
+                    ],
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    const versions = await this.prisma.client.creativeVersion.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: IMAGE_SEARCH_CANDIDATE_LIMIT,
+      include: { creative: { include: { brand: true } } },
+    });
+    // No location exists yet, so no hash distance applies on list searches.
+    return versions.map((version) => this.toCreativeSearchResponse(version, null));
+  }
+
+  /**
+   * Appends approved-undeployed creative cards to an advert page. The logical
+   * result order is [adverts..., creatives...]; a page window [skip,
+   * skip+take) that already covers part of the advert segment is extended out
+   * of the creative segment so pagination stays contiguous across both.
+   * Mutates neither input; returns the merged rows and combined total.
+   */
+  private async mergeWithApprovedCreatives(
+    rows: AdvertResponseDto[],
+    total: number,
+    skip: number,
+    take: number,
+    filters: { search?: string; industry?: string; brand_id?: string },
+  ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
+    const creativeRows = await this.approvedUndeployedCreatives(filters);
+    if (creativeRows.length === 0) return { rows, total };
+    const crStart = Math.max(skip - total, 0);
+    const crEnd = skip + take - total;
+    return {
+      rows: [...rows, ...creativeRows.slice(crStart, Math.max(crEnd, 0))],
+      total: total + creativeRows.length,
+    };
+  }
+
+  /**
+   * Radius search via PostGIS ST_DWithin. A radius may also be centered on a
+   * city name (`search=Nashik&radius=5` — resolved through the geocoder); an
+   * unresolvable place degrades to the plain text search instead of 400.
+   * Approved-but-undeployed creatives join the result as their own cards.
+   */
   async searchByRadius(filters: {
     lat?: number;
     lng?: number;
@@ -491,14 +577,34 @@ export class AdvertService {
     max_distance?: number;
     actor_id?: string;
   }): Promise<AdvertSearchResult> {
-    const hasLat = filters.lat !== undefined;
-    const hasLng = filters.lng !== undefined;
-    if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
+    let lat = filters.lat;
+    let lng = filters.lng;
+    const searchTerm = filters.search?.trim() ?? '';
+    if ((lat !== undefined) !== (lng !== undefined)) {
       throw new BadRequestException('lat and lng must be searched together');
     }
-    if (filters.radius !== undefined && (!hasLat || !hasLng)) {
-      throw new BadRequestException('radius needs lat and lng and cannot be searched alone');
+    if (
+      filters.radius !== undefined &&
+      lat === undefined &&
+      lng === undefined &&
+      searchTerm.length === 0
+    ) {
+      throw new BadRequestException(
+        'radius needs a point (lat+lng) or a place (search) to center on',
+      );
     }
+    // City + radius (`search=Nashik&radius=5`): geocode the place and center
+    // the circle there. Unknown place / unreachable provider -> plain search.
+    let geocoded: GeoPoint | null = null;
+    if (filters.radius !== undefined && lat === undefined && lng === undefined) {
+      const point = await this.geocoder.geocodePlace(searchTerm);
+      if (point) {
+        geocoded = point;
+        lat = point.lat;
+        lng = point.lng;
+      }
+    }
+    const hasCoords = lat !== undefined && lng !== undefined;
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 50;
     const sort = filters.sort ?? 'distance_asc';
@@ -510,9 +616,9 @@ export class AdvertService {
     );
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
     const echo: AdvertSearchEcho = {
-      lat: filters.lat ?? null,
-      lng: filters.lng ?? null,
-      radius_km: hasLat && hasLng ? (filters.radiusKm ?? filters.radius ?? 5) : null,
+      lat: lat ?? null,
+      lng: lng ?? null,
+      radius_km: hasCoords ? (filters.radiusKm ?? filters.radius ?? 5) : null,
       search: filters.search ?? null,
       industry: filters.industry ?? null,
       brand_id: filters.brand_id ?? null,
@@ -524,9 +630,9 @@ export class AdvertService {
     };
     let rows: AdvertResponseDto[];
     let total: number;
-    if (hasLat && hasLng) {
+    if (hasCoords) {
       ({ rows, total } = await this.geoSearch(
-        filters,
+        { ...filters, lat, lng },
         echo.radius_km as number,
         sort,
         skip,
@@ -552,6 +658,15 @@ export class AdvertService {
         .slice(skip, skip + take)
         .map((entry) => ({ ...entry.row, hash_distance: entry.distance }));
     }
+    // Approved-but-undeployed creatives surface in Advert Control as their own
+    // cards (a version only becomes an `Advert` row when it is booked at a
+    // site). Adverts keep their ranking order; creative cards are appended
+    // after them, newest first. When the term was just geocoded it names a
+    // place, not a creative, so it is not applied as a text filter.
+    ({ rows, total } = await this.mergeWithApprovedCreatives(rows, total, skip, take, {
+      ...filters,
+      search: geocoded ? undefined : searchTerm || undefined,
+    }));
     await this.recordSearch(filters.actor_id, echo, total, rows);
     const items = filters.group_by === 'brand' ? groupAdvertsByBrand(rows) : rows;
     return {
@@ -1241,7 +1356,7 @@ export class AdvertService {
     const limit = query.limit ?? 20;
     const { skip, take } = toSkipTake({ page, limit, sortOrder: query.sortOrder ?? 'desc' });
     const where = buildAdvertWhere(query);
-    const [adverts, total] = await Promise.all([
+    const [adverts, advertTotal] = await Promise.all([
       this.prisma.client.advert.findMany({
         where,
         orderBy: advertOrderBy(query.sortBy, query.sortOrder ?? 'desc'),
@@ -1252,9 +1367,17 @@ export class AdvertService {
       this.prisma.client.advert.count({ where }),
     ]);
     const locations = await this.fetchLocationWkt(adverts.map((advert) => advert.id));
-    const rows = adverts.map((advert) =>
+    let rows = adverts.map((advert) =>
       this.toResponse(advert, undefined, { location: locations.get(advert.id) ?? null }),
     );
+    let total = advertTotal;
+    // Approved-but-undeployed creatives join the Advert Control list as their
+    // own cards so an approval is visible immediately.
+    ({ rows, total } = await this.mergeWithApprovedCreatives(rows, total, skip, take, {
+      search: query.search,
+      industry: query.industry,
+      brand_id: query.brand_id,
+    }));
     if (query.group_by === 'brand') {
       const items = groupAdvertsByBrand(rows);
       return { items, meta: standardMeta(total, page, limit, items.length) };
@@ -1511,7 +1634,7 @@ export class AdvertService {
     version: Prisma.CreativeVersionGetPayload<{
       include: { creative: { include: { brand: true } } };
     }>,
-    hashDistance: number,
+    hashDistance: number | null,
   ): AdvertResponseDto {
     return plainToInstance(
       AdvertResponseDto,
