@@ -47,17 +47,19 @@ async function bootstrap(): Promise<void> {
   // Close HTTP server, Prisma, and Redis cleanly on SIGTERM/SIGINT.
   app.enableShutdownHooks();
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('grub-media-backend API')
-    .setDescription('GrubPac media backend — Auth, Users, Health')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  // Swagger docs are a dev/QA tool — never exposed from a production boot.
+  if ((process.env.NODE_ENV ?? 'development') !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('grub-media-backend API')
+      .setDescription('GrubPac media backend — Auth, Users, Health')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  }
 
   const port = config.get<number>('app.port') ?? 3000;
   await app.listen(port);
-
 }
 
 void bootstrap();

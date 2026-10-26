@@ -561,8 +561,7 @@ export class CreativeService {
     const autoApprove = creative.brand?.autoApprove === true;
     const status = autoApprove ? ReviewStatus.APPROVED : ReviewStatus.PENDING;
     const imageHash = autoApprove ? await this.adverts.resolveImageHash(dto.media_url) : null;
-    const fileSizeBytes =
-      dto.file_size_bytes ?? (await this.resolveFileSize(dto.media_url));
+    const fileSizeBytes = dto.file_size_bytes ?? (await this.resolveFileSize(dto.media_url));
 
     const version = await this.prisma.$transaction(async (tx) => {
       const created = await tx.creativeVersion.create({

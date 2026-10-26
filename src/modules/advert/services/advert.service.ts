@@ -41,7 +41,6 @@ import {
 import { allowedImageHosts, dHashFromImageUrl } from '../image-hash-indexer';
 import type { AdvertSearchSort, AdvertSortKey } from '../validators';
 
-
 export interface AdvertUpstreamInput {
   upstream_advert_id: string;
   upstream_creative_id: string;
@@ -275,7 +274,7 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
               : { in: statuses as AdvertStatus[] },
         }
       : {}),
-    ...(Object.keys(creative).length ? { version: { creative } } : {}),
+    ...(Object.keys(_creative).length ? { version: { creative: _creative } } : {}),
     ...(search
       ? {
           OR: [
@@ -700,7 +699,20 @@ export class AdvertService {
         row: this.toCreativeSearchResponse(entry.version, entry.distance),
       }));
 
-    const ranked = [...advertMatches, ...creativeMatches].sort(
+    // The same approved version can surface both as a deployed advert row and
+    // as a bare approved creative (the adverts:{none:{}} filter was dropped).
+    // Keep the advert card (it carries location, schedule and lifecycle
+    // actions) and drop the duplicate creative entry for that version.
+    const seenVersionIds = new Set(
+      advertMatches
+        .map((entry) => (entry.row as { version_id?: string }).version_id)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    const dedupedCreativeMatches = creativeMatches.filter(
+      (entry) => !seenVersionIds.has((entry.row as { version_id?: string }).version_id as string),
+    );
+
+    const ranked = [...advertMatches, ...dedupedCreativeMatches].sort(
       (a, b) => a.distance - b.distance || b.createdAt.getTime() - a.createdAt.getTime(),
     );
     const total = ranked.length;
@@ -750,16 +762,15 @@ export class AdvertService {
         ? Prisma.sql`AND c."brandId" = ${filters.brand_id}`
         : Prisma.empty;
     const search = filters.search?.trim();
-    const searchClause =
-      search
-        ? Prisma.sql`AND (
+    const searchClause = search
+      ? Prisma.sql`AND (
             a."id" ILIKE ${`%${search}%`}
             OR a."upstream_advert_id" ILIKE ${`%${search}%`}
             OR a."address_text" ILIKE ${`%${search}%`}
             OR a."city_name" ILIKE ${`%${search}%`}
             OR a."zone_name" ILIKE ${`%${search}%`}
           )`
-        : Prisma.empty;
+      : Prisma.empty;
     const startClause =
       filters.start !== undefined ? Prisma.sql`AND a."endDate" >= ${filters.start}` : Prisma.empty;
     const endClause =
@@ -827,7 +838,11 @@ export class AdvertService {
       LIMIT ${imageMode ? IMAGE_SEARCH_CANDIDATE_LIMIT : take} OFFSET ${imageMode ? 0 : skip}
     `);
     return {
-      rows: rows.map((row) => this.toResponse(row as any, row as any)),
+      rows: rows.map((row) =>
+        // The raw row carries every Advert scalar toResponse reads; the joined
+        // version/creative/brand columns are passed through the geo argument.
+        this.toResponse(row as unknown as Prisma.AdvertGetPayload<object>, row),
+      ),
       total: rows.length > 0 ? Number(rows[0].total) : 0,
     };
   }
@@ -1539,6 +1554,3 @@ export class AdvertService {
     );
   }
 }
-
-
-

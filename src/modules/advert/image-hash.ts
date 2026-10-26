@@ -12,7 +12,7 @@ export const IMAGE_HASH_RE = /^[0-9a-fA-F]{16}$/;
 
 export const IMAGE_HASH_BITS = 64;
 
-/** Default/maximum Hamming distance for by-image matches. 
+/** Default/maximum Hamming distance for by-image matches.
  * Industry standard for dHash visual similarity is typically 10 for near-duplicates,
  * but 15-20 provides much better real-world recall for compressed/resized web images. */
 export const IMAGE_SEARCH_DEFAULT_MAX_DISTANCE = 18;

@@ -660,7 +660,7 @@ describe('CreativeService.takeAction', () => {
     });
   });
 
-  it('rejects REJECT without comments', async () => {
+  it('rejects REJECT without a reason', async () => {
     const { service, creativeVersion } = makeDeps();
     creativeVersion.findUnique.mockResolvedValue(versionRow);
 
@@ -684,7 +684,11 @@ describe('CreativeService.takeAction', () => {
     creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'REJECTED' });
     advert.findMany.mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]);
 
-    await service.takeAction('v1', { action: 'REJECT', comments: 'Misleading claim' }, 'reviewer1');
+    await service.takeAction(
+      'v1',
+      { action: 'REJECT', comments: 'Misleading claim', reason: 'NON_COMPLIANT' },
+      'reviewer1',
+    );
 
     expect(reviewAction.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -838,7 +842,11 @@ describe('CreativeService.takeAction', () => {
     creativeVersion.findUnique.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
 
     await expect(
-      service.takeAction('v1', { action: 'REJECT', comments: 'late' }, 'reviewer1'),
+      service.takeAction(
+        'v1',
+        { action: 'REJECT', comments: 'late', reason: 'NON_COMPLIANT' },
+        'reviewer1',
+      ),
     ).rejects.toThrow(ConflictException);
   });
 

@@ -75,12 +75,12 @@ describe('parsePublishedOn', () => {
 describe('ReferenceService.findAll', () => {
   it('applies the tri-state archive filter and category', async () => {
     const { service, referenceDoc } = makeDeps();
-    await service.findAll({ archived: 'false' });
+    await service.findAll({ status: 'active' });
     expect(referenceDoc.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { isArchived: false } }),
     );
 
-    await service.findAll({ archived: 'true', category: 'Regulatory' });
+    await service.findAll({ status: 'archived', category: 'Regulatory' });
     expect(referenceDoc.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { category: { equals: 'Regulatory', mode: 'insensitive' }, isArchived: true },

@@ -15,20 +15,37 @@ import {
 } from './transitions';
 
 describe('validateTakeAction', () => {
-  it('requires comments for REJECT and REQUEST_CHANGES', () => {
-    expect(validateTakeAction({ action: 'REJECT' })).toContain('comments are mandatory');
-    expect(validateTakeAction({ action: 'REQUEST_CHANGES', comments: '   ' })).toContain(
-      'comments are mandatory',
+  it('requires reason for HOLD, REJECT and REQUEST_CHANGES', () => {
+    expect(validateTakeAction({ action: 'REJECT' })).toContain('reason is mandatory');
+    expect(validateTakeAction({ action: 'REQUEST_CHANGES', comments: 'Fix the claim' })).toContain(
+      'reason is mandatory',
+    );
+    expect(validateTakeAction({ action: 'HOLD', comments: 'Parked' })).toContain(
+      'reason is mandatory',
+    );
+    expect(validateTakeAction({ action: 'REJECT', reason: '   ' })).toContain(
+      'reason is mandatory',
     );
   });
 
-  it('allows APPROVE and HOLD without comments', () => {
+  it('allows APPROVE without comments and accepts decisions with reason + comments', () => {
     expect(validateTakeAction({ action: 'APPROVE' })).toBeNull();
-    expect(validateTakeAction({ action: 'HOLD' })).toBeNull();
+    expect(validateTakeAction({ action: 'APPROVE', comments: 'Compliant' })).toBeNull();
+    expect(validateTakeAction({ action: 'REJECT', reason: 'NON_COMPLIANT' })).toBeNull();
+    expect(
+      validateTakeAction({ action: 'HOLD', reason: 'PENDING_LEGAL', comments: 'On hold' }),
+    ).toBeNull();
+    expect(validateTakeAction({ action: 'REQUEST_CHANGES', reason: 'LOW_QUALITY' })).toBeNull();
   });
 
   it('accepts decided actions with comments', () => {
-    expect(validateTakeAction({ action: 'REJECT', comments: 'Non-compliant claim' })).toBeNull();
+    expect(
+      validateTakeAction({
+        action: 'REJECT',
+        reason: 'NON_COMPLIANT',
+        comments: 'Non-compliant claim',
+      }),
+    ).toBeNull();
   });
 
   it('rejects unknown actions', () => {

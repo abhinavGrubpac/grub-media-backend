@@ -41,7 +41,6 @@ export function validateTakeAction(input: {
   if (!isReviewAction(input.action)) {
     return `action must be one of: ${REVIEW_ACTIONS.join(', ')}`;
   }
-  const _comments = input.comments?.trim();
   const reason = input.reason?.trim();
 
   // APPROVE: comments optional, reason not required
@@ -69,7 +68,11 @@ export function validateTakeAction(input: {
   return null;
 }
 
-export function assertValidTakeAction(input: { action: string; comments?: string | null; reason?: string | null }): void {
+export function assertValidTakeAction(input: {
+  action: string;
+  comments?: string | null;
+  reason?: string | null;
+}): void {
   const message = validateTakeAction(input);
   if (message) throw new BadRequestException(message);
 }

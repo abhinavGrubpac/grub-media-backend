@@ -921,7 +921,6 @@ describe('AdvertService.searchByImage (single endpoint)', () => {
         where: expect.objectContaining({
           status: 'APPROVED',
           imageHash: { not: null },
-          adverts: { none: {} },
         }),
       }),
     );
