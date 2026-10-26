@@ -46,7 +46,7 @@ export interface BrandComplianceView {
 export interface BrandListFilters {
   search?: string;
   flag_status?: 'flagged' | 'unflagged';
-  auto_approval?: 'on' | 'off';
+  auto_approval?: 'on' | 'off' | 'true' | 'false';
   activity?: 'active' | 'stopped';
   industry?: string;
 }
@@ -83,7 +83,7 @@ export function buildBrandWhere(filters: BrandListFilters): Prisma.BrandWhereInp
   return {
     ...(search ? { brandName: { contains: search, mode: 'insensitive' as const } } : {}),
     ...(filters.flag_status ? { isFlagged: filters.flag_status === 'flagged' } : {}),
-    ...(filters.auto_approval ? { autoApprove: filters.auto_approval === 'on' } : {}),
+    ...(filters.auto_approval ? { autoApprove: filters.auto_approval === 'on' || filters.auto_approval === 'true' } : {}),
     ...(filters.activity ? { isActive: filters.activity === 'active' } : {}),
     ...(filters.industry
       ? { industryCategory: { equals: filters.industry, mode: 'insensitive' as const } }
@@ -595,3 +595,7 @@ export class BrandService {
     );
   }
 }
+
+
+
+

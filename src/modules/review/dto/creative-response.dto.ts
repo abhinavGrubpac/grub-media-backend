@@ -23,6 +23,13 @@ export class CreativeBrandSummaryDto {
   @Expose()
   logo_url!: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Brand registered address / location (free text)',
+    nullable: true,
+  })
+  @Expose()
+  address!: string | null;
+
   @ApiPropertyOptional({ description: 'Display name of the flagging reviewer', nullable: true })
   @Expose()
   flagged_by!: string | null;
@@ -105,6 +112,13 @@ export class ReviewActionResponseDto {
   @Expose()
   comments!: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Structured decision reason selected or entered by the reviewer',
+    nullable: true,
+  })
+  @Expose()
+  reason!: string | null;
+
   @ApiProperty()
   @Expose()
   actor_id!: string;
@@ -138,6 +152,10 @@ export class CreativeVersionResponseDto {
   @ApiPropertyOptional({ description: 'Display name of the media file', nullable: true })
   @Expose()
   media_name?: string | null;
+
+  @ApiPropertyOptional({ description: 'Uploaded file size in bytes', nullable: true })
+  @Expose()
+  file_size_bytes!: number | null;
 
   @ApiProperty({ enum: ReviewStatus })
   @Expose()
@@ -237,6 +255,14 @@ export class CreativeResponseDto {
   @Expose()
   last_action_at!: Date | null;
 
+  @ApiPropertyOptional({
+    description:
+      'Primary creative location: first linked hoarding address, else the brand registered address',
+    nullable: true,
+  })
+  @Expose()
+  location!: string | null;
+
   @ApiPropertyOptional({ type: CreativeAgencySummaryDto, nullable: true })
   @Expose()
   agency?: CreativeAgencySummaryDto | null;
@@ -255,6 +281,13 @@ export class CreativeResponseDto {
   })
   @Expose()
   targeted_regions!: string[];
+
+  @ApiPropertyOptional({
+    description: 'Total bytes across every uploaded version of this creative',
+    nullable: true,
+  })
+  @Expose()
+  total_size_bytes!: number | null;
 
   @ApiPropertyOptional({ description: 'Display name of the last viewer', nullable: true })
   @Expose()

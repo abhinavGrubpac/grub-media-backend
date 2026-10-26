@@ -55,7 +55,7 @@ export class ReviewController {
       .status(200)
       .set({
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': 'attachment; filename=creatives_export.csv',
+        'Content-Disposition': 'attachment; filename="creative_review_report.csv"',
       })
       .send(['id,name,brand,status,version,uploaded_on', ...lines].join('\n'));
   }

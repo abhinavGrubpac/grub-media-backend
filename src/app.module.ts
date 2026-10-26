@@ -34,6 +34,7 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { isValidRequestId, RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { REQUEST_ID_HEADER } from './common/constants/request.constants';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     BrandModule,
     ReferenceModule,
   ],
+  controllers: [AppController],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.
     { provide: APP_GUARD, useClass: ThrottlerGuard },

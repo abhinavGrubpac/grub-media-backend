@@ -65,6 +65,7 @@ function makeDeps() {
     findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
     update: jest.fn(),
+    groupBy: jest.fn().mockResolvedValue([]),
   };
   const reviewAction = {
     create: jest.fn().mockResolvedValue(undefined),
@@ -103,6 +104,7 @@ function makeDeps() {
   };
   const adverts = {
     scheduleVersion: jest.fn().mockResolvedValue({ id: 'a1', status: 'SCHEDULED' }),
+    resolveImageHash: jest.fn().mockResolvedValue(null),
   };
   const storage = {
     buildKey: jest.fn().mockImplementation((prefix: string) => `${prefix}/1-a.png`),
@@ -160,14 +162,15 @@ describe('normalizeCreativeStatusFilter', () => {
 describe('CreativeService.findAll', () => {
   const pageQuery = { page: 1, limit: 20 } as { page: number; limit: number };
 
-  it('filters by normalized status', async () => {
-    const { service, creative } = makeDeps();
+  it('filters by normalized status on the current version only', async () => {
+    const { service, creative, client } = makeDeps();
+    (client.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'c1' }, { id: 'c2' }]);
     creative.findMany.mockResolvedValue([]);
     await service.findAll({ ...pageQuery, status: 'REJECT' } as never);
     expect(creative.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          versions: { some: { status: 'REJECTED' } },
+          currentVersionId: { in: ['c1', 'c2'] },
         }),
       }),
     );
@@ -213,6 +216,114 @@ describe('CreativeService.findAll', () => {
       city: 'Bengaluru',
       address: '12 MG Road',
     });
+  });
+
+  it('uses the newest review across versions when the latest version has no action', async () => {
+    const { service, creative, reviewAction, user } = makeDeps();
+    const reviewedAt = new Date('2026-10-03T10:00:00Z');
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: brandRow,
+        versions: [
+          { ...versionRow, id: 'v2', versionNumber: 2, status: 'PENDING', actions: [] },
+          {
+            ...versionRow,
+            id: 'v1',
+            versionNumber: 1,
+            status: 'APPROVED',
+            actions: [
+              {
+                id: 'ra1',
+                versionId: 'v1',
+                actorId: 'reviewer1',
+                action: 'APPROVE',
+                comments: null,
+                reason: null,
+                createdAt: reviewedAt,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    reviewAction.findMany.mockResolvedValue([
+      {
+        id: 'ra1',
+        actorId: 'reviewer1',
+        createdAt: reviewedAt,
+        version: { creativeId: 'c1' },
+      },
+    ]);
+    user.findMany.mockResolvedValue([{ id: 'reviewer1', firstName: 'Rita', lastName: 'Reviewer' }]);
+
+    const result = await service.findAll(pageQuery as never);
+
+    expect(reviewAction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { version: { is: { creativeId: { in: ['c1'] } } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+    expect(result.items[0].last_action_by).toBe('Rita Reviewer');
+    expect(result.items[0].last_action_at).toEqual(reviewedAt);
+  });
+
+  it('adds location, brand address, and targeted regions to list rows', async () => {
+    const { service, creative, advert } = makeDeps();
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: { ...brandRow, address: 'Express Towers, Mumbai' },
+        versions: [],
+      },
+    ]);
+    advert.findMany.mockResolvedValue([
+      {
+        addressText: 'FC Road, Pune',
+        cityName: 'Pune',
+        version: { creativeId: 'c1' },
+      },
+      {
+        addressText: 'MG Road, Mumbai',
+        cityName: 'Mumbai',
+        version: { creativeId: 'c1' },
+      },
+      { addressText: null, cityName: 'Mumbai', version: { creativeId: 'c1' } },
+      { addressText: 'Delhi site', cityName: 'Delhi', version: { creativeId: 'c2' } },
+    ]);
+
+    const result = await service.findAll(pageQuery as never);
+
+    expect(result.items[0].brand.address).toBe('Express Towers, Mumbai');
+    expect(result.items[0].location).toBe('FC Road, Pune');
+    expect(result.items[0].targeted_regions).toEqual(['Mumbai', 'Pune']);
+    expect(advert.findMany).toHaveBeenCalledWith({
+      where: { version: { is: { creativeId: { in: ['c1'] } } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        addressText: true,
+        cityName: true,
+        version: { select: { creativeId: true } },
+      },
+    });
+  });
+
+  it('falls back to the brand address when a creative has no advert address', async () => {
+    const { service, creative, advert } = makeDeps();
+    creative.findMany.mockResolvedValue([
+      {
+        ...creativeRow,
+        brand: { ...brandRow, address: 'Head Office, Mumbai' },
+        versions: [],
+      },
+    ]);
+    advert.findMany.mockResolvedValue([]);
+
+    const result = await service.findAll(pageQuery as never);
+
+    expect(result.items[0].location).toBe('Head Office, Mumbai');
+    expect(result.items[0].targeted_regions).toEqual([]);
   });
 
   it('embeds approval threads with include=history in one batched query', async () => {
@@ -286,6 +397,21 @@ describe('CreativeService.findAll', () => {
     } as never);
     expect(result.items.map((row) => row.id)).toEqual(['c2', 'c1']);
     expect(result.meta.totalItems).toBe(2);
+  });
+
+  it('honors the documented sort_by/sort_order aliases', async () => {
+    const { service, creative } = makeDeps();
+    creative.findMany.mockResolvedValue([]);
+
+    await service.findAll({
+      ...pageQuery,
+      sort_by: 'brand_name',
+      sort_order: 'asc',
+    } as never);
+
+    expect(creative.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { brand: { brandName: 'asc' } } }),
+    );
   });
 });
 
@@ -518,6 +644,22 @@ describe('CreativeService.takeAction', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  it('reports the latest version when expectedVersion is stale', async () => {
+    const { service, creativeVersion } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.findFirst.mockResolvedValue({ ...versionRow, versionNumber: 4 });
+
+    await expect(
+      service.takeAction('v1', { action: 'APPROVE', expectedVersion: 1 }, 'reviewer1'),
+    ).rejects.toThrow('Version conflict: creative is now on version 4');
+
+    expect(creativeVersion.findFirst).toHaveBeenCalledWith({
+      where: { creativeId: 'c1' },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true },
+    });
+  });
+
   it('rejects REJECT without comments', async () => {
     const { service, creativeVersion } = makeDeps();
     creativeVersion.findUnique.mockResolvedValue(versionRow);
@@ -566,6 +708,21 @@ describe('CreativeService.takeAction', () => {
     );
   });
 
+  it('indexes the media hash when an approval has none yet', async () => {
+    const { service, creativeVersion, adverts } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+    adverts.resolveImageHash.mockResolvedValue('23109893b6e4e24f');
+
+    await service.takeAction('v1', { action: 'APPROVE' }, 'reviewer1');
+
+    expect(adverts.resolveImageHash).toHaveBeenCalledWith(versionRow.mediaUrl);
+    expect(creativeVersion.update).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      data: { status: 'APPROVED', imageHash: '23109893b6e4e24f' },
+    });
+  });
+
   it('does not cascade adverts on APPROVE', async () => {
     const { service, creativeVersion, advert } = makeDeps();
     creativeVersion.findUnique.mockResolvedValue(versionRow);
@@ -609,6 +766,52 @@ describe('CreativeService.takeAction', () => {
     expect(result.latest_action).toMatchObject({ action: 'APPROVE', actor_name: 'Rita Reviewer' });
     expect(result.actions).toHaveLength(1);
     expect(result.actions?.[0]).toMatchObject({ action: 'APPROVE', comments: 'Compliant' });
+  });
+
+  it('stores a structured reason separately from comments and returns it', async () => {
+    const { service, creativeVersion, reviewAction, outbox, user } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue(versionRow);
+    creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'REJECTED',
+      actions: [
+        {
+          id: 'ra1',
+          versionId: 'v1',
+          actorId: 'reviewer1',
+          action: 'REJECT',
+          comments: 'Free-form detail',
+          reason: 'NON_COMPLIANT',
+          createdAt: new Date('2026-10-19T06:00:00Z'),
+        },
+      ],
+    });
+    user.findMany.mockResolvedValue([{ id: 'reviewer1', firstName: 'Rita', lastName: 'Reviewer' }]);
+
+    const result = await service.takeAction(
+      'v1',
+      { action: 'REJECT', comments: 'Free-form detail', reason: 'NON_COMPLIANT' },
+      'reviewer1',
+    );
+
+    expect(reviewAction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        comments: 'Free-form detail',
+        reason: 'NON_COMPLIANT',
+      }),
+    });
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'review.rejected',
+        payload: expect.objectContaining({ reason: 'NON_COMPLIANT' }),
+      }),
+    );
+    expect(result.latest_action).toMatchObject({
+      action: 'REJECT',
+      comments: 'Free-form detail',
+      reason: 'NON_COMPLIANT',
+    });
   });
 
   it('writes the audit-trail row for every decision', async () => {
@@ -829,6 +1032,7 @@ describe('CreativeService.getCreative', () => {
     expect(result.agency).toMatchObject({ agency_name: 'Test Agency', city: 'Bengaluru' });
     expect(result.schedules).toHaveLength(1);
     expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_km: 2.5 });
+    expect(result.location).toBe('MG Road');
     expect(result.brand.flagged_by).toBe('Riya Sharma');
     expect(result.last_viewed_by).toBe('Aarav Mehta');
     expect(result.viewed_minutes_ago).toBe(0);
@@ -877,6 +1081,7 @@ describe('CreativeService.getCreative', () => {
     const result = await service.getCreative('c1', 'viewer1');
 
     expect(result.targeted_regions).toEqual(['Bengaluru', 'Delhi', 'Mumbai']);
+    expect(result.location).toBe('Mumbai site');
   });
 
   it('reports no targeted regions before any deployment', async () => {

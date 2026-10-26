@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, Length } from 'class-validator';
+import { IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 
 export class CreativeFinalizeDto {
   @ApiPropertyOptional({
@@ -32,4 +32,10 @@ export class CreativeFinalizeDto {
   @IsString()
   @Length(1, 50)
   media_type!: string;
+
+  @ApiPropertyOptional({ description: 'Uploaded file size in bytes' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  file_size_bytes?: number;
 }

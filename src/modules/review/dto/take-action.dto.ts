@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator';
 import { REVIEW_ACTIONS } from '../transitions';
 
 export class TakeActionDto {
@@ -13,6 +13,17 @@ export class TakeActionDto {
   @IsString()
   @Length(1, 2000)
   comments?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional structured rejection/hold reason (dropdown value or short label). ' +
+      'Stored separately from free-form comments.',
+    maxLength: 200,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reason?: string;
 
   @ApiPropertyOptional({
     description: 'Optimistic-lock guard: the version number the caller based the decision on',

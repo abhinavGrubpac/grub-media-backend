@@ -26,6 +26,10 @@
     "prisma:seed:prod": "node dist/prisma/seed.js",
     "prisma:seed:media": "ts-node prisma/seed.media.ts",
     "prisma:seed:media:prod": "node dist/prisma/seed.media.js",
+    "prisma:backfill:image-hashes": "ts-node prisma/backfill-image-hashes.ts",
+    "prisma:backfill:image-hashes:prod": "node dist/prisma/backfill-image-hashes.js",
+    "prisma:backfill:file-sizes": "ts-node prisma/backfill-file-sizes.ts",
+    "prisma:backfill:file-sizes:prod": "node dist/prisma/backfill-file-sizes.js",
     "prisma:studio": "prisma studio",
     "prepare": "husky"
   },

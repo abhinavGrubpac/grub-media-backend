@@ -27,6 +27,9 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: config.get<string[]>('app.corsOrigins') ?? [],
     credentials: true,
+    // Browser downloads need the filename; Content-Disposition is not a
+    // CORS-safelisted response header, so expose it explicitly.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   app.setGlobalPrefix('api');
@@ -54,6 +57,7 @@ async function bootstrap(): Promise<void> {
 
   const port = config.get<number>('app.port') ?? 3000;
   await app.listen(port);
+
 }
 
 void bootstrap();

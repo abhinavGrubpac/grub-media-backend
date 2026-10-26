@@ -86,12 +86,12 @@ export class ReferenceService {
 
   /** Tri-state archive filter + name search + allowlisted sort for the UI tabs. */
   async findAll(query: ReferenceListQueryDto): Promise<ReferenceDocResponseDto[]> {
-    const archived = query.archived === undefined ? undefined : query.archived === 'true';
+    const isArchived = query.status === 'archived' ? true : query.status === 'active' ? false : undefined;
     const search = query.search?.trim();
     const docs = await this.prisma.client.referenceDoc.findMany({
       where: {
         ...(query.category ? { category: { equals: query.category, mode: 'insensitive' } } : {}),
-        ...(archived === undefined ? {} : { isArchived: archived }),
+        ...(isArchived === undefined ? {} : { isArchived: isArchived }),
         ...(search ? { title: { contains: search, mode: 'insensitive' } } : {}),
       },
       orderBy: resolveOrderBy(query.sortBy, query.sortOrder),

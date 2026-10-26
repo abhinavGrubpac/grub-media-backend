@@ -502,9 +502,35 @@
                 "v1",
                 "creatives",
                 "export"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Optional: same status filter as the list, including ALL."
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Optional: case-insensitive match on creative name."
+                },
+                {
+                  "key": "brand_id",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Optional: filter by brand id."
+                },
+                {
+                  "key": "industry",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Optional: brand industry, case-insensitive exact match."
+                }
               ]
             },
-            "description": "Returns text/csv attachment."
+            "description": "Returns text/csv attachment with Content-Disposition: attachment; filename=\"creative_review_report.csv\". Accepts the active list filters."
           },
           "response": []
         },
@@ -765,14 +791,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action\": \"APPROVE\",\n  \"comments\": \"Compliant\",\n  \"expectedVersion\": 1\n}",
+              "raw": "{\n  \"action\": \"APPROVE\",\n  \"comments\": \"Compliant\",\n  \"reason\": \"Meets brand guidelines\",\n  \"expectedVersion\": 1\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "action* (APPROVE|REJECT|HOLD|REQUEST_CHANGES|RESUME); comments mandatory for REJECT/REQUEST_CHANGES; expectedVersion optimistic lock"
+            "description": "action* (APPROVE|REJECT|HOLD|REQUEST_CHANGES|RESUME); comments mandatory for REJECT/REQUEST_CHANGES; reason optional structured decision reason; expectedVersion optimistic lock"
           },
           "response": []
         },
@@ -842,6 +868,12 @@
                   "description": "km, needs lat+lng"
                 },
                 {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Text fallback: advert ID, address, city, or zone (no coordinates needed)"
+                },
+                {
                   "key": "brand_id",
                   "value": "",
                   "disabled": true
@@ -853,7 +885,7 @@
                 }
               ]
             },
-            "description": "Without lat/lng falls back to a plain filtered list."
+            "description": "Without lat/lng falls back to a plain filtered list. Use search=City/Zone to match address_text, city_name, or zone_name when coordinates are unavailable."
           },
           "response": []
         },
@@ -874,7 +906,7 @@
                 "recent"
               ]
             },
-            "description": "7-day revisit window: this operator's recent searches, newest first."
+            "description": "7-day revisit window: this operator's recent searches, newest first. Each item includes params/search_params, adverts_matched/match_count/advertsMatched, preview[], thumbnail_url/img, searched_at and hours_ago."
           },
           "response": []
         },
@@ -904,16 +936,23 @@
                 {
                   "key": "status",
                   "value": "",
-                  "disabled": true
+                  "disabled": true,
+                  "description": "One status or comma-separated list (LIVE,PAUSED); all five statuses accepted"
                 },
                 {
                   "key": "brand_id",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Matches advert ID, address, city, zone, brand name, or industry"
                 }
               ]
             },
-            "description": "Filters: status, brand_id/brandId, search, industry, dates, brand_status, city, zone, group_by=brand."
+            "description": "Filters: status (single or comma-separated multi), brand_id/brandId, search (address/city/zone/brand/industry), industry, dates, brand_status, city, zone, group_by=brand."
           },
           "response": []
         },
@@ -933,7 +972,7 @@
                 "export"
               ]
             },
-            "description": "Returns text/csv attachment."
+            "description": "Returns text/csv attachment with Content-Disposition: attachment; filename=\"adverts_export.csv\". Applies the active status (single or comma-separated), brand_id, search, industry, date, brand_status, city, zone, and ids filters."
           },
           "response": []
         },
@@ -962,14 +1001,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\"\n}",
+              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\",\n  \"reason\": \"Non-compliant placement\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale)"
+            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale); optional reason/comments are written to the audit trail and event payload"
           },
           "response": []
         },
@@ -1014,10 +1053,10 @@
                 "{{advertId}}"
               ]
             },
-            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale)",
+            "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale); optional reason/comments are written to the audit trail and event payload",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\"\n}",
+              "raw": "{\n  \"status\": \"PAUSED\",\n  \"expected_status\": \"LIVE\",\n  \"reason\": \"Non-compliant placement\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1050,7 +1089,7 @@
                 }
               ]
             },
-            "description": "Single image-search endpoint. EITHER attach a file (multipart form-data, field name MUST be \"image\", PNG/JPEG, 5MB max — a present file always wins) OR send query params only: image_hash (16 hex chars) / advert_id plus optional max_distance/status/brand_id/page/limit. Needs one of the two, never a binary/raw body.",
+            "description": "Single image-search endpoint. EITHER attach a file (multipart form-data, field name MUST be \"image\", PNG/JPEG, 5MB max — a present file always wins) OR send query params only: image_hash (16 hex chars) / advert_id plus optional max_distance/status/brand_id/page/limit. Needs one of the two, never a binary/raw body. PDF uploads return 422 because PDF cover rasterization is not implemented; upload a PNG/JPEG cover image.",
             "body": {
               "mode": "formdata",
               "formdata": [

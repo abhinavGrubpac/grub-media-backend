@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { AdvertService } from './advert.service';
 
@@ -56,7 +61,7 @@ const advertRow = {
   createdAt: new Date(),
 };
 
-function makeDeps() {
+function makeDeps(configValues: Record<string, string | undefined> = {}) {
   const advert = {
     findUnique: jest.fn().mockResolvedValue(null),
     findMany: jest.fn().mockResolvedValue([]),
@@ -93,10 +98,14 @@ function makeDeps() {
     emitInTx: jest.fn().mockResolvedValue(undefined),
     emit: jest.fn().mockResolvedValue(undefined),
   };
+  // No storage bucket by default: image indexing returns null without
+  // attempting a network fetch.
+  const config = { get: jest.fn((key: string) => configValues[key]) };
   const service = new AdvertService(
     prisma as never,
     outbox as never,
     new ActivityLogService(prisma as never),
+    config as never,
   );
   return {
     service,
@@ -107,7 +116,17 @@ function makeDeps() {
     queryRaw,
     advertSearchHistory,
     outbox,
+    config,
   };
+}
+
+async function blackPng(): Promise<Buffer> {
+  const sharp = (await import('sharp')).default;
+  return sharp({
+    create: { width: 9, height: 8, channels: 3, background: { r: 0, g: 0, b: 0 } },
+  })
+    .png()
+    .toBuffer();
 }
 
 describe('AdvertService.scheduleVersion', () => {
@@ -135,6 +154,38 @@ describe('AdvertService.scheduleVersion', () => {
     expect(outbox.emit).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'advert.deploy_blocked' }),
     );
+  });
+
+  it('indexes the version media hash when the schedule omits image_hash', async () => {
+    const { service, creativeVersion, advert, outbox } = makeDeps({
+      'storage.bucket': 'grub-media',
+      'storage.region': 'ap-south-1',
+    });
+    creativeVersion.findUnique.mockResolvedValue({
+      ...approvedVersion,
+      mediaUrl: 'https://grub-media.s3.ap-south-1.amazonaws.com/creatives/festive.png',
+      creative: { ...creativeRow, brand: brandRow },
+    });
+    advert.findUnique.mockResolvedValue({ ...advertRow, imageHash: '0000000000000000' });
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array(await blackPng()), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      }),
+    );
+
+    try {
+      await service.scheduleVersion(dto, 'manager1');
+      expect(outbox.emitInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          eventType: 'advert.scheduled',
+          payload: expect.objectContaining({ image_hash: '0000000000000000' }),
+        }),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('blocks dead-end versions and emits advert.deploy_blocked', async () => {
@@ -265,6 +316,28 @@ describe('AdvertService.updateStatus (govt origin)', () => {
     expect(response.status).toBe('REVOKED');
   });
 
+  it('allows revoking a PAUSED advert without an expected_status guard', async () => {
+    const { service, advert, outbox } = makeDeps();
+    advert.findUnique
+      .mockResolvedValueOnce({ ...advertRow, status: 'PAUSED' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'REVOKED' })
+      .mockResolvedValueOnce({
+        ...advertRow,
+        status: 'REVOKED',
+        version: { creative: { brand: {} } },
+      });
+
+    await service.updateStatus('a1', 'REVOKED', 'manager1');
+
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'advert.revoked',
+        payload: expect.objectContaining({ from_status: 'PAUSED', status: 'REVOKED' }),
+      }),
+    );
+  });
+
   it('rejects unknown adverts', async () => {
     const { service, advert } = makeDeps();
     advert.findUnique.mockResolvedValue(null);
@@ -291,6 +364,32 @@ describe('AdvertService.updateStatus (govt origin)', () => {
           entityType: 'Advert',
           entityId: 'a1',
         }),
+      }),
+    );
+  });
+
+  it('persists the supplied reason in the audit trail and event payload', async () => {
+    const { service, advert, client, outbox } = makeDeps();
+    advert.findUnique
+      .mockResolvedValueOnce({ ...advertRow, status: 'LIVE' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'PAUSED' })
+      .mockResolvedValueOnce({ ...advertRow, status: 'PAUSED' });
+
+    await service.updateStatus('a1', 'PAUSED', 'manager1', undefined, 'Non-compliant creative');
+
+    expect(client.activityLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            reason: 'Non-compliant creative',
+          }),
+        }),
+      }),
+    );
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({ reason: 'Non-compliant creative' }),
       }),
     );
   });
@@ -442,6 +541,30 @@ describe('AdvertService.findAll', () => {
     });
   });
 
+  it('accepts a multi-status filter and textual city/zone fallback', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({
+      page: 1,
+      limit: 20,
+      status: ['LIVE', 'PAUSED'],
+      search: 'Bengaluru',
+      sortOrder: 'desc',
+    });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.status).toEqual({ in: ['LIVE', 'PAUSED'] });
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { addressText: { contains: 'Bengaluru', mode: 'insensitive' } },
+        { cityName: { contains: 'Bengaluru', mode: 'insensitive' } },
+        { zoneName: { contains: 'Bengaluru', mode: 'insensitive' } },
+      ]),
+    );
+  });
+
   it('combines industry, schedule window, ids and DB sorting in one predicate', async () => {
     const { service, advert } = makeDeps();
     advert.findMany.mockResolvedValue([]);
@@ -506,6 +629,22 @@ describe('AdvertService.exportAdverts', () => {
         radius_km: 2.5,
       }),
     ]);
+  });
+
+  it('applies multi-status and search filters to the export query', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+
+    await service.exportAdverts({ status: ['LIVE', 'PAUSED'], search: 'Bengaluru' });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.status).toEqual({ in: ['LIVE', 'PAUSED'] });
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { cityName: { contains: 'Bengaluru', mode: 'insensitive' } },
+        { zoneName: { contains: 'Bengaluru', mode: 'insensitive' } },
+      ]),
+    );
   });
 });
 
@@ -596,8 +735,14 @@ describe('AdvertService.searchByRadius', () => {
     expect(result.search).toEqual(
       expect.objectContaining({ lat: 12.9716, lng: 77.5946, radius_km: 5, sort: 'distance_asc' }),
     );
-    const row = result.items[0] as { distance_km: number; location: string; industry: string };
+    const row = result.items[0] as {
+      distance_km: number;
+      distance_m: number;
+      location: string;
+      industry: string;
+    };
     expect(row.distance_km).toBe(1.235);
+    expect(row.distance_m).toBe(1235);
     expect(row.location).toBe('POINT(77.5946 12.9716)');
     expect(row.industry).toBe('Food');
     expect(advertSearchHistory.create).toHaveBeenCalledWith(
@@ -619,6 +764,23 @@ describe('AdvertService.searchByRadius', () => {
       expect.objectContaining({ lat: null, lng: null, radius_km: null }),
     );
     expect(advertSearchHistory.create).toHaveBeenCalled();
+  });
+
+  it('uses text search as the fallback when coordinates are absent', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.searchByRadius({ search: 'Bengaluru', actor_id: 'manager1' });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { addressText: { contains: 'Bengaluru', mode: 'insensitive' } },
+        { cityName: { contains: 'Bengaluru', mode: 'insensitive' } },
+        { zoneName: { contains: 'Bengaluru', mode: 'insensitive' } },
+      ]),
+    );
   });
 
   it('skips history for anonymous callers', async () => {
@@ -699,15 +861,6 @@ describe('AdvertService.transitionFromUpstream', () => {
 });
 
 describe('AdvertService.searchByImage (single endpoint)', () => {
-  async function blackPng(): Promise<Buffer> {
-    const sharp = (await import('sharp')).default;
-    return sharp({
-      create: { width: 9, height: 8, channels: 3, background: { r: 0, g: 0, b: 0 } },
-    })
-      .png()
-      .toBuffer();
-  }
-
   it('requires either a file or image_hash/advert_id', async () => {
     const { service } = makeDeps();
     await expect(service.searchByImage(undefined, {})).rejects.toThrow(BadRequestException);
@@ -719,7 +872,7 @@ describe('AdvertService.searchByImage (single endpoint)', () => {
       BadRequestException,
     );
     await expect(service.searchByImage(Buffer.from('not-an-image'), {})).rejects.toThrow(
-      BadRequestException,
+      UnprocessableEntityException,
     );
   });
 
@@ -750,6 +903,52 @@ describe('AdvertService.searchByImage (single endpoint)', () => {
         data: expect.objectContaining({ userId: 'manager1', resultCount: 2 }),
       }),
     );
+  });
+
+  it('includes approved creatives that have no advert yet', async () => {
+    const { service, advert, creativeVersion } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    creativeVersion.findMany.mockResolvedValue([
+      { ...approvedVersion, imageHash: '0000000000000000' },
+      { ...approvedVersion, id: 'v2', imageHash: '0000000000000003' },
+      { ...approvedVersion, id: 'unhashed', imageHash: null },
+    ]);
+
+    const result = await service.searchByImage(await blackPng(), { max_distance: 10 });
+
+    expect(creativeVersion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'APPROVED',
+          imageHash: { not: null },
+          adverts: { none: {} },
+        }),
+      }),
+    );
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        id: 'v1',
+        version_id: 'v1',
+        status: 'APPROVED',
+        source: 'creative',
+        hash_distance: 0,
+        start_date: null,
+        end_date: null,
+        available_actions: [],
+      }),
+    );
+    expect((result.items[1] as { hash_distance: number }).hash_distance).toBe(2);
+    expect(result.meta.totalItems).toBe(2);
+  });
+
+  it('skips advert rows when only approved creatives are requested', async () => {
+    const { service, advert, creativeVersion } = makeDeps();
+    creativeVersion.findMany.mockResolvedValue([]);
+
+    await service.searchByImage(undefined, { image_hash: '0000000000000000', status: 'APPROVED' });
+
+    expect(advert.findMany).not.toHaveBeenCalled();
   });
 
   it('resolves advert_id to its stored hash and ranks nearest-first', async () => {
@@ -817,8 +1016,13 @@ describe('AdvertService.listRecentSearches', () => {
       {
         id: 's1',
         params: { radius_km: 5 },
+        search_params: { radius_km: 5 },
         adverts_matched: 3,
+        match_count: 3,
+        advertsMatched: 3,
         preview: [],
+        thumbnail_url: null,
+        img: null,
         searched_at: searchedAt,
         hours_ago: 5,
       },
@@ -846,6 +1050,8 @@ describe('AdvertService.listRecentSearches', () => {
     const rows = await service.listRecentSearches('manager1');
 
     expect(rows[0].preview).toEqual(preview);
+    expect(rows[0].thumbnail_url).toBe('agency/test-agency/v1.png');
+    expect(rows[0].img).toBe('agency/test-agency/v1.png');
   });
 
   it('stores a top-4 media snapshot when recording a search', async () => {

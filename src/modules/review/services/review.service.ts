@@ -38,6 +38,7 @@ import {
 export interface TakeActionInput {
   action: string;
   comments?: string;
+  reason?: string;
   expectedVersion?: number;
 }
 
@@ -65,11 +66,18 @@ function dayEnd(value: string): Date {
 }
 
 /**
- * Shared list/export predicate. All version-level conditions (status, upload
- * window, actor) merge into a single `versions.some` so one version must
- * satisfy them together.
+ * Shared list/export predicate. All version-level conditions (upload window,
+ * actor) merge into a single `versions.some` so one version must satisfy them
+ * together. Status is special: a creative belongs to exactly one status
+ * section, so callers resolve the ids of creatives whose *current* (latest)
+ * version has that status and pass them as `currentVersionIds`. This keeps
+ * pagination totals at one row per creative instead of counting every
+ * historical version that ever carried the status.
  */
-export function buildCreativeWhere(filters: CreativeListFilters): Prisma.CreativeWhereInput {
+export function buildCreativeWhere(
+  filters: CreativeListFilters,
+  options: { currentVersionIds?: string[] } = {},
+): Prisma.CreativeWhereInput {
   const status = normalizeCreativeStatusFilter(filters.status);
 
   let createdAt: { gte?: Date; lte?: Date } | undefined;
@@ -83,13 +91,24 @@ export function buildCreativeWhere(filters: CreativeListFilters): Prisma.Creativ
   }
 
   const versionMatch: Record<string, unknown> = {
-    ...(status ? { status } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(filters.actor_id ? { actions: { some: { actorId: filters.actor_id } } } : {}),
   };
 
+  const andClauses: Prisma.CreativeWhereInput[] = [];
+  if (filters.ids?.length) andClauses.push({ id: { in: filters.ids } });
+  if (status) {
+    andClauses.push(
+      options.currentVersionIds !== undefined
+        ? { currentVersionId: { in: options.currentVersionIds } }
+        : // Backwards-compatible fallback for direct callers that have not
+          // resolved current-version ids yet.
+          { versions: { some: { status } } },
+    );
+  }
+
   return {
-    ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
+    ...(andClauses.length === 1 ? andClauses[0] : andClauses.length ? { AND: andClauses } : {}),
     ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
     ...(filters.search ? { creativeName: { contains: filters.search, mode: 'insensitive' } } : {}),
     ...(filters.industry
@@ -97,6 +116,28 @@ export function buildCreativeWhere(filters: CreativeListFilters): Prisma.Creativ
       : {}),
     ...(Object.keys(versionMatch).length ? { versions: { some: versionMatch } } : {}),
   } as Prisma.CreativeWhereInput;
+}
+
+/**
+ * Version ids of creatives whose current version carries `status`.
+ *
+ * `Creative.currentVersionId` is advanced on every upload, so joining through
+ * it yields exactly one row per creative. Raw SQL is used because Prisma
+ * cannot compare a relation back to a scalar column in a single `where`.
+ */
+export async function currentVersionIdsForStatus(
+  prisma: PrismaService,
+  status: ReviewStatus,
+): Promise<string[]> {
+  const rows = await prisma.client.$queryRaw<Array<{ id: string | null }>>(
+    Prisma.sql`
+      SELECT c."current_version_id" AS "id"
+      FROM "Creative" c
+      INNER JOIN "CreativeVersion" v ON v."id" = c."current_version_id"
+      WHERE v."status" = ${status}::"ReviewStatus"
+    `,
+  );
+  return rows.map((row) => row.id).filter((id): id is string => Boolean(id));
 }
 
 type ListedCreative = CreativeResponseDto & { versions?: CreativeVersionResponseDto[] };
@@ -181,24 +222,32 @@ export class CreativeService {
     meta: StandardMeta;
   }> {
     const { skip, take } = toSkipTake(query);
-    const order = query.sortOrder ?? 'desc';
-    const where = buildCreativeWhere({
-      status: query.status,
-      brand_id: query.brand_id,
-      search: query.search,
-      industry: query.industry,
-      startDate: query.startDate,
-      endDate: query.endDate,
-      actor_id: query.actor_id,
-      ids: query.ids,
-    });
+    const sortBy = query.sort_by ?? query.sortBy;
+    const order = query.sort_order ?? query.sortOrder ?? 'desc';
+    const status = normalizeCreativeStatusFilter(query.status);
+    const currentVersionIds = status
+      ? await currentVersionIdsForStatus(this.prisma, status)
+      : undefined;
+    const where = buildCreativeWhere(
+      {
+        status: query.status,
+        brand_id: query.brand_id,
+        search: query.search,
+        industry: query.industry,
+        startDate: query.startDate,
+        endDate: query.endDate,
+        actor_id: query.actor_id,
+        ids: query.ids,
+      },
+      status ? { currentVersionIds } : {},
+    );
     // Version-derived sorts (uploaded_on/last_action_at) cannot be pushed to
     // Prisma (to-many ordering), so filter in the DB, enrich, then sort and
     // slice in memory. created_at/brand_name sort in the database.
-    const versionSort = !!query.sortBy && isVersionDerivedSort(query.sortBy);
+    const versionSort = !!sortBy && isVersionDerivedSort(sortBy);
     const orderBy = versionSort
       ? { createdAt: 'desc' as const }
-      : query.sortBy === 'brand_name'
+      : sortBy === 'brand_name'
         ? { brand: { brandName: order } }
         : { createdAt: order };
     const versionsInclude = {
@@ -247,23 +296,41 @@ export class CreativeService {
       threadsByCreative.set(version.creativeId, list);
     }
 
-    const agencies = await this.fetchAgencies(
-      creatives.map((creative) => creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId),
-    );
+    const creativeIds = creatives.map((creative) => creative.id);
+    const [agencies, latestActions, creativeGeo, sizeTotals] = await Promise.all([
+      this.fetchAgencies(
+        creatives.map((creative) => creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId),
+      ),
+      this.fetchLatestActions(creativeIds),
+      this.fetchCreativeGeo(creativeIds),
+      this.fetchCreativeSizeTotals(creativeIds),
+    ]);
     const actorNames = await this.resolveActorNames([
       ...this.collectActorIds([
         ...creatives.flatMap((creative) => creative.versions),
         ...threadVersions,
       ]),
       ...this.collectRowIds(creatives),
+      ...Array.from(latestActions.values()).map((action) => action.actorId),
     ]);
     const data = creatives.map((creative) => {
-      const response = this.toCreativeResponse(creative, actorNames, agencies);
-      const latestAction = creative.versions[0]?.actions[0];
+      // The root "last action" reflects the newest review across the whole
+      // thread. A newly uploaded (usually PENDING) version can have no action
+      // while the previous version still carries the latest review.
+      const latestAction =
+        latestActions.get(creative.id) ?? creative.versions[0]?.actions[0] ?? null;
+      const response = this.toCreativeResponse(
+        creative,
+        actorNames,
+        agencies,
+        latestAction,
+        sizeTotals.get(creative.id) ?? null,
+      );
+      const geo = creativeGeo.get(creative.id);
       return {
         ...response,
-        last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
-        last_action_at: latestAction ? latestAction.createdAt : null,
+        location: geo?.location ?? response.location ?? null,
+        targeted_regions: geo?.regions ?? [],
         ...(query.include === 'history'
           ? {
               versions: (threadsByCreative.get(creative.id) ?? []).map((version) =>
@@ -273,8 +340,8 @@ export class CreativeService {
           : {}),
       };
     });
-    if (versionSort && query.sortBy) {
-      const sorted = sortListed(data, query.sortBy, order);
+    if (versionSort && sortBy) {
+      const sorted = sortListed(data, sortBy, order);
       const page = sorted.slice(skip, skip + take);
       return { items: page, meta: standardMeta(total, query.page, query.limit, page.length) };
     }
@@ -292,6 +359,14 @@ export class CreativeService {
     // call (same auto-approve + idempotency rules as uploadVersion).
     const autoApprove = brand.autoApprove === true;
     const initialStatus = autoApprove ? ReviewStatus.APPROVED : ReviewStatus.PENDING;
+    const initialImageHash =
+      autoApprove && dto.initial_version
+        ? await this.adverts.resolveImageHash(dto.initial_version.media_url)
+        : null;
+    const initialFileSize = dto.initial_version
+      ? (dto.initial_version.file_size_bytes ??
+        (await this.resolveFileSize(dto.initial_version.media_url)))
+      : null;
 
     if (dto.schedule && !dto.initial_version) {
       throw new BadRequestException('schedule needs initial_version: nothing to book yet');
@@ -337,6 +412,8 @@ export class CreativeService {
           mediaUrl: dto.initial_version.media_url,
           mediaType: dto.initial_version.media_type,
           mediaName: dto.initial_version.media_name ?? null,
+          fileSizeBytes: initialFileSize,
+          imageHash: initialImageHash,
           status: initialStatus,
           createdBy: actorId,
         },
@@ -406,8 +483,8 @@ export class CreativeService {
           advert_id: booked.id,
           version_id: version.id,
           status: booked.status,
-          start_date: booked.start_date,
-          end_date: booked.end_date,
+          start_date: booked.start_date as Date,
+          end_date: booked.end_date as Date,
           address_text: booked.address_text,
           city_name: booked.city_name,
           zone_name: booked.zone_name,
@@ -452,6 +529,7 @@ export class CreativeService {
       admin_approved_by?: string | null;
       admin_approved_at?: Date | null;
       admin_comments?: string | null;
+      file_size_bytes?: number;
     },
     actorId: string,
   ): Promise<{ version: CreativeVersionResponseDto; replayed: boolean }> {
@@ -482,6 +560,9 @@ export class CreativeService {
     const nextVersionNumber = latest ? latest.versionNumber + 1 : 1;
     const autoApprove = creative.brand?.autoApprove === true;
     const status = autoApprove ? ReviewStatus.APPROVED : ReviewStatus.PENDING;
+    const imageHash = autoApprove ? await this.adverts.resolveImageHash(dto.media_url) : null;
+    const fileSizeBytes =
+      dto.file_size_bytes ?? (await this.resolveFileSize(dto.media_url));
 
     const version = await this.prisma.$transaction(async (tx) => {
       const created = await tx.creativeVersion.create({
@@ -491,6 +572,8 @@ export class CreativeService {
           mediaUrl: dto.media_url,
           mediaType: dto.media_type,
           mediaName: dto.media_name ?? null,
+          fileSizeBytes,
+          imageHash,
           status,
           createdBy: actorId,
           upstreamVersionId: dto.upstream_version_id ?? null,
@@ -601,7 +684,22 @@ export class CreativeService {
         ),
       ),
     ).sort((a, b) => a.localeCompare(b));
-    const base = this.toCreativeResponse(creative, actorNames);
+    const primaryLocation =
+      creative.versions
+        .flatMap((version) => version.adverts ?? [])
+        .map((advert) => advert.addressText?.trim())
+        .find((address): address is string => Boolean(address)) ??
+      creative.brand.address ??
+      null;
+    const base = this.toCreativeResponse(
+      creative,
+      actorNames,
+      new Map(),
+      undefined,
+      creative.versions.length > 0
+        ? creative.versions.reduce((sum, version) => sum + (version.fileSizeBytes ?? 0), 0)
+        : null,
+    );
     return plainToInstance(
       CreativeResponseDto,
       {
@@ -615,6 +713,7 @@ export class CreativeService {
             }
           : null,
         versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
+        location: primaryLocation,
         targeted_regions: targetedRegions,
         schedules: creative.versions.flatMap((version) =>
           (version.adverts ?? []).map((advert) => ({
@@ -672,6 +771,7 @@ export class CreativeService {
       name?: string;
       s3_key: string;
       media_type: string;
+      file_size_bytes?: number;
     },
     actorId: string,
   ): Promise<CreativeResponseDto | CreativeVersionResponseDto> {
@@ -679,12 +779,18 @@ export class CreativeService {
     // foreign hosts and malformed keys fail here instead of downstream.
     const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
     this.storage.assertFileUrlAllowed(fileUrl);
-    await this.assertUploadCompleted(fileUrl);
+    const uploadedSize = await this.assertUploadCompleted(fileUrl);
+    const fileSizeBytes = dto.file_size_bytes ?? uploadedSize ?? undefined;
     const mediaName = this.deriveMediaName(dto.s3_key);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
         dto.creative_id,
-        { media_url: fileUrl, media_name: mediaName ?? undefined, media_type: dto.media_type },
+        {
+          media_url: fileUrl,
+          media_name: mediaName ?? undefined,
+          media_type: dto.media_type,
+          file_size_bytes: fileSizeBytes,
+        },
         actorId,
       );
       return version;
@@ -700,6 +806,7 @@ export class CreativeService {
           media_url: fileUrl,
           media_name: mediaName ?? undefined,
           media_type: dto.media_type,
+          file_size_bytes: fileSizeBytes,
         },
       },
       actorId,
@@ -711,11 +818,14 @@ export class CreativeService {
    * a key that was never uploaded (definitive S3 404) or an empty-bodied PUT
    * (zero-byte object) must not become a version whose media 404s. Mock
    * storage and unreachable S3 stay fail-open, matching the reference flow.
+   *
+   * Returns the authoritative object size (null when it cannot be read) so the
+   * same HEAD powers the stored file-size total.
    */
-  private async assertUploadCompleted(fileUrl: string): Promise<void> {
-    if (!this.storage.isConfigured) return;
+  private async assertUploadCompleted(fileUrl: string): Promise<number | null> {
+    if (!this.storage.isConfigured) return null;
     const key = this.storage.extractKeyFromUrl(fileUrl);
-    if (!key) return;
+    if (!key) return null;
     let size: number | null;
     try {
       size = await this.storage.getObjectSize(key);
@@ -725,12 +835,29 @@ export class CreativeService {
           `No file uploaded yet for "${key}" — PUT the file bytes to upload_url first, then finalize`,
         );
       }
-      return; // storage unreachable: fail-open
+      return null; // storage unreachable: fail-open
     }
     if (size === 0) {
       throw new BadRequestException(
         `The uploaded file "${key}" is empty — PUT the file bytes to upload_url first, then finalize`,
       );
+    }
+    return size;
+  }
+
+  /**
+   * Best-effort authoritative size for a media URL. Used on direct
+   * upload/create calls (which may not run the finalize HEAD); mock storage or
+   * an unreachable object leaves the size unknown instead of blocking intake.
+   */
+  private async resolveFileSize(mediaUrl: string): Promise<number | null> {
+    if (!this.storage.isConfigured) return null;
+    const key = this.storage.extractKeyFromUrl(mediaUrl);
+    if (!key) return null;
+    try {
+      return await this.storage.getObjectSize(key);
+    } catch {
+      return null;
     }
   }
 
@@ -767,8 +894,21 @@ export class CreativeService {
     });
     if (!version) throw new NotFoundException(`Creative version ${versionId} not found`);
 
-    if (input.expectedVersion !== undefined && input.expectedVersion !== version.versionNumber) {
-      throw new ConflictException('This asset has been updated by another user; refresh and retry');
+    if (input.expectedVersion !== undefined) {
+      // expectedVersion is the version number the caller saw. Compare it with
+      // the newest version in the thread, not merely the target row: a newly
+      // uploaded version must invalidate a stale review screen.
+      const latest = await this.prisma.client.creativeVersion.findFirst({
+        where: { creativeId: version.creativeId },
+        orderBy: { versionNumber: 'desc' },
+        select: { versionNumber: true },
+      });
+      const latestVersionNumber = latest?.versionNumber ?? version.versionNumber;
+      if (input.expectedVersion !== latestVersionNumber) {
+        throw new ConflictException(
+          `Version conflict: creative is now on version ${latestVersionNumber}`,
+        );
+      }
     }
     // WORKFLOWS.md §1.3 one-way gate: only PENDING accepts a decision.
     // ON_HOLD parks the version — RESUME returns it to PENDING first.
@@ -781,11 +921,16 @@ export class CreativeService {
     if (action !== 'RESUME') assertActionableStatus(version.status);
     const newStatus = statusForAction(action);
     assertValidTransition(version.status, newStatus);
+    const imageHash =
+      newStatus === ReviewStatus.APPROVED && !version.imageHash
+        ? await this.adverts.resolveImageHash(version.mediaUrl)
+        : null;
+    const reason = input.reason?.trim() || null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.creativeVersion.update({
         where: { id: versionId },
-        data: { status: newStatus },
+        data: { status: newStatus, ...(imageHash ? { imageHash } : {}) },
       });
       await tx.reviewAction.create({
         data: {
@@ -793,6 +938,7 @@ export class CreativeService {
           actorId,
           action: actionTypeFor(action),
           comments: input.comments ?? null,
+          reason,
         },
       });
       await this.activity.recordInTx(tx, {
@@ -804,6 +950,7 @@ export class CreativeService {
           from_status: version.status,
           new_status: newStatus,
           comments: input.comments ?? null,
+          reason,
         },
       });
       await this.outbox.emitInTx(tx, {
@@ -819,6 +966,7 @@ export class CreativeService {
           new_status: newStatus,
           from_status: version.status,
           comments: input.comments ?? null,
+          reason,
         },
       });
       if (newStatus === ReviewStatus.REJECTED || newStatus === ReviewStatus.NEEDS_CHANGES) {
@@ -1117,6 +1265,86 @@ export class CreativeService {
     );
   }
 
+  /** Newest review action per creative across every version in the thread. */
+  private async fetchLatestActions(
+    creativeIds: string[],
+  ): Promise<Map<string, { actorId: string; createdAt: Date }>> {
+    if (creativeIds.length === 0) return new Map();
+    const rows = await this.prisma.client.reviewAction.findMany({
+      where: { version: { is: { creativeId: { in: creativeIds } } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        actorId: true,
+        createdAt: true,
+        version: { select: { creativeId: true } },
+      },
+    });
+    const latest = new Map<string, { actorId: string; createdAt: Date }>();
+    for (const row of rows) {
+      const creativeId = row.version.creativeId;
+      if (!latest.has(creativeId)) {
+        latest.set(creativeId, { actorId: row.actorId, createdAt: row.createdAt });
+      }
+    }
+    return latest;
+  }
+
+  /**
+   * Primary hoarding address + distinct advert cities per creative for the
+   * list's Location column and Region/Location filter. Mirrors the detail
+   * view's targeted_regions and gives the UI a row-level `location` even when
+   * the filter-options lookup is unavailable.
+   */
+  private async fetchCreativeGeo(
+    creativeIds: string[],
+  ): Promise<Map<string, { location: string | null; regions: string[] }>> {
+    if (creativeIds.length === 0) return new Map();
+    const rows = await this.prisma.client.advert.findMany({
+      where: { version: { is: { creativeId: { in: creativeIds } } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        addressText: true,
+        cityName: true,
+        version: { select: { creativeId: true } },
+      },
+    });
+    const geo = new Map<string, { location: string | null; cities: Set<string> }>();
+    for (const row of rows) {
+      const creativeId = row.version.creativeId;
+      const entry = geo.get(creativeId) ?? { location: null, cities: new Set<string>() };
+      const address = row.addressText?.trim();
+      if (!entry.location && address) entry.location = address;
+      const city = row.cityName?.trim();
+      if (city) entry.cities.add(city);
+      geo.set(creativeId, entry);
+    }
+    return new Map(
+      [...geo].map(([creativeId, entry]) => [
+        creativeId,
+        {
+          location: entry.location,
+          regions: [...entry.cities].sort((a, b) => a.localeCompare(b)),
+        },
+      ]),
+    );
+  }
+
+  /** Total bytes across every version of each listed creative. */
+  private async fetchCreativeSizeTotals(creativeIds: string[]): Promise<Map<string, number>> {
+    if (creativeIds.length === 0) return new Map();
+    const rows = await this.prisma.client.creativeVersion.groupBy({
+      by: ['creativeId'],
+      where: { creativeId: { in: creativeIds } },
+      _sum: { fileSizeBytes: true },
+    });
+    return new Map(
+      rows
+        .filter((row) => row._sum.fileSizeBytes !== null)
+        .map((row) => [row.creativeId, row._sum.fileSizeBytes as number]),
+    );
+  }
+
   /** WKT site locations for adverts (Prisma cannot project the PostGIS column). */
   private async fetchAdvertLocations(ids: string[]): Promise<Map<string, string | null>> {
     if (ids.length === 0) return new Map();
@@ -1136,13 +1364,43 @@ export class CreativeService {
     return new Map(rows.map((row) => [row.upstreamAgencyId, row]));
   }
 
+  /**
+   * Newest action across every version. The list passes an explicit batched
+   * lookup because it only loads the latest version; detail/other callers can
+   * rely on the versions they already hold.
+   */
+  private latestActionFromVersions(
+    versions: Array<{ actions?: Array<{ actorId: string; createdAt: Date }> }>,
+  ): { actorId: string; createdAt: Date } | null {
+    let latest: { actorId: string; createdAt: Date } | null = null;
+    for (const version of versions) {
+      for (const action of version.actions ?? []) {
+        if (!latest || action.createdAt.getTime() > latest.createdAt.getTime()) {
+          latest = { actorId: action.actorId, createdAt: action.createdAt };
+        }
+      }
+    }
+    return latest;
+  }
+
   private toCreativeResponse(
     creative: CreativeWithBrandAndVersions,
     actorNames: Map<string, string>,
     agencies: Map<string, AgencyRef> = new Map(),
+    latestActionOverride?: { actorId: string; createdAt: Date } | null,
+    totalSizeOverride?: number | null,
   ): CreativeResponseDto {
     const latestVersion = creative.versions[0];
-    const latestAction = latestVersion?.actions[0];
+    const latestAction =
+      latestActionOverride !== undefined
+        ? latestActionOverride
+        : this.latestActionFromVersions(creative.versions);
+    const totalSizeBytes =
+      totalSizeOverride !== undefined
+        ? totalSizeOverride
+        : creative.versions.length > 0
+          ? creative.versions.reduce((sum, version) => sum + (version.fileSizeBytes ?? 0), 0)
+          : null;
     const agencyId = creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId;
     const agency = agencyId ? (agencies.get(agencyId) ?? null) : null;
     return plainToInstance(
@@ -1154,6 +1412,7 @@ export class CreativeService {
           id: creative.brand.id,
           brand_name: creative.brand.brandName,
           logo_url: creative.brand.logoUrl ?? null,
+          address: creative.brand.address ?? null,
           is_flagged: creative.brand.isFlagged,
           industry_category: creative.brand.industryCategory ?? null,
           flagged_by:
@@ -1169,6 +1428,9 @@ export class CreativeService {
         latest_version: latestVersion ? this.toVersionResponse(latestVersion, actorNames) : null,
         last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
         last_action_at: latestAction ? latestAction.createdAt : null,
+        location: creative.brand.address ?? null,
+        targeted_regions: [],
+        total_size_bytes: totalSizeBytes,
         last_viewed_by: (creative.lastViewedBy && actorNames.get(creative.lastViewedBy)) || null,
         last_viewed_at: creative.lastViewedAt ?? null,
         viewed_minutes_ago: creative.lastViewedAt
@@ -1208,6 +1470,7 @@ export class CreativeService {
         media_url: version.mediaUrl,
         media_type: version.mediaType,
         media_name: version.mediaName ?? null,
+        file_size_bytes: version.fileSizeBytes ?? null,
         status: version.status,
         created_by: version.createdBy,
         created_by_name: actorNames.get(version.createdBy) ?? null,
@@ -1222,6 +1485,7 @@ export class CreativeService {
                 id: latestAction.id,
                 action: latestAction.action,
                 comments: latestAction.comments,
+                reason: latestAction.reason ?? null,
                 actor_id: latestAction.actorId,
                 actor_name: actorNames.get(latestAction.actorId) ?? null,
                 created_at: latestAction.createdAt,
@@ -1237,6 +1501,7 @@ export class CreativeService {
                   id: action.id,
                   action: action.action,
                   comments: action.comments,
+                  reason: action.reason ?? null,
                   actor_id: action.actorId,
                   actor_name: actorNames.get(action.actorId) ?? null,
                   created_at: action.createdAt,

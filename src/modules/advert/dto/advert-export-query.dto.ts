@@ -9,13 +9,28 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
-import { ADVERT_STATUSES } from '../validators';
+import { ADVERT_STATUSES, normalizeStatusFilter, type AdvertStatusType } from '../validators';
 
 export class AdvertExportQueryDto {
-  @ApiPropertyOptional({ enum: [...ADVERT_STATUSES] })
+  @ApiPropertyOptional({
+    enum: [...ADVERT_STATUSES],
+    isArray: true,
+    description: 'One status or a comma-separated list (LIVE,PAUSED). Unknown values return 400.',
+  })
   @IsOptional()
-  @IsIn([...ADVERT_STATUSES])
-  status?: (typeof ADVERT_STATUSES)[number];
+  @Transform(({ value }) => normalizeStatusFilter(value))
+  @IsArray()
+  @IsIn([...ADVERT_STATUSES], { each: true })
+  status?: AdvertStatusType[];
+
+  @ApiPropertyOptional({
+    description:
+      'Case-insensitive match on advert ID, address text, city, zone, brand name, or industry',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  search?: string;
 
   @ApiPropertyOptional({ description: 'Filter by brand' })
   @IsOptional()

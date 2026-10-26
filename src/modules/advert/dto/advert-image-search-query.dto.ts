@@ -28,10 +28,14 @@ export class AdvertImageSearchQueryDto {
   @Max(256)
   max_distance?: number;
 
-  @ApiPropertyOptional({ enum: [...ADVERT_STATUSES] })
+  @ApiPropertyOptional({
+    enum: [...ADVERT_STATUSES, 'APPROVED'],
+    description:
+      'Status filter. APPROVED returns approved creatives that are not deployed yet; omit to search both.',
+  })
   @IsOptional()
-  @IsIn([...ADVERT_STATUSES])
-  status?: (typeof ADVERT_STATUSES)[number];
+  @IsIn([...ADVERT_STATUSES, 'APPROVED'])
+  status?: (typeof ADVERT_STATUSES)[number] | 'APPROVED';
 
   @ApiPropertyOptional({ description: 'Filter by brand' })
   @IsOptional()

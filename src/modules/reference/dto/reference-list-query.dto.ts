@@ -19,13 +19,12 @@ export class ReferenceListQueryDto {
   category?: string;
 
   @ApiPropertyOptional({
-    description:
-      "Tri-state archive filter: 'true' archived only, 'false' active only, omitted for all",
-    enum: ['true', 'false'],
+    description: "Archive filter: 'active' docs only, 'archived' docs only, or omitted for all",
+    enum: ['active', 'archived'],
   })
   @IsOptional()
-  @IsIn(['true', 'false'])
-  archived?: 'true' | 'false';
+  @IsIn(['active', 'archived'])
+  status?: 'active' | 'archived';
 
   @ApiPropertyOptional({ description: 'Case-insensitive match on document name', maxLength: 200 })
   @IsOptional()

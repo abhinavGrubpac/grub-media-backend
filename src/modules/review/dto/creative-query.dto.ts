@@ -10,7 +10,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
-import { CREATIVE_STATUS_FILTERS, CREATIVE_SORT_KEYS } from '../transitions';
+import { CREATIVE_SORT_KEYS, CREATIVE_SORT_ORDERS, CREATIVE_STATUS_FILTERS } from '../transitions';
 
 export class CreativeQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -61,11 +61,31 @@ export class CreativeQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: [...CREATIVE_SORT_KEYS],
     description:
+      'Camel-case alias retained for backwards compatibility. Prefer sort_by. ' +
       'created_at/brand_name sort in the database; uploaded_on/last_action_at sort in memory after filtering.',
   })
   @IsOptional()
   @IsIn([...CREATIVE_SORT_KEYS])
   declare sortBy?: string;
+
+  @ApiPropertyOptional({
+    enum: [...CREATIVE_SORT_KEYS],
+    description:
+      'Documented wire-format sort key. created_at/brand_name sort in the database; ' +
+      'uploaded_on/last_action_at sort in memory after filtering.',
+  })
+  @IsOptional()
+  @IsIn([...CREATIVE_SORT_KEYS])
+  sort_by?: string;
+
+  @ApiPropertyOptional({
+    enum: [...CREATIVE_SORT_ORDERS],
+    default: 'desc',
+    description: 'Documented wire-format sort direction. Default desc.',
+  })
+  @IsOptional()
+  @IsIn([...CREATIVE_SORT_ORDERS])
+  sort_order?: 'asc' | 'desc';
 
   @ApiPropertyOptional({
     enum: ['history'],

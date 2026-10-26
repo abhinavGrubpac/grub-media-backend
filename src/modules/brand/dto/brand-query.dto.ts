@@ -21,10 +21,13 @@ export class BrandQueryDto extends PaginationQueryDto {
   @IsIn(['flagged', 'unflagged'])
   flag_status?: 'flagged' | 'unflagged';
 
-  @ApiPropertyOptional({ enum: ['on', 'off'], description: 'Auto-approval filter' })
+  @ApiPropertyOptional({
+    description: 'Auto-approval filter: supports "on"/"off" or "true"/"false"',
+    enum: ['on', 'off', 'true', 'false'],
+  })
   @IsOptional()
-  @IsIn(['on', 'off'])
-  auto_approval?: 'on' | 'off';
+  @IsIn(['on', 'off', 'true', 'false'])
+  auto_approval?: 'on' | 'off' | 'true' | 'false';
 
   @ApiPropertyOptional({ enum: ['active', 'stopped'], description: 'Brand activity filter' })
   @IsOptional()

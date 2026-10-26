@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsOptional, IsString, Length, ValidateNested } from 'class-validator';
+import { IsInt, IsOptional, IsString, Length, Min, ValidateNested } from 'class-validator';
 import { CreativeScheduleInputDto } from './creative-schedule.dto';
 
 export class InitialVersionDto {
@@ -19,6 +19,12 @@ export class InitialVersionDto {
   @IsString()
   @Length(1, 200)
   media_name?: string;
+
+  @ApiPropertyOptional({ description: 'Uploaded file size in bytes' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  file_size_bytes?: number;
 
   @ApiPropertyOptional({
     description: 'Optional reviewer notes attached to the upload',

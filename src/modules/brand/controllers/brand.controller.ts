@@ -126,7 +126,16 @@ export class BrandController {
     return this.brandService.killSwitch(id, dto.is_active ?? false);
   }
 
-  /** Legacy alias of POST /:id/kill kept for compatibility with early clients. */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @Patch(':id/status')
+  @ResponseMessage('Brand activity status updated')
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: BrandKillDto,
+  ): Promise<{ brand: BrandResponseDto; revoked_adverts_count: number }> {
+    return this.brandService.killSwitch(id, dto.is_active ?? false);
+  }
+
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @Put(':id/kill')
   @ResponseMessage('Brand kill-switch applied')

@@ -33,23 +33,43 @@ export function actionTypeFor(action: ReviewActionType): ActionType {
   return action as ActionType;
 }
 
-/** Comments are mandatory for REJECT and REQUEST_CHANGES (WORKFLOWS.md §1.3). */
 export function validateTakeAction(input: {
   action: string;
   comments?: string | null;
+  reason?: string | null;
 }): string | null {
   if (!isReviewAction(input.action)) {
     return `action must be one of: ${REVIEW_ACTIONS.join(', ')}`;
   }
-  const needsComments = input.action === 'REJECT' || input.action === 'REQUEST_CHANGES';
-  const comments = input.comments?.trim();
-  if (needsComments && (!comments || comments.length === 0)) {
-    return `comments are mandatory for ${input.action}`;
+  const _comments = input.comments?.trim();
+  const reason = input.reason?.trim();
+
+  // APPROVE: comments optional, reason not required
+  if (input.action === 'APPROVE') {
+    return null;
   }
+
+  // HOLD: reason compulsory, comments optional
+  if (input.action === 'HOLD') {
+    if (!reason || reason.length === 0) {
+      return `reason is mandatory for HOLD`;
+    }
+    return null;
+  }
+
+  // REJECT & REQUEST_CHANGES: reason compulsory, comments optional
+  if (input.action === 'REJECT' || input.action === 'REQUEST_CHANGES') {
+    if (!reason || reason.length === 0) {
+      return `reason is mandatory for ${input.action}`;
+    }
+    return null;
+  }
+
+  // RESUME: no specific requirements
   return null;
 }
 
-export function assertValidTakeAction(input: { action: string; comments?: string | null }): void {
+export function assertValidTakeAction(input: { action: string; comments?: string | null; reason?: string | null }): void {
   const message = validateTakeAction(input);
   if (message) throw new BadRequestException(message);
 }

@@ -2,8 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import { Prisma, AdvertStatus, ReviewStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -32,10 +35,12 @@ import {
   IMAGE_SEARCH_MAX_DISTANCE,
   IMAGE_UPLOAD_MAX_BYTES,
   assertImageHash,
-  dHashFromGrayscale,
+  dHashFromImage,
   hammingDistanceHex,
 } from '../image-hash';
+import { allowedImageHosts, dHashFromImageUrl } from '../image-hash-indexer';
 import type { AdvertSearchSort, AdvertSortKey } from '../validators';
+
 
 export interface AdvertUpstreamInput {
   upstream_advert_id: string;
@@ -61,7 +66,7 @@ export interface AdvertUpstreamTransitionInput {
 }
 
 export interface AdvertListFilters {
-  status?: string;
+  status?: string | string[];
   brand_id?: string;
   brandId?: string;
   search?: string;
@@ -90,6 +95,7 @@ export function buildSearchPreview(
   return flat.slice(0, limit).map((row) => ({
     advert_id: row.id,
     media_url: row.media_url ?? null,
+    thumbnail_url: row.media_url ?? null,
     creative_name: row.creative_name ?? row.version?.creative_name ?? null,
     brand_name: row.version?.brand?.brand_name ?? null,
     address_text: row.address_text ?? null,
@@ -131,6 +137,7 @@ export interface AdvertSearchEcho {
   lat: number | null;
   lng: number | null;
   radius_km: number | null;
+  search: string | null;
   industry: string | null;
   brand_id: string | null;
   start: string | null;
@@ -155,9 +162,19 @@ export interface AdvertImageSearchResult {
 export interface RecentAdvertSearch {
   id: string;
   params: unknown;
+  /** Alias of params for clients that use the spec name. */
+  search_params: unknown;
   adverts_matched: number;
+  /** Alias of adverts_matched for frontend compatibility. */
+  match_count: number;
+  /** Alias of adverts_matched for the current advert-control table. */
+  advertsMatched: number;
   /** Media snapshot of the top matched adverts at search time (empty for older rows). */
   preview: AdvertSearchPreview[];
+  /** First preview image, if a match stored media. */
+  thumbnail_url: string | null;
+  /** Alias of thumbnail_url for the current advert-control table. */
+  img: string | null;
   searched_at: Date;
   hours_ago: number;
 }
@@ -166,6 +183,7 @@ export interface RecentAdvertSearch {
 export interface AdvertSearchPreview {
   advert_id: string;
   media_url: string | null;
+  thumbnail_url: string | null;
   creative_name: string | null;
   brand_name: string | null;
   address_text: string | null;
@@ -215,6 +233,13 @@ function dayEnd(value: string): Date {
  */
 export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhereInput {
   const brandId = filters.brandId ?? filters.brand_id;
+  const statuses = filters.status
+    ? Array.isArray(filters.status)
+      ? filters.status
+      : [filters.status]
+    : [];
+  const search = filters.search?.trim();
+
   let start: Date | undefined;
   let end: Date | undefined;
   if (filters.start_date) {
@@ -225,7 +250,7 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
     end = dayEnd(filters.end_date);
     if (Number.isNaN(end.getTime())) throw new BadRequestException('Invalid end_date');
   }
-  const creative: Prisma.CreativeWhereInput = {
+  const _creative: Prisma.CreativeWhereInput = {
     ...(brandId ? { brandId } : {}),
     ...(filters.industry || filters.brand_status
       ? {
@@ -242,17 +267,27 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
   };
   return {
     ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
-    ...(filters.status ? { status: filters.status as AdvertStatus } : {}),
+    ...(statuses.length
+      ? {
+          status:
+            statuses.length === 1
+              ? (statuses[0] as AdvertStatus)
+              : { in: statuses as AdvertStatus[] },
+        }
+      : {}),
     ...(Object.keys(creative).length ? { version: { creative } } : {}),
-    ...(filters.search
+    ...(search
       ? {
           OR: [
-            { id: { contains: filters.search } },
-            { addressText: { contains: filters.search, mode: 'insensitive' } },
+            { id: { contains: search, mode: 'insensitive' } },
+            { upstreamAdvertId: { contains: search, mode: 'insensitive' } },
+            { addressText: { contains: search, mode: 'insensitive' } },
+            { cityName: { contains: search, mode: 'insensitive' } },
+            { zoneName: { contains: search, mode: 'insensitive' } },
             {
               version: {
                 creative: {
-                  brand: { is: { brandName: { contains: filters.search, mode: 'insensitive' } } },
+                  brand: { is: { brandName: { contains: search, mode: 'insensitive' } } },
                 },
               },
             },
@@ -260,7 +295,7 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
               version: {
                 creative: {
                   brand: {
-                    is: { industryCategory: { contains: filters.search, mode: 'insensitive' } },
+                    is: { industryCategory: { contains: search, mode: 'insensitive' } },
                   },
                 },
               },
@@ -324,11 +359,30 @@ type VersionWithContext = Prisma.CreativeVersionGetPayload<{
  */
 @Injectable()
 export class AdvertService {
+  private readonly logger = new Logger(AdvertService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: EventOutboxService,
     private readonly activity: ActivityLogService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * dHash used by reverse-image search. An explicit caller hash wins; otherwise
+   * index the version media so government-uploaded creatives participate even
+   * when no upstream/intake hash was supplied. Best-effort by design: an
+   * unreachable object leaves the column null instead of failing the write.
+   */
+  async resolveImageHash(
+    mediaUrl: string | null | undefined,
+    supplied?: string | null,
+  ): Promise<string | null> {
+    if (supplied) return supplied;
+    const bucket = this.config.get<string>('storage.bucket');
+    const region = this.config.get<string>('storage.region') ?? 'ap-south-1';
+    return dHashFromImageUrl(mediaUrl, allowedImageHosts(bucket, region), this.logger);
+  }
 
   /**
    * Schedules a version at a physical site. Booking is pre-approval by design
@@ -346,6 +400,8 @@ export class AdvertService {
       address_text: string;
       start_date: Date;
       end_date: Date;
+      timeSlotStart?: string | null;
+      timeSlotEnd?: string | null;
       city_name?: string | null;
       zone_name?: string | null;
       radius?: number | null;
@@ -378,12 +434,17 @@ export class AdvertService {
       );
     }
 
+    // Every booking carries a searchable hash: upstream-supplied when present,
+    // otherwise indexed from the version media (government uploads never send
+    // one through the presigned-upload flow).
+    const imageHash = await this.resolveImageHash(version.mediaUrl, dto.image_hash);
+
     const advertId = randomUUID();
     const wkt = `POINT(${dto.lng} ${dto.lat})`;
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "created_at")
-        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${dto.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${dto.start_date}, ${dto.end_date}, ${dto.city_name ?? null}, ${dto.zone_name ?? null}, ${dto.radius ?? null}, ${dto.image_hash ?? null}, CURRENT_TIMESTAMP)
+        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "time_slot_start", "time_slot_end", "city_name", "zone_name", "radius_km", "image_hash", "created_at")
+        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${dto.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${dto.start_date}, ${dto.end_date}, ${dto.timeSlotStart ?? null}, ${dto.timeSlotEnd ?? null}, ${dto.city_name ?? null}, ${dto.zone_name ?? null}, ${dto.radius ?? null}, ${imageHash}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.advertScheduled,
@@ -404,7 +465,7 @@ export class AdvertService {
           city_name: dto.city_name ?? null,
           zone_name: dto.zone_name ?? null,
           radius_km: dto.radius ?? null,
-          image_hash: dto.image_hash ?? null,
+          image_hash: imageHash,
         },
       });
     });
@@ -418,6 +479,7 @@ export class AdvertService {
     lng?: number;
     radius?: number;
     radiusKm?: number;
+    search?: string;
     industry?: string;
     brand_id?: string;
     start?: Date;
@@ -452,6 +514,7 @@ export class AdvertService {
       lat: filters.lat ?? null,
       lng: filters.lng ?? null,
       radius_km: hasLat && hasLng ? (filters.radiusKm ?? filters.radius ?? 5) : null,
+      search: filters.search ?? null,
       industry: filters.industry ?? null,
       brand_id: filters.brand_id ?? null,
       start: filters.start?.toISOString() ?? null,
@@ -500,11 +563,11 @@ export class AdvertService {
   }
 
   /**
-   * Reverse-image search (single endpoint): rank adverts by Hamming distance
-   * (nearest first) from a query hash that comes either from an uploaded
-   * PNG/JPEG file or from explicit image_hash/advert_id params. A present file
-   * always wins over params. Only adverts with a stored image_hash
-   * participate; the search is recorded in history like radius search.
+   * Reverse-image search (single endpoint): rank deployed adverts and
+   * approved-but-not-yet-deployed creatives by Hamming distance (nearest
+   * first) from a query hash that comes either from an uploaded PNG/JPEG file
+   * or from explicit image_hash/advert_id params. A present file always wins
+   * over params. The search is recorded in history like radius search.
    */
   async searchByImage(
     buffer: Buffer | undefined,
@@ -525,15 +588,11 @@ export class AdvertService {
         throw new BadRequestException(`image must be smaller than ${IMAGE_UPLOAD_MAX_BYTES} bytes`);
       }
       try {
-        const sharp = (await import('sharp')).default;
-        const pixels = await sharp(buffer)
-          .greyscale()
-          .resize(9, 8, { fit: 'fill' })
-          .raw()
-          .toBuffer();
-        queryHash = dHashFromGrayscale(pixels, 9, 8);
+        queryHash = await dHashFromImage(buffer);
       } catch {
-        throw new BadRequestException('image must be a PNG or JPEG file');
+        throw new UnprocessableEntityException(
+          'Uploaded file could not be decoded as an image; use a PNG or JPEG cover image',
+        );
       }
     } else {
       queryHash = opts.image_hash;
@@ -550,7 +609,7 @@ export class AdvertService {
       }
       assertImageHash(queryHash);
     }
-    if (opts.status !== undefined && !isAdvertStatus(opts.status)) {
+    if (opts.status !== undefined && opts.status !== 'APPROVED' && !isAdvertStatus(opts.status)) {
       throw new BadRequestException('Invalid advert status');
     }
     const maxDistance = Math.min(
@@ -561,17 +620,48 @@ export class AdvertService {
     const limit = Math.min(opts.limit ?? 50, 100);
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
 
-    const candidates = await this.prisma.client.advert.findMany({
-      where: {
-        ...(opts.status ? { status: opts.status as AdvertStatus } : {}),
-        ...(opts.brand_id ? { version: { creative: { brandId: opts.brand_id } } } : {}),
-      },
-      take: IMAGE_SEARCH_CANDIDATE_LIMIT,
-      orderBy: { createdAt: 'desc' },
-      include: { version: { include: { creative: { include: { brand: true } } } } },
-    });
+    // The government portal can approve a creative before the agency portal
+    // has scheduled it. Those approved versions have no Advert row yet, so
+    // search them from the indexed CreativeVersion.image_hash as well.
+    const wantsAdverts = opts.status !== 'APPROVED';
+    const wantsCreatives = opts.status === undefined || opts.status === 'APPROVED';
+    const advertStatus =
+      opts.status !== undefined && opts.status !== 'APPROVED'
+        ? (opts.status as AdvertStatus)
+        : undefined;
+
+    const [candidates, creativeCandidates] = await Promise.all([
+      wantsAdverts
+        ? this.prisma.client.advert.findMany({
+            where: {
+              imageHash: { not: null },
+              ...(advertStatus ? { status: advertStatus } : {}),
+              ...(opts.brand_id ? { version: { creative: { brandId: opts.brand_id } } } : {}),
+            },
+            take: IMAGE_SEARCH_CANDIDATE_LIMIT,
+            orderBy: { createdAt: 'desc' },
+            include: { version: { include: { creative: { include: { brand: true } } } } },
+          })
+        : Promise.resolve([]),
+      wantsCreatives
+        ? this.prisma.client.creativeVersion.findMany({
+            where: {
+              status: ReviewStatus.APPROVED,
+              imageHash: { not: null },
+              // Removed: adverts: { none: {} },
+              // We now include approved creatives even if they are already deployed as adverts,
+              // and deduplicate them during the ranking phase to treat them as a single entity.
+              ...(opts.brand_id ? { creative: { brandId: opts.brand_id } } : {}),
+            },
+            take: IMAGE_SEARCH_CANDIDATE_LIMIT,
+            orderBy: { createdAt: 'desc' },
+            include: { creative: { include: { brand: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
     const locations = await this.fetchLocationWkt(candidates.map((advert) => advert.id));
-    const ranked = candidates
+
+    const advertMatches = candidates
       .filter(
         (advert): advert is typeof advert & { imageHash: string } =>
           typeof advert.imageHash === 'string' &&
@@ -580,27 +670,52 @@ export class AdvertService {
       )
       .map((advert) => ({
         advert,
-        distance: hammingDistanceHex(queryHash as string, advert.imageHash),
+        distance: hammingDistanceHex(queryHash as string, advert.imageHash as string),
       }))
       .filter((entry) => entry.distance <= maxDistance)
-      .sort((a, b) => a.distance - b.distance);
-    const total = ranked.length;
-    const rows = ranked.slice(skip, skip + take).map((entry) =>
-      this.toResponse(entry.advert, undefined, {
-        location: locations.get(entry.advert.id) ?? null,
-        hashDistance: entry.distance,
-      }),
+      .map((entry) => ({
+        distance: entry.distance,
+        createdAt: entry.advert.createdAt,
+        row: this.toResponse(entry.advert, undefined, {
+          location: locations.get(entry.advert.id) ?? null,
+          hashDistance: entry.distance,
+        }),
+      }));
+
+    const creativeMatches = creativeCandidates
+      .filter(
+        (version): version is typeof version & { imageHash: string } =>
+          typeof version.imageHash === 'string' &&
+          version.imageHash.length === (queryHash as string).length &&
+          version.imageHash.length > 0,
+      )
+      .map((version) => ({
+        version,
+        distance: hammingDistanceHex(queryHash as string, version.imageHash as string),
+      }))
+      .filter((entry) => entry.distance <= maxDistance)
+      .map((entry) => ({
+        distance: entry.distance,
+        createdAt: entry.version.createdAt,
+        row: this.toCreativeSearchResponse(entry.version, entry.distance),
+      }));
+
+    const ranked = [...advertMatches, ...creativeMatches].sort(
+      (a, b) => a.distance - b.distance || b.createdAt.getTime() - a.createdAt.getTime(),
     );
+    const total = ranked.length;
+    const rows = ranked.slice(skip, skip + take).map((entry) => entry.row);
     const echo: AdvertSearchEcho = {
       lat: null,
       lng: null,
       radius_km: null,
+      search: null,
       industry: null,
       brand_id: opts.brand_id ?? null,
       start: null,
       end: null,
       sort: 'distance_asc',
-      query_hash: queryHash,
+      query_hash: queryHash ?? null,
       max_distance: maxDistance,
     };
     await this.recordSearch(opts.actor_id, echo, total, rows);
@@ -611,6 +726,7 @@ export class AdvertService {
     filters: {
       lat?: number;
       lng?: number;
+      search?: string;
       industry?: string;
       brand_id?: string;
       start?: Date;
@@ -632,6 +748,17 @@ export class AdvertService {
     const brandClause =
       filters.brand_id !== undefined
         ? Prisma.sql`AND c."brandId" = ${filters.brand_id}`
+        : Prisma.empty;
+    const search = filters.search?.trim();
+    const searchClause =
+      search
+        ? Prisma.sql`AND (
+            a."id" ILIKE ${`%${search}%`}
+            OR a."upstream_advert_id" ILIKE ${`%${search}%`}
+            OR a."address_text" ILIKE ${`%${search}%`}
+            OR a."city_name" ILIKE ${`%${search}%`}
+            OR a."zone_name" ILIKE ${`%${search}%`}
+          )`
         : Prisma.empty;
     const startClause =
       filters.start !== undefined ? Prisma.sql`AND a."endDate" >= ${filters.start}` : Prisma.empty;
@@ -695,18 +822,19 @@ export class AdvertService {
       JOIN "Creative" c ON c."id" = v."creative_id"
       JOIN "Brand" b ON b."id" = c."brand_id"
       WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusKm * 1000})
-        ${industryClause} ${brandClause} ${startClause} ${endClause}
+        ${searchClause} ${industryClause} ${brandClause} ${startClause} ${endClause}
       ${orderClause}
       LIMIT ${imageMode ? IMAGE_SEARCH_CANDIDATE_LIMIT : take} OFFSET ${imageMode ? 0 : skip}
     `);
     return {
-      rows: rows.map((row) => this.toResponse(row, { ...row, distanceKm: Number(row.distanceKm) })),
+      rows: rows.map((row) => this.toResponse(row as any, row as any)),
       total: rows.length > 0 ? Number(rows[0].total) : 0,
     };
   }
 
   private async plainSearch(
     filters: {
+      search?: string;
       industry?: string;
       brand_id?: string;
       start?: Date;
@@ -717,23 +845,17 @@ export class AdvertService {
     imageMode = false,
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
     // No coordinates: the same filters through Prisma (sort applies to geo mode only).
-    const creative: Prisma.CreativeWhereInput = {
+    const _creative: Prisma.CreativeWhereInput = {
       ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
       ...(filters.industry
         ? { brand: { is: { industryCategory: { equals: filters.industry, mode: 'insensitive' } } } }
         : {}),
     };
-    const where: Prisma.AdvertWhereInput = {
-      ...(Object.keys(creative).length ? { version: { creative } } : {}),
-      ...(filters.start || filters.end
-        ? {
-            AND: [
-              ...(filters.start ? [{ endDate: { gte: filters.start } }] : []),
-              ...(filters.end ? [{ startDate: { lte: filters.end } }] : []),
-            ],
-          }
-        : {}),
-    };
+    const where = buildAdvertWhere({
+      ...filters,
+      start_date: filters.start?.toISOString(),
+      end_date: filters.end?.toISOString(),
+    });
     const [adverts, total] = await Promise.all([
       this.prisma.client.advert.findMany({
         where,
@@ -789,14 +911,25 @@ export class AdvertService {
       take: RECENT_SEARCH_LIMIT,
     });
     const now = Date.now();
-    return rows.map((row) => ({
-      id: row.id,
-      params: row.params,
-      adverts_matched: row.resultCount,
-      preview: Array.isArray(row.preview) ? (row.preview as unknown as AdvertSearchPreview[]) : [],
-      searched_at: row.createdAt,
-      hours_ago: Math.round(((now - row.createdAt.getTime()) / 3600000) * 10) / 10,
-    }));
+    return rows.map((row) => {
+      const preview = Array.isArray(row.preview)
+        ? (row.preview as unknown as AdvertSearchPreview[])
+        : [];
+      const thumbnail = preview.find((entry) => entry.media_url)?.media_url ?? null;
+      return {
+        id: row.id,
+        params: row.params,
+        search_params: row.params,
+        adverts_matched: row.resultCount,
+        match_count: row.resultCount,
+        advertsMatched: row.resultCount,
+        preview,
+        thumbnail_url: thumbnail,
+        img: thumbnail,
+        searched_at: row.createdAt,
+        hours_ago: Math.round(((now - row.createdAt.getTime()) / 3600000) * 10) / 10,
+      };
+    });
   }
 
   /**
@@ -809,6 +942,7 @@ export class AdvertService {
     status: string,
     actorId: string,
     expectedStatus?: string,
+    reason?: string,
   ): Promise<AdvertResponseDto> {
     if (!isAdvertStatus(status)) {
       throw new BadRequestException(
@@ -870,7 +1004,7 @@ export class AdvertService {
         action: `advert.${status.toLowerCase()}`,
         entityType: 'Advert',
         entityId: id,
-        metadata: { from_status: current.status, status },
+        metadata: { from_status: current.status, status, reason: reason ?? null },
       });
       await this.outbox.emitInTx(tx, {
         eventType: STATUS_EVENT[status],
@@ -878,7 +1012,13 @@ export class AdvertService {
         entityId: id,
         actorId,
         key: id,
-        payload: { advert_id: id, from_status: current.status, status, actor: actorId },
+        payload: {
+          advert_id: id,
+          from_status: current.status,
+          status,
+          actor: actorId,
+          reason: reason ?? null,
+        },
       });
     });
 
@@ -926,6 +1066,8 @@ export class AdvertService {
       );
     }
 
+    const imageHash = await this.resolveImageHash(version.mediaUrl, input.image_hash);
+
     const existing = await this.prisma.client.advert.findUnique({
       where: { upstreamAdvertId: input.upstream_advert_id },
     });
@@ -947,7 +1089,7 @@ export class AdvertService {
               "city_name" = ${input.city_name ?? null},
               "zone_name" = ${input.zone_name ?? null},
               "radius_km" = ${input.radius_km ?? null},
-              "image_hash" = ${input.image_hash ?? null}
+              "image_hash" = COALESCE(${imageHash}, "image_hash")
           WHERE "id" = ${existing.id}
         `;
         await this.outbox.emitInTx(tx, {
@@ -969,7 +1111,7 @@ export class AdvertService {
             city_name: input.city_name ?? null,
             zone_name: input.zone_name ?? null,
             radius_km: input.radius_km ?? null,
-            image_hash: input.image_hash ?? null,
+            image_hash: imageHash,
             updated: true,
             origin: 'upstream',
           },
@@ -982,7 +1124,7 @@ export class AdvertService {
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
         INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "upstream_advert_id", "created_at")
-        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${input.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${input.start_date}, ${input.end_date}, ${input.city_name ?? null}, ${input.zone_name ?? null}, ${input.radius_km ?? null}, ${input.image_hash ?? null}, ${input.upstream_advert_id}, CURRENT_TIMESTAMP)
+        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${input.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${input.start_date}, ${input.end_date}, ${input.city_name ?? null}, ${input.zone_name ?? null}, ${input.radius_km ?? null}, ${imageHash}, ${input.upstream_advert_id}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.advertScheduled,
@@ -1004,7 +1146,7 @@ export class AdvertService {
           city_name: input.city_name ?? null,
           zone_name: input.zone_name ?? null,
           radius_km: input.radius_km ?? null,
-          image_hash: input.image_hash ?? null,
+          image_hash: imageHash,
           origin: 'upstream',
         },
       });
@@ -1331,10 +1473,72 @@ export class AdvertService {
           geo?.distanceKm !== undefined && geo?.distanceKm !== null
             ? Math.round(geo.distanceKm * 1000) / 1000
             : (extra?.distanceKm ?? null),
+        distance_m:
+          geo?.distanceKm !== undefined && geo?.distanceKm !== null
+            ? Math.round(geo.distanceKm * 1000)
+            : extra?.distanceKm !== undefined && extra?.distanceKm !== null
+              ? Math.round(extra.distanceKm * 1000)
+              : null,
         hash_distance: extra?.hashDistance ?? null,
         available_actions: availableGovtActions(advert.status),
+        source: 'advert',
+      },
+      { excludeExtraneousValues: true },
+    );
+  }
+
+  /**
+   * Search result for an approved creative that has no Advert row yet. It
+   * mirrors the advert card shape so the existing Advert Control UI can render
+   * it: no location/dates, status APPROVED, and no lifecycle actions.
+   */
+  private toCreativeSearchResponse(
+    version: Prisma.CreativeVersionGetPayload<{
+      include: { creative: { include: { brand: true } } };
+    }>,
+    hashDistance: number,
+  ): AdvertResponseDto {
+    return plainToInstance(
+      AdvertResponseDto,
+      {
+        id: version.id,
+        version_id: version.id,
+        status: 'APPROVED',
+        address_text: null,
+        start_date: null,
+        end_date: null,
+        city_name: null,
+        zone_name: null,
+        image_hash: version.imageHash,
+        upstream_advert_id: null,
+        created_at: version.createdAt,
+        version: {
+          id: version.id,
+          version_number: version.versionNumber,
+          status: version.status,
+          creative_id: version.creative.id,
+          creative_name: version.creative.creativeName,
+          brand: {
+            id: version.creative.brand.id,
+            brand_name: version.creative.brand.brandName,
+            is_flagged: version.creative.brand.isFlagged,
+          },
+        },
+        location: null,
+        radius_km: null,
+        media_url: version.mediaUrl,
+        media_type: version.mediaType,
+        creative_name: version.creative.creativeName,
+        creative_id: version.creative.id,
+        industry: version.creative.brand.industryCategory,
+        hash_distance: hashDistance,
+        available_actions: [],
+        source: 'creative',
       },
       { excludeExtraneousValues: true },
     );
   }
 }
+
+
+

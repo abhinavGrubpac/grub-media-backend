@@ -7,5 +7,5 @@
     "incremental": false,
     "declaration": false
   },
-  "include": ["prisma/seed.ts", "prisma/seed.media.ts"]
+  "include": ["prisma/seed.ts", "prisma/seed.media.ts", "prisma/backfill-image-hashes.ts"]
 }

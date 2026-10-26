@@ -42,6 +42,15 @@ export class AdvertSearchQueryDto {
   @Max(500)
   radius?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Text fallback when no coordinates are supplied: matches advert ID, address text, city, or zone (case-insensitive).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  search?: string;
+
   @ApiPropertyOptional({ description: 'Brand industry (case-sensitive exact match)' })
   @IsOptional()
   @IsString()

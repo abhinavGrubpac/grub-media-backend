@@ -12,8 +12,10 @@ export const IMAGE_HASH_RE = /^[0-9a-fA-F]{16}$/;
 
 export const IMAGE_HASH_BITS = 64;
 
-/** Default/maximum Hamming distance for by-image matches. */
-export const IMAGE_SEARCH_DEFAULT_MAX_DISTANCE = 10;
+/** Default/maximum Hamming distance for by-image matches. 
+ * Industry standard for dHash visual similarity is typically 10 for near-duplicates,
+ * but 15-20 provides much better real-world recall for compressed/resized web images. */
+export const IMAGE_SEARCH_DEFAULT_MAX_DISTANCE = 18;
 export const IMAGE_SEARCH_MAX_DISTANCE = 64;
 
 /** Upper bound for scanned candidates per by-image query (test-phase scale). */
@@ -34,6 +36,13 @@ export function dHashFromGrayscale(pixels: Buffer, width: number, height: number
     }
   }
   return hash.toString(16).padStart(16, '0');
+}
+
+/** dHash for encoded image bytes in any format sharp can decode. */
+export async function dHashFromImage(buffer: Buffer): Promise<string> {
+  const sharp = (await import('sharp')).default;
+  const pixels = await sharp(buffer).greyscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer();
+  return dHashFromGrayscale(pixels, 9, 8);
 }
 
 /** Hamming distance between two 16-hex-char hashes (case-insensitive). */

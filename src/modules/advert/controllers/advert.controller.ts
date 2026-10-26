@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Res,
+  UnprocessableEntityException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -75,6 +76,13 @@ export class AdvertController {
       fileFilter: (_req, file, done) => {
         if (file.mimetype === 'image/png' || file.mimetype === 'image/jpeg') {
           done(null, true);
+        } else if (file.mimetype === 'application/pdf') {
+          done(
+            new UnprocessableEntityException(
+              'PDF creatives are not supported for visual search; upload a PNG or JPEG cover image',
+            ),
+            false,
+          );
         } else {
           done(new BadRequestException('image must be a PNG or JPEG file'), false);
         }
@@ -128,7 +136,7 @@ export class AdvertController {
       .status(200)
       .set({
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': 'attachment; filename=adverts_export.csv',
+        'Content-Disposition': 'attachment; filename="adverts_export.csv"',
       })
       .send(
         [
@@ -148,7 +156,13 @@ export class AdvertController {
     @Body() dto: AdvertStatusDto,
     @CurrentUser() user: AuthUser,
   ): Promise<AdvertResponseDto> {
-    return this.advertService.updateStatus(id, dto.status, user.id, dto.expected_status);
+    return this.advertService.updateStatus(
+      id,
+      dto.status,
+      user.id,
+      dto.expected_status,
+      dto.reason ?? dto.comments,
+    );
   }
 
   /** Spec-shape alias of PATCH /:id/status. */
@@ -160,7 +174,13 @@ export class AdvertController {
     @Body() dto: AdvertStatusDto,
     @CurrentUser() user: AuthUser,
   ): Promise<AdvertResponseDto> {
-    return this.advertService.updateStatus(id, dto.status, user.id, dto.expected_status);
+    return this.advertService.updateStatus(
+      id,
+      dto.status,
+      user.id,
+      dto.expected_status,
+      dto.reason ?? dto.comments,
+    );
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)

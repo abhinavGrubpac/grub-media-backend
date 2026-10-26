@@ -52,21 +52,39 @@ export class AdvertResponseDto {
   @Expose()
   version_id!: string;
 
-  @ApiProperty({ enum: AdvertStatus })
+  @ApiProperty({
+    enum: [...Object.values(AdvertStatus), 'APPROVED'],
+    description:
+      'Advert lifecycle status. APPROVED marks an approved creative that has no scheduled advert yet (image-search results only).',
+  })
   @Expose()
-  status!: AdvertStatus;
+  status!: AdvertStatus | 'APPROVED';
 
   @ApiPropertyOptional({ nullable: true })
   @Expose()
   address_text!: string | null;
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Null for an approved creative that is not scheduled yet',
+  })
   @Expose()
-  start_date!: Date;
+  start_date!: Date | null;
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Null for an approved creative that is not scheduled yet',
+  })
   @Expose()
-  end_date!: Date;
+  end_date!: Date | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  timeRange!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @Expose()
+  fileSize!: string | null;
 
   @ApiPropertyOptional({
     description: 'Display annotation of the city from upstream',
@@ -137,11 +155,19 @@ export class AdvertResponseDto {
 
   @ApiPropertyOptional({
     description:
-      'Distance in kilometres from the searched lat/lng to the advert site (radius/geo search only)',
+      'Distance in kilometres from the searched lat/lng to the advert site, rounded to 3 decimals (radius/geo search only)',
     nullable: true,
   })
   @Expose()
   distance_km?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Distance in metres from the searched lat/lng, rounded to a whole metre (radius/geo search only)',
+    nullable: true,
+  })
+  @Expose()
+  distance_m?: number | null;
 
   @ApiPropertyOptional({
     description: 'Hamming distance to the uploaded query image (by-image search only)',
@@ -149,6 +175,14 @@ export class AdvertResponseDto {
   })
   @Expose()
   hash_distance?: number | null;
+
+  @ApiProperty({
+    enum: ['advert', 'creative'],
+    description:
+      'advert = deployed/scheduled row; creative = approved creative with no advert yet (by-image search only)',
+  })
+  @Expose()
+  source!: 'advert' | 'creative';
 
   @ApiPropertyOptional({
     enum: [...ADVERT_GOVT_ACTIONS],

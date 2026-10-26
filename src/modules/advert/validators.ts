@@ -49,6 +49,20 @@ export function isAdvertStatus(value: string): value is AdvertStatusType {
 }
 
 /**
+ * Query-string status filters accept a single value or a comma-separated /
+ * repeated list (`status=LIVE,PAUSED` or `status=LIVE&status=PAUSED`).
+ * Values are trimmed and upper-cased; an empty value means "no filter".
+ */
+export function normalizeStatusFilter(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const values = Array.isArray(value) ? value : String(value).split(',');
+  const normalized = values
+    .map((entry) => String(entry).trim().toUpperCase())
+    .filter((entry) => entry.length > 0);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+/**
  * Upstream (agency portal) status aliases. The upstream enum uses
  * COMPLETED/CANCELLED where the government portal uses EXPIRED:
  * a finished flight maps to EXPIRED (neutral end-of-window), never to

@@ -29,6 +29,12 @@ export class CreativeExportQueryDto {
   @MaxLength(100)
   industry?: string;
 
+  @ApiPropertyOptional({ description: 'Case-insensitive match on creative name' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
+
   @ApiPropertyOptional({ description: 'Versions uploaded on/after this date (ISO, inclusive day)' })
   @IsOptional()
   @IsDateString()
