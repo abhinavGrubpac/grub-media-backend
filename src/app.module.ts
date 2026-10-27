@@ -32,6 +32,7 @@ import { LogsModule } from './modules/logs/logs.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { EmployeeActivityLogInterceptor } from './common/interceptors/employee-activity-log.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { isValidRequestId, RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { REQUEST_ID_HEADER } from './common/constants/request.constants';
@@ -120,6 +121,7 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_INTERCEPTOR, useClass: EmployeeActivityLogInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
