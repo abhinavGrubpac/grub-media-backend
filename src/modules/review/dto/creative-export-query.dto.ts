@@ -15,6 +15,12 @@ export class CreativeExportQueryDto {
   @MaxLength(200)
   brand_id?: string;
 
+  @ApiPropertyOptional({ description: 'Free-text search across creative names' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
+
   @ApiPropertyOptional({ description: 'Brand industry (case-insensitive exact match)' })
   @IsOptional()
   @IsString()

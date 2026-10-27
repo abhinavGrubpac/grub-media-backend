@@ -59,11 +59,7 @@ export class ExportService {
   constructor(private readonly prisma: PrismaService) {}
 
   async exportCreatives(filters: CreativeExportFilters): Promise<CreativeExportRow[]> {
-    const status = normalizeCreativeStatusFilter(filters.status);
-    const currentVersionIds = status
-      ? await currentVersionIdsForStatus(this.prisma, status)
-      : undefined;
-    const where = buildCreativeWhere(filters, status ? { currentVersionIds } : {});
+    const where = buildCreativeWhere(filters);
     const creatives = await this.prisma.client.creative.findMany({
       where,
       orderBy: { createdAt: 'desc' },

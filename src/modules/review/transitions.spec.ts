@@ -15,20 +15,21 @@ import {
 } from './transitions';
 
 describe('validateTakeAction', () => {
-  it('requires comments for REJECT and REQUEST_CHANGES', () => {
-    expect(validateTakeAction({ action: 'REJECT' })).toContain('comments are mandatory');
-    expect(validateTakeAction({ action: 'REQUEST_CHANGES', comments: '   ' })).toContain(
-      'comments are mandatory',
-    );
+  it('requires a reason for HOLD, REJECT and REQUEST_CHANGES', () => {
+    expect(validateTakeAction({ action: 'REJECT' })).toContain('reason is mandatory');
+    expect(validateTakeAction({ action: 'HOLD', reason: '   ' })).toContain('reason is mandatory');
+    expect(validateTakeAction({ action: 'REQUEST_CHANGES' })).toContain('reason is mandatory');
   });
 
-  it('allows APPROVE and HOLD without comments', () => {
+  it('allows APPROVE and RESUME without comments or a reason', () => {
     expect(validateTakeAction({ action: 'APPROVE' })).toBeNull();
-    expect(validateTakeAction({ action: 'HOLD' })).toBeNull();
+    expect(validateTakeAction({ action: 'RESUME' })).toBeNull();
   });
 
-  it('accepts decided actions with comments', () => {
-    expect(validateTakeAction({ action: 'REJECT', comments: 'Non-compliant claim' })).toBeNull();
+  it('accepts decided actions with a reason and optional comments', () => {
+    expect(
+      validateTakeAction({ action: 'REJECT', reason: 'NON_COMPLIANT', comments: 'Claim' }),
+    ).toBeNull();
   });
 
   it('rejects unknown actions', () => {

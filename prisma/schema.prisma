@@ -307,6 +307,7 @@ model CreativeVersion {
   mediaUrl          String              @map("media_url")
   mediaType         String              @map("media_type")
   mediaName         String?             @map("media_name")
+  fileSizeBytes     Int?                @map("file_size_bytes")
   status            ReviewStatus        @default(PENDING)
   createdBy         String              @map("created_by")
   upstreamVersionId String?             @unique @map("upstream_version_id")
@@ -330,6 +331,7 @@ model ReviewAction {
   actorId   String          @map("actor_id")
   action    ActionType
   comments  String?
+  reason    String?
   createdAt DateTime        @default(now()) @map("created_at")
 
   @@index([versionId])

@@ -105,6 +105,10 @@ export class ReviewActionResponseDto {
   @Expose()
   comments!: string | null;
 
+  @ApiPropertyOptional({ description: 'Structured decision reason', nullable: true })
+  @Expose()
+  reason!: string | null;
+
   @ApiProperty()
   @Expose()
   actor_id!: string;
@@ -138,6 +142,10 @@ export class CreativeVersionResponseDto {
   @ApiPropertyOptional({ description: 'Display name of the media file', nullable: true })
   @Expose()
   media_name?: string | null;
+
+  @ApiPropertyOptional({ description: 'Uploaded file size in bytes', nullable: true })
+  @Expose()
+  file_size_bytes!: number | null;
 
   @ApiProperty({ enum: ReviewStatus })
   @Expose()

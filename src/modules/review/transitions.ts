@@ -37,19 +37,25 @@ export function actionTypeFor(action: ReviewActionType): ActionType {
 export function validateTakeAction(input: {
   action: string;
   comments?: string | null;
+  reason?: string | null;
 }): string | null {
   if (!isReviewAction(input.action)) {
     return `action must be one of: ${REVIEW_ACTIONS.join(', ')}`;
   }
-  const needsComments = input.action === 'REJECT' || input.action === 'REQUEST_CHANGES';
-  const comments = input.comments?.trim();
-  if (needsComments && (!comments || comments.length === 0)) {
-    return `comments are mandatory for ${input.action}`;
+  const needsReason =
+    input.action === 'HOLD' || input.action === 'REJECT' || input.action === 'REQUEST_CHANGES';
+  const reason = input.reason?.trim();
+  if (needsReason && (!reason || reason.length === 0)) {
+    return `reason is mandatory for ${input.action}`;
   }
   return null;
 }
 
-export function assertValidTakeAction(input: { action: string; comments?: string | null }): void {
+export function assertValidTakeAction(input: {
+  action: string;
+  comments?: string | null;
+  reason?: string | null;
+}): void {
   const message = validateTakeAction(input);
   if (message) throw new BadRequestException(message);
 }

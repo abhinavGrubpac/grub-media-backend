@@ -810,6 +810,7 @@ export class AdvertService {
     status: string,
     actorId: string,
     expectedStatus?: string,
+    reason?: string,
   ): Promise<AdvertResponseDto> {
     if (!isAdvertStatus(status)) {
       throw new BadRequestException(
@@ -871,7 +872,7 @@ export class AdvertService {
         action: `advert.${status.toLowerCase()}`,
         entityType: 'Advert',
         entityId: id,
-        metadata: { from_status: current.status, status },
+        metadata: { from_status: current.status, status, reason: reason?.trim() || null },
       });
       await this.outbox.emitInTx(tx, {
         eventType: STATUS_EVENT[status],
@@ -879,7 +880,13 @@ export class AdvertService {
         entityId: id,
         actorId,
         key: id,
-        payload: { advert_id: id, from_status: current.status, status, actor: actorId },
+        payload: {
+          advert_id: id,
+          from_status: current.status,
+          status,
+          actor: actorId,
+          reason: reason?.trim() || null,
+        },
       });
     });
 

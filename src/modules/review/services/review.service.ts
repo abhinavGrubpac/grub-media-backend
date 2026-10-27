@@ -39,6 +39,7 @@ import {
 export interface TakeActionInput {
   action: string;
   comments?: string;
+  reason?: string;
   expectedVersion?: number;
 }
 
@@ -338,6 +339,7 @@ export class CreativeService {
           mediaUrl: dto.initial_version.media_url,
           mediaType: dto.initial_version.media_type,
           mediaName: dto.initial_version.media_name ?? null,
+          fileSizeBytes: dto.initial_version.file_size_bytes ?? null,
           status: initialStatus,
           createdBy: actorId,
         },
@@ -492,6 +494,7 @@ export class CreativeService {
           mediaUrl: dto.media_url,
           mediaType: dto.media_type,
           mediaName: dto.media_name ?? null,
+          fileSizeBytes: dto.file_size_bytes ?? null,
           status,
           createdBy: actorId,
           upstreamVersionId: dto.upstream_version_id ?? null,
@@ -680,12 +683,17 @@ export class CreativeService {
     // foreign hosts and malformed keys fail here instead of downstream.
     const fileUrl = this.storage.resolveCreativeFileUrl(dto.s3_key);
     this.storage.assertFileUrlAllowed(fileUrl);
-    await this.assertUploadCompleted(fileUrl);
+    const fileSizeBytes = await this.assertUploadCompleted(fileUrl);
     const mediaName = this.deriveMediaName(dto.s3_key);
     if (dto.creative_id) {
       const { version } = await this.uploadVersion(
         dto.creative_id,
-        { media_url: fileUrl, media_name: mediaName ?? undefined, media_type: dto.media_type },
+        {
+          media_url: fileUrl,
+          media_name: mediaName ?? undefined,
+          media_type: dto.media_type,
+          file_size_bytes: fileSizeBytes ?? undefined,
+        },
         actorId,
       );
       return version;
@@ -701,6 +709,7 @@ export class CreativeService {
           media_url: fileUrl,
           media_name: mediaName ?? undefined,
           media_type: dto.media_type,
+          file_size_bytes: fileSizeBytes ?? undefined,
         },
       },
       actorId,
@@ -713,10 +722,10 @@ export class CreativeService {
    * (zero-byte object) must not become a version whose media 404s. Mock
    * storage and unreachable S3 stay fail-open, matching the reference flow.
    */
-  private async assertUploadCompleted(fileUrl: string): Promise<void> {
-    if (!this.storage.isConfigured) return;
+  private async assertUploadCompleted(fileUrl: string): Promise<number | null> {
+    if (!this.storage.isConfigured) return null;
     const key = this.storage.extractKeyFromUrl(fileUrl);
-    if (!key) return;
+    if (!key) return null;
     let size: number | null;
     try {
       size = await this.storage.getObjectSize(key);
@@ -726,13 +735,14 @@ export class CreativeService {
           `No file uploaded yet for "${key}" — PUT the file bytes to upload_url first, then finalize`,
         );
       }
-      return; // storage unreachable: fail-open
+      return null; // storage unreachable: fail-open
     }
     if (size === 0) {
       throw new BadRequestException(
         `The uploaded file "${key}" is empty — PUT the file bytes to upload_url first, then finalize`,
       );
     }
+    return size ?? null;
   }
 
   /**
@@ -794,6 +804,7 @@ export class CreativeService {
           actorId,
           action: actionTypeFor(action),
           comments: input.comments ?? null,
+          reason: input.reason?.trim() || null,
         },
       });
       await this.activity.recordInTx(tx, {
@@ -805,6 +816,7 @@ export class CreativeService {
           from_status: version.status,
           new_status: newStatus,
           comments: input.comments ?? null,
+          reason: input.reason?.trim() || null,
         },
       });
       await this.outbox.emitInTx(tx, {
@@ -820,6 +832,7 @@ export class CreativeService {
           new_status: newStatus,
           from_status: version.status,
           comments: input.comments ?? null,
+          reason: input.reason?.trim() || null,
         },
       });
       if (newStatus === ReviewStatus.REJECTED || newStatus === ReviewStatus.NEEDS_CHANGES) {
@@ -1255,6 +1268,7 @@ export class CreativeService {
         media_url: version.mediaUrl,
         media_type: version.mediaType,
         media_name: version.mediaName ?? null,
+        file_size_bytes: version.fileSizeBytes ?? null,
         status: version.status,
         created_by: version.createdBy,
         created_by_name: actorNames.get(version.createdBy) ?? null,
@@ -1269,6 +1283,7 @@ export class CreativeService {
                 id: latestAction.id,
                 action: latestAction.action,
                 comments: latestAction.comments,
+                reason: latestAction.reason ?? null,
                 actor_id: latestAction.actorId,
                 actor_name: actorNames.get(latestAction.actorId) ?? null,
                 created_at: latestAction.createdAt,
@@ -1284,6 +1299,7 @@ export class CreativeService {
                   id: action.id,
                   action: action.action,
                   comments: action.comments,
+                  reason: action.reason ?? null,
                   actor_id: action.actorId,
                   actor_name: actorNames.get(action.actorId) ?? null,
                   created_at: action.createdAt,
