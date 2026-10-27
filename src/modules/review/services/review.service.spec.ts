@@ -598,7 +598,14 @@ describe('CreativeService.takeAction', () => {
         },
       ],
     });
-    user.findMany.mockResolvedValue([{ id: 'reviewer1', firstName: 'Rita', lastName: 'Reviewer' }]);
+    user.findMany.mockResolvedValue([
+      {
+        id: 'reviewer1',
+        firstName: 'Rita',
+        lastName: 'Reviewer',
+        avatarUrl: 'https://cdn.example.com/rita.png',
+      },
+    ]);
 
     const result = await service.takeAction(
       'v1',
@@ -610,9 +617,17 @@ describe('CreativeService.takeAction', () => {
       where: { id: 'v1' },
       include: { actions: { orderBy: { createdAt: 'asc' } } },
     });
-    expect(result.latest_action).toMatchObject({ action: 'APPROVE', actor_name: 'Rita Reviewer' });
+    expect(result.latest_action).toMatchObject({
+      action: 'APPROVE',
+      actor_name: 'Rita Reviewer',
+      logo: 'https://cdn.example.com/rita.png',
+    });
     expect(result.actions).toHaveLength(1);
-    expect(result.actions?.[0]).toMatchObject({ action: 'APPROVE', comments: 'Compliant' });
+    expect(result.actions?.[0]).toMatchObject({
+      action: 'APPROVE',
+      comments: 'Compliant',
+      logo: 'https://cdn.example.com/rita.png',
+    });
   });
 
   it('writes the audit-trail row for every decision', async () => {

@@ -117,6 +117,10 @@ export class ReviewActionResponseDto {
   @Expose()
   actor_name!: string | null;
 
+  @ApiPropertyOptional({ description: 'Actor profile logo/avatar URL', nullable: true })
+  @Expose()
+  logo!: string | null;
+
   @ApiProperty()
   @Expose()
   created_at!: Date;

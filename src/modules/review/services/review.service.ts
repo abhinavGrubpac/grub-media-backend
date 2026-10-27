@@ -43,6 +43,12 @@ export interface TakeActionInput {
   expectedVersion?: number;
 }
 
+/** Resolved display data for a user referenced by review history. */
+interface ActorProfile {
+  name: string;
+  logo: string | null;
+}
+
 export interface CreativeListFilters {
   status?: string;
   brand_id?: string;
@@ -252,7 +258,7 @@ export class CreativeService {
     const agencies = await this.fetchAgencies(
       creatives.map((creative) => creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId),
     );
-    const actorNames = await this.resolveActorNames([
+    const actorProfiles = await this.resolveActorProfiles([
       ...this.collectActorIds([
         ...creatives.flatMap((creative) => creative.versions),
         ...threadVersions,
@@ -260,16 +266,18 @@ export class CreativeService {
       ...this.collectRowIds(creatives),
     ]);
     const data = creatives.map((creative) => {
-      const response = this.toCreativeResponse(creative, actorNames, agencies);
+      const response = this.toCreativeResponse(creative, actorProfiles, agencies);
       const latestAction = creative.versions[0]?.actions[0];
       return {
         ...response,
-        last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
+        last_action_by: latestAction
+          ? (actorProfiles.get(latestAction.actorId)?.name ?? null)
+          : null,
         last_action_at: latestAction ? latestAction.createdAt : null,
         ...(query.include === 'history'
           ? {
               versions: (threadsByCreative.get(creative.id) ?? []).map((version) =>
-                this.toVersionResponse(version, actorNames),
+                this.toVersionResponse(version, actorProfiles),
               ),
             }
           : {}),
@@ -579,7 +587,7 @@ export class CreativeService {
       // View tracking must never break the read.
     }
 
-    const actorNames = await this.resolveActorNames([
+    const actorProfiles = await this.resolveActorProfiles([
       ...this.collectActorIds(creative.versions),
       ...this.collectRowIds([creative]),
       actorId,
@@ -605,7 +613,7 @@ export class CreativeService {
         ),
       ),
     ).sort((a, b) => a.localeCompare(b));
-    const base = this.toCreativeResponse(creative, actorNames);
+    const base = this.toCreativeResponse(creative, actorProfiles);
     return plainToInstance(
       CreativeResponseDto,
       {
@@ -618,7 +626,9 @@ export class CreativeService {
               address: agency.address ?? null,
             }
           : null,
-        versions: creative.versions.map((version) => this.toVersionResponse(version, actorNames)),
+        versions: creative.versions.map((version) =>
+          this.toVersionResponse(version, actorProfiles),
+        ),
         targeted_regions: targetedRegions,
         schedules: creative.versions.flatMap((version) =>
           (version.adverts ?? []).map((advert) => ({
@@ -867,8 +877,8 @@ export class CreativeService {
         include: { actions: { orderBy: { createdAt: 'asc' } } },
       });
     });
-    const actorNames = await this.resolveActorNames(this.collectActorIds([updated]));
-    return this.toVersionResponse(updated, actorNames);
+    const actorProfiles = await this.resolveActorProfiles(this.collectActorIds([updated]));
+    return this.toVersionResponse(updated, actorProfiles);
   }
 
   /**
@@ -1163,16 +1173,16 @@ export class CreativeService {
     return ids;
   }
 
-  private async resolveActorNames(actorIds: string[]): Promise<Map<string, string>> {
+  private async resolveActorProfiles(actorIds: string[]): Promise<Map<string, ActorProfile>> {
     if (actorIds.length === 0) return new Map();
     const users = await this.prisma.client.user.findMany({
       where: { id: { in: actorIds } },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, avatarUrl: true },
     });
     return new Map(
       users.map((user) => {
         const name = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
-        return [user.id, name || 'Unknown user'];
+        return [user.id, { name: name || 'Unknown user', logo: user.avatarUrl ?? null }];
       }),
     );
   }
@@ -1198,7 +1208,7 @@ export class CreativeService {
 
   private toCreativeResponse(
     creative: CreativeWithBrandAndVersions,
-    actorNames: Map<string, string>,
+    actorProfiles: Map<string, ActorProfile>,
     agencies: Map<string, AgencyRef> = new Map(),
   ): CreativeResponseDto {
     const latestVersion = creative.versions[0];
@@ -1217,7 +1227,7 @@ export class CreativeService {
           is_flagged: creative.brand.isFlagged,
           industry_category: creative.brand.industryCategory ?? null,
           flagged_by:
-            (creative.brand.flaggedBy && actorNames.get(creative.brand.flaggedBy)) || null,
+            (creative.brand.flaggedBy && actorProfiles.get(creative.brand.flaggedBy)?.name) || null,
           flagged_on: creative.brand.flaggedOn ?? null,
         },
         creative_name: creative.creativeName,
@@ -1226,10 +1236,13 @@ export class CreativeService {
         campaign_ref: creative.campaignRef,
         current_version_id: creative.currentVersionId,
         created_at: creative.createdAt,
-        latest_version: latestVersion ? this.toVersionResponse(latestVersion, actorNames) : null,
-        last_action_by: latestAction ? (actorNames.get(latestAction.actorId) ?? null) : null,
+        latest_version: latestVersion ? this.toVersionResponse(latestVersion, actorProfiles) : null,
+        last_action_by: latestAction
+          ? (actorProfiles.get(latestAction.actorId)?.name ?? null)
+          : null,
         last_action_at: latestAction ? latestAction.createdAt : null,
-        last_viewed_by: (creative.lastViewedBy && actorNames.get(creative.lastViewedBy)) || null,
+        last_viewed_by:
+          (creative.lastViewedBy && actorProfiles.get(creative.lastViewedBy)?.name) || null,
         last_viewed_at: creative.lastViewedAt ?? null,
         viewed_minutes_ago: creative.lastViewedAt
           ? Math.max(0, Math.round((Date.now() - creative.lastViewedAt.getTime()) / 60000))
@@ -1253,7 +1266,7 @@ export class CreativeService {
     version:
       | Prisma.CreativeVersionGetPayload<{ include: { actions: true } }>
       | Prisma.CreativeVersionGetPayload<object>,
-    actorNames: Map<string, string>,
+    actorProfiles: Map<string, ActorProfile>,
   ): CreativeVersionResponseDto {
     const withActions = version as Prisma.CreativeVersionGetPayload<{ include: { actions: true } }>;
     const actions = withActions.actions ?? [];
@@ -1271,7 +1284,7 @@ export class CreativeService {
         file_size_bytes: version.fileSizeBytes ?? null,
         status: version.status,
         created_by: version.createdBy,
-        created_by_name: actorNames.get(version.createdBy) ?? null,
+        created_by_name: actorProfiles.get(version.createdBy)?.name ?? null,
         created_at: version.createdAt,
         admin_approved_by: version.adminApprovedBy ?? null,
         admin_approved_at: version.adminApprovedAt ?? null,
@@ -1285,7 +1298,8 @@ export class CreativeService {
                 comments: latestAction.comments,
                 reason: latestAction.reason ?? null,
                 actor_id: latestAction.actorId,
-                actor_name: actorNames.get(latestAction.actorId) ?? null,
+                actor_name: actorProfiles.get(latestAction.actorId)?.name ?? null,
+                logo: actorProfiles.get(latestAction.actorId)?.logo ?? null,
                 created_at: latestAction.createdAt,
               },
               { excludeExtraneousValues: true },
@@ -1301,7 +1315,8 @@ export class CreativeService {
                   comments: action.comments,
                   reason: action.reason ?? null,
                   actor_id: action.actorId,
-                  actor_name: actorNames.get(action.actorId) ?? null,
+                  actor_name: actorProfiles.get(action.actorId)?.name ?? null,
+                  logo: actorProfiles.get(action.actorId)?.logo ?? null,
                   created_at: action.createdAt,
                 },
                 { excludeExtraneousValues: true },
