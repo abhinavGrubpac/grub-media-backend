@@ -1089,6 +1089,137 @@ describe('filterOptions', () => {
   });
 });
 
+describe('CreativeService.bulkAction (multi-select bulk review)', () => {
+  const approvedRow = { ...versionRow, id: 'v2', status: 'APPROVED' };
+
+  it('validates the shared action once before writing anything', async () => {
+    const { service, creativeVersion } = makeDeps();
+
+    await expect(
+      service.bulkAction({ action: 'REJECT', version_ids: ['v1', 'v2'] }, 'reviewer1'),
+    ).rejects.toThrow(BadRequestException);
+
+    // No version was even probed: the batch fails fast with zero reads/writes.
+    expect(creativeVersion.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('applies the decision per version through the standard single path', async () => {
+    const { service, creativeVersion, reviewAction, outbox, client } = makeDeps();
+    // Both versions are applicable: fresh, PENDING rows.
+    creativeVersion.findUnique.mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve({ ...versionRow, id: args.where.id }),
+    );
+    creativeVersion.update
+      .mockResolvedValueOnce({ ...versionRow, status: 'APPROVED' })
+      .mockResolvedValueOnce({ ...versionRow, id: 'v2', status: 'APPROVED' });
+    client.creativeVersion.findUniqueOrThrow.mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve({ ...versionRow, id: args.where.id, status: 'APPROVED', actions: [] }),
+    );
+
+    const result = await service.bulkAction(
+      {
+        action: 'APPROVE',
+        comments: 'Bulk approved',
+        version_ids: ['v1', 'v2'],
+      },
+      'reviewer1',
+    );
+
+    expect(result.applied).toEqual([
+      { version_id: 'v1', new_status: 'APPROVED' },
+      { version_id: 'v2', new_status: 'APPROVED' },
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(reviewAction.create).toHaveBeenCalledTimes(2);
+    const events = outbox.emitInTx.mock.calls.map(
+      (call) => (call[1] as { eventType: string }).eventType,
+    );
+    // One review.approved event per applied version — same trail as singles.
+    expect(events.filter((event) => event === 'review.approved')).toHaveLength(2);
+  });
+
+  it('skips decided and missing versions with per-id reasons instead of failing', async () => {
+    const { service, creativeVersion, client } = makeDeps();
+    creativeVersion.findUnique.mockImplementation((args: { where: { id: string } }) => {
+      if (args.where.id === 'v1') return Promise.resolve(versionRow);
+      if (args.where.id === 'v2') return Promise.resolve(approvedRow);
+      return Promise.resolve(null);
+    });
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+    client.creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'APPROVED',
+      actions: [],
+    });
+
+    const result = await service.bulkAction(
+      { action: 'APPROVE', version_ids: ['v1', 'v2', 'v3'] },
+      'reviewer1',
+    );
+
+    expect(result.applied).toEqual([{ version_id: 'v1', new_status: 'APPROVED' }]);
+    expect(result.skipped).toEqual(
+      ['v2', 'v3'].map((version_id) => ({ version_id, reason: expect.any(String) })),
+    );
+    expect(result.skipped.find((row) => row.version_id === 'v2')?.reason).toMatch(
+      /already APPROVED/,
+    );
+    expect(result.skipped.find((row) => row.version_id === 'v3')?.reason).toMatch(/not found/);
+  });
+
+  it('does not cascade advert revocations for skipped versions', async () => {
+    const { service, creativeVersion, client, advert } = makeDeps();
+    // Only v1 is applicable; v2 is already decided.
+    creativeVersion.findUnique.mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve(args.where.id === 'v1' ? versionRow : approvedRow),
+    );
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'APPROVED' });
+    client.creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'APPROVED',
+      actions: [],
+    });
+
+    await service.bulkAction({ action: 'APPROVE', version_ids: ['v1', 'v2'] }, 'reviewer1');
+
+    expect(advert.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('cascades advert revocations once per applied REJECT', async () => {
+    const { service, creativeVersion, client, advert, outbox } = makeDeps();
+    creativeVersion.findUnique.mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve({ ...versionRow, id: args.where.id }),
+    );
+    creativeVersion.update.mockResolvedValue({ ...versionRow, status: 'REJECTED' });
+    advert.findMany.mockResolvedValue([{ id: 'a1' }]);
+    client.creativeVersion.findUniqueOrThrow.mockResolvedValue({
+      ...versionRow,
+      status: 'REJECTED',
+      actions: [],
+    });
+
+    const result = await service.bulkAction(
+      {
+        action: 'REJECT',
+        reason: 'NON_COMPLIANT',
+        version_ids: ['v1', 'v2'],
+      },
+      'reviewer1',
+    );
+
+    expect(result.applied).toHaveLength(2);
+    expect(advert.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['a1'] } },
+      data: { status: 'REVOKED' },
+    });
+    expect(advert.updateMany).toHaveBeenCalledTimes(2);
+    const events = outbox.emitInTx.mock.calls.map(
+      (call) => (call[1] as { eventType: string }).eventType,
+    );
+    expect(events.filter((event) => event === 'review.rejected')).toHaveLength(2);
+  });
+});
+
 describe('ReviewController route order', () => {
   it('declares static GET routes before parameterized GET routes', () => {
     const getMetadata = (

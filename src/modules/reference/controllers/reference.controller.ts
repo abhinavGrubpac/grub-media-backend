@@ -17,6 +17,8 @@ import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { BulkRestoreDto, RestoreAllQueryDto } from '../dto/bulk-restore.dto';
+import { BulkSelectionDto } from '../dto/bulk-selection.dto';
+
 import { ReferenceFinalizeDto } from '../dto/reference-finalize.dto';
 import { ReferenceListQueryDto } from '../dto/reference-list-query.dto';
 import { ReferenceDocResponseDto } from '../dto/reference-response.dto';
@@ -115,5 +117,35 @@ export class ReferenceController {
   @ResponseMessage('Reference document restored')
   restore(@Param('id') id: string): Promise<ReferenceDocResponseDto> {
     return this.referenceService.restore(id);
+  }
+
+  /**
+   * Multi-select soft archive (documents tab): one call instead of
+   * N × DELETE /:id. Already-archived/missing ids are excluded from the
+   * write and reflected in the counts.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('bulk-archive')
+  @ApiOperation({ summary: 'Archive a selection of documents at once' })
+  @ResponseMessage('Reference documents archived')
+  bulkArchive(@Body() dto: BulkSelectionDto): Promise<{ archived: number }> {
+    return this.referenceService.bulkArchive(dto.ids);
+  }
+
+  /**
+   * Multi-select permanent delete (archived tab): one call instead of
+   * N × DELETE /:id/permanent. Same guards as the single delete — docs that
+   * justify review decisions or are not archived are skipped with a reason.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('bulk-hard-delete')
+  @ApiOperation({ summary: 'Permanently delete a selection of archived documents at once' })
+  @ResponseMessage('Reference documents permanently deleted')
+  bulkHardDelete(
+    @Body() dto: BulkSelectionDto,
+  ): Promise<{ deleted: number; skipped: { id: string; reason: string }[] }> {
+    return this.referenceService.bulkHardDelete(dto.ids);
   }
 }

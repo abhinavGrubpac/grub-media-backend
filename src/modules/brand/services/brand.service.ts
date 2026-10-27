@@ -345,6 +345,75 @@ export class BrandService {
   }
 
   /**
+   * Multi-select bulk flag/unflag (Manage Brands): replaces N × setFlag calls
+   * with one request. Same compliance rules as setFlag — stopped brands are
+   * frozen and already-in-state rows are no-ops — but per-row validity issues
+   * are skipped with a reason instead of failing the whole batch. All valid
+   * rows are written and their brand.* events emitted in ONE transaction.
+   */
+  async bulkFlag(
+    ids: string[],
+    isFlagged: boolean,
+    actorId?: string,
+  ): Promise<{
+    applied: number;
+    skipped: { id: string; reason: string }[];
+  }> {
+    // Deduplicate so a repeated id in the selection counts once.
+    const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (unique.length === 0) {
+      throw new BadRequestException('ids must contain at least one non-empty brand id');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const brands = await tx.brand.findMany({ where: { id: { in: unique } } });
+      const byId = new Map(brands.map((brand) => [brand.id, brand]));
+
+      const skipped: { id: string; reason: string }[] = [];
+      const applicable: Brand[] = [];
+      for (const id of unique) {
+        const brand = byId.get(id);
+        if (!brand) {
+          skipped.push({ id, reason: 'not found' });
+        } else if (!brand.isActive) {
+          skipped.push({ id, reason: 'brand is stopped (deactivated); reactivate first' });
+        } else if (brand.isFlagged === isFlagged) {
+          skipped.push({ id, reason: isFlagged ? 'already flagged' : 'not flagged' });
+        } else {
+          applicable.push(brand);
+        }
+      }
+
+      for (const brand of applicable) {
+        await tx.brand.update({
+          where: { id: brand.id },
+          data: {
+            isFlagged,
+            flaggedBy: isFlagged ? (actorId ?? brand.flaggedBy) : null,
+            flaggedOn: isFlagged ? new Date() : null,
+          },
+        });
+        await this.outbox.emitInTx(tx, {
+          eventType: isFlagged
+            ? EventTypes.brandNonCompliantFlagged
+            : EventTypes.brandNonCompliantUnflagged,
+          entityType: 'Brand',
+          entityId: brand.id,
+          actorId,
+          payload: {
+            brand_id: brand.id,
+            brand_name: brand.brandName,
+            is_flagged: isFlagged,
+            bulk: true,
+          },
+        });
+      }
+
+      return { applied: applicable.length, skipped };
+    });
+  }
+
+  /**
    * Global kill-switch. Deactivation cascades every non-revoked advert of the
    * brand to REVOKED (advert.auto_revoked per advert, reason brand_kill_switch)
    * and upstream must honour it. Reactivation does not resurrect adverts.

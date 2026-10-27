@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /** True when the error is a definitive S3 "object does not exist" response. */
@@ -151,5 +156,25 @@ export class StorageService {
       }),
     );
     return typeof out.ContentLength === 'number' ? out.ContentLength : null;
+  }
+
+  /**
+   * Presigned S3 GET URL for server-side reads (e.g. embedding private
+   * creative images into an export PDF). Falls back to a harmless mock URL
+   * when credentials are absent so callers can still detect the mock mode.
+   */
+  async presignedDownloadUrl(key: string, filename?: string): Promise<string> {
+    if (!this.isConfigured) {
+      return `https://mock-storage.local/downloads/${key}?mock=1`;
+    }
+    return getSignedUrl(
+      this.client(),
+      new GetObjectCommand({
+        Bucket: this.config.get<string>('storage.bucket'),
+        Key: key,
+        ...(filename ? { ResponseContentDisposition: `attachment; filename="${filename}"` } : {}),
+      }),
+      { expiresIn: 900 },
+    );
   }
 }

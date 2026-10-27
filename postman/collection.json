@@ -777,6 +777,41 @@
           "response": []
         },
         {
+          "name": "Bulk Review Action (multi-select)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/creatives/bulk-action",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "creatives",
+                "bulk-action"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version_ids\": [],\n  \"action\": \"APPROVE\",\n  \"comments\": \"Compliant\",\n  \"reason\": \"Meets brand guidelines\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Multi-select review decision: applies the same action to version_ids* in ONE call instead of N × POST /:versionId/action. Shared input validation runs once (missing REJECT/HOLD/REQUEST_CHANGES reason 400s before anything is written); versions that cannot accept the action (already decided, ON_HOLD without RESUME, missing) are skipped with a per-id reason. ✅ 200 { applied: [{version_id, new_status}], skipped: [{version_id, reason}] }"
+          },
+          "response": []
+        },
+        {
           "name": "Get Brand Options (for creative)",
           "request": {
             "method": "GET",
@@ -970,6 +1005,41 @@
               }
             },
             "description": "status* (SCHEDULED|LIVE|PAUSED|EXPIRED|REVOKED); expected_status optimistic lock (409 on stale)"
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Status (multi-select)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/adverts/bulk-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "adverts",
+                "bulk-status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{advertId}}\"\n  ],\n  \"status\": \"PAUSED\",\n  \"reason\": \"Non-compliant placement\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Multi-select compliance status change: applies one status to every advert in `ids` in ONE call instead of N × PATCH /:id/status. Same per-advert optimistic-lock / flight-window rules; adverts that cannot accept the status are skipped with a per-id reason. Optional expected_status applies to every id — stale ones are skipped. ✅ 200 { applied: [{advert_id, status}], skipped: [{advert_id, reason}] }"
           },
           "response": []
         },
@@ -1375,6 +1445,76 @@
           }
         },
         {
+          "name": "Archive Selection (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/bulk-archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "bulk-archive"
+              ]
+            },
+            "description": "ids* — soft-archive a selection at once (documents tab multi-select): one call instead of N × DELETE /references/:id. Already-archived and missing ids are excluded from the write and reflected in the count. ✅ 200 { archived: N }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Selection Permanently (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/bulk-hard-delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "bulk-hard-delete"
+              ]
+            },
+            "description": "ids* — permanent delete of archived docs in ONE call instead of N × DELETE /references/:id/permanent. Same guards per doc (archive-first, cannot delete a doc that justifies review decisions); blocked docs are skipped with a per-id reason. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Unarchive All",
           "request": {
             "method": "POST",
@@ -1693,6 +1833,41 @@
               }
             }
           }
+        },
+        {
+          "name": "Flag Selection (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/brands/bulk-flag",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "brands",
+                "bulk-flag"
+              ]
+            },
+            "description": "Multi-select flag/unflag on Manage Brands: ONE call replaces N × POST /brands/:id/flag. ids* + is_flagged*. Same compliance rules as the single flag (stopped brands are frozen); brands already in the target state are no-ops. ✅ 200 { applied: N, skipped: [{id, reason}] }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{brandId}}\"\n  ],\n  \"is_flagged\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         },
         {
           "name": "Stop Activity (kill)",

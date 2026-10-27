@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -855,6 +856,52 @@ export class CreativeService {
     });
     const actorNames = await this.resolveActorNames(this.collectActorIds([updated]));
     return this.toVersionResponse(updated, actorNames);
+  }
+
+  /**
+   * Multi-select bulk review decision: replaces N × POST /:id/action with one
+   * request. Shared input validation happens ONCE up front (so a missing
+   * REJECT reason 400s before anything is written), then each version is
+   * applied through the standard single-version path — identical one-way
+   * gate, action trail, activity log, outbox events and advert-revocation
+   * cascade as an individual decision. Versions that cannot accept the
+   * action (already decided, ON_HOLD without RESUME, missing) are skipped
+   * with a per-id reason instead of failing the whole batch; each applied
+   * version commits in its own transaction, matching per-user row actions.
+   */
+  async bulkAction(
+    input: TakeActionInput & { version_ids: string[] },
+    actorId: string,
+  ): Promise<{
+    applied: { version_id: string; new_status: ReviewStatus }[];
+    skipped: { version_id: string; reason: string }[];
+  }> {
+    assertValidTakeAction(input);
+    const unique = [...new Set(input.version_ids.map((id) => id.trim()).filter(Boolean))];
+    if (unique.length === 0) {
+      throw new BadRequestException('version_ids must contain at least one non-empty id');
+    }
+
+    const applied: { version_id: string; new_status: ReviewStatus }[] = [];
+    const skipped: { version_id: string; reason: string }[] = [];
+    for (const versionId of unique) {
+      try {
+        const version = await this.takeAction(versionId, input, actorId);
+        applied.push({
+          version_id: version.id,
+          new_status: version.status as ReviewStatus,
+        });
+      } catch (error) {
+        skipped.push({
+          version_id: versionId,
+          reason:
+            error instanceof HttpException
+              ? error.message
+              : 'unexpected error applying the decision',
+        });
+      }
+    }
+    return { applied, skipped };
   }
 
   /**

@@ -279,6 +279,77 @@ describe('BrandService', () => {
     expect(brand.update).not.toHaveBeenCalled();
   });
 
+  describe('bulkFlag', () => {
+    it('flags a selection in one transaction and emits one event per applied brand', async () => {
+      const { service, brand, outbox } = makeDeps();
+      brand.findMany.mockResolvedValue([fullBrand, { ...fullBrand, id: 'b2', brandName: 'Beta' }]);
+      brand.update.mockImplementation((args: { where: { id: string } }) =>
+        Promise.resolve({ ...fullBrand, id: args.where.id, isFlagged: true }),
+      );
+
+      const result = await service.bulkFlag(['b1', 'b2'], true, 'manager1');
+
+      expect(result).toEqual({ applied: 2, skipped: [] });
+      expect(brand.update).toHaveBeenCalledTimes(2);
+      expect(brand.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'b1' },
+          data: expect.objectContaining({ isFlagged: true, flaggedBy: 'manager1' }),
+        }),
+      );
+      const events = outbox.emitInTx.mock.calls.map(
+        (call) => (call[1] as { eventType: string }).eventType,
+      );
+      expect(events).toEqual(['brand.non_compliant_flagged', 'brand.non_compliant_flagged']);
+    });
+
+    it('skips unknown, stopped and already-in-state brands with reasons', async () => {
+      const { service, brand } = makeDeps();
+      brand.findMany.mockResolvedValue([
+        { ...fullBrand, id: 'b1', isFlagged: true }, // already flagged
+        { ...fullBrand, id: 'b2', isActive: false }, // kill-switch frozen
+        { ...fullBrand, id: 'b3' }, // applicable
+      ]);
+      brand.update.mockResolvedValue({ ...fullBrand, id: 'b3', isFlagged: true });
+
+      const result = await service.bulkFlag(['b1', 'b2', 'b3', 'missing', 'b1'], true, 'm1');
+
+      // The duplicate 'b1' is deduplicated, so it is skipped exactly once.
+      expect(result.applied).toBe(1);
+      expect(result.skipped).toEqual(
+        expect.arrayContaining([
+          { id: 'b1', reason: 'already flagged' },
+          { id: 'b2', reason: 'brand is stopped (deactivated); reactivate first' },
+          { id: 'missing', reason: 'not found' },
+        ]),
+      );
+      expect(result.skipped.filter((row) => row.id === 'b1')).toHaveLength(1);
+      expect(brand.update).toHaveBeenCalledTimes(1);
+      expect(brand.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'b3' } }));
+    });
+
+    it('unflag clears flaggedBy and flaggedOn and emits unflagged events', async () => {
+      const { service, brand, outbox } = makeDeps();
+      brand.findMany.mockResolvedValue([
+        { ...fullBrand, id: 'b1', isFlagged: true, flaggedBy: 'm0', flaggedOn: new Date() },
+      ]);
+      brand.update.mockResolvedValue({ ...fullBrand, id: 'b1', isFlagged: false });
+
+      const result = await service.bulkFlag(['b1'], false, 'm1');
+
+      expect(result.applied).toBe(1);
+      expect(brand.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ isFlagged: false, flaggedBy: null, flaggedOn: null }),
+        }),
+      );
+      const events = outbox.emitInTx.mock.calls.map(
+        (call) => (call[1] as { eventType: string }).eventType,
+      );
+      expect(events).toEqual(['brand.non_compliant_unflagged']);
+    });
+  });
+
   it('update rejects is_active toggles via PATCH (use kill-switch)', async () => {
     const { service, brand } = makeDeps();
     brand.findUnique.mockResolvedValue(fullBrand);

@@ -335,6 +335,66 @@ describe('ReferenceService.archive / restore', () => {
     expect(result).toEqual({ restored: 5 });
   });
 
+  it('bulk-archive archives a selection at once', async () => {
+    const { service, referenceDoc, outbox } = makeDeps();
+    referenceDoc.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await service.bulkArchive(['a', 'b']);
+
+    expect(referenceDoc.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['a', 'b'] }, isArchived: false },
+        data: expect.objectContaining({ isArchived: true }),
+      }),
+    );
+    expect(result).toEqual({ archived: 2 });
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ eventType: 'reference.bulk_archived' }),
+    );
+  });
+
+  it('rejects empty bulk-archive selections', async () => {
+    const { service } = makeDeps();
+    await expect(service.bulkArchive([])).rejects.toThrow(BadRequestException);
+  });
+
+  it('bulk-hard-delete applies the single-doc guards per id and skips blockers', async () => {
+    const { service, referenceDoc, client, outbox } = makeDeps();
+    // a: archived, no links → deleted. b: still justifying decisions → skipped.
+    referenceDoc.findUnique.mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve(
+        args.where.id === 'a'
+          ? { ...docRow, id: 'a', isArchived: true }
+          : { ...docRow, id: 'b', isArchived: true },
+      ),
+    );
+    client.creativeReference.count.mockImplementation((args: { where: { docId: string } }) =>
+      Promise.resolve(args.where.docId === 'b' ? 1 : 0),
+    );
+    referenceDoc.delete.mockResolvedValue(undefined);
+
+    const result = await service.bulkHardDelete(['a', 'b']);
+
+    expect(result.deleted).toBe(1);
+    expect(result.skipped).toEqual([
+      {
+        id: 'b',
+        reason: expect.stringMatching(/justifies 1 review decision/),
+      },
+    ]);
+    expect(referenceDoc.delete).toHaveBeenCalledTimes(1);
+    const events = outbox.emitInTx.mock.calls.map(
+      (call) => (call[1] as { eventType: string }).eventType,
+    );
+    expect(events).toEqual(['reference.deleted']);
+  });
+
+  it('rejects empty bulk-hard-delete selections', async () => {
+    const { service } = makeDeps();
+    await expect(service.bulkHardDelete([])).rejects.toThrow(BadRequestException);
+  });
+
   it('rejects empty bulk-restore selections', async () => {
     const { service } = makeDeps();
     await expect(service.bulkRestore([])).rejects.toThrow(BadRequestException);

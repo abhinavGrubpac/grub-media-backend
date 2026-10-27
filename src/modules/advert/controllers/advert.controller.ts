@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -12,7 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { SkipResponseWrap } from '../../../common/decorators/skip-response-wrap.decorator';
@@ -26,6 +28,7 @@ import { AdvertListQueryDto } from '../dto/advert-list-query.dto';
 import { AdvertBrandGroupDto, AdvertResponseDto } from '../dto/advert-response.dto';
 import { AdvertSearchQueryDto } from '../dto/advert-search-query.dto';
 import { AdvertStatusDto } from '../dto/advert-status.dto';
+import { AdvertBulkStatusDto } from '../dto/advert-bulk-status.dto';
 import type {
   AdvertImageSearchResult,
   AdvertSearchResult,
@@ -136,6 +139,33 @@ export class AdvertController {
           ...lines,
         ].join('\n'),
       );
+  }
+
+  /**
+   * Multi-select compliance status change: one call instead of N ×
+   * PATCH /:id/status. Same optimistic-lock / flight-window rules per advert;
+   * adverts that cannot accept the status are skipped with a reason.
+   */
+  // Future permission: 'advert:revoke'.
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Patch('bulk-status')
+  @ApiOperation({ summary: 'Apply one status to a selection of adverts in one call' })
+  @ResponseMessage('Bulk advert status applied')
+  bulkStatus(
+    @Body() dto: AdvertBulkStatusDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{
+    applied: { advert_id: string; status: string }[];
+    skipped: { advert_id: string; reason: string }[];
+  }> {
+    return this.advertService.bulkStatus(
+      dto.ids,
+      dto.status,
+      user.id,
+      dto.expected_status,
+      dto.reason,
+    );
   }
 
   /** Government compliance status change (pause/revoke via the govt matrix). */

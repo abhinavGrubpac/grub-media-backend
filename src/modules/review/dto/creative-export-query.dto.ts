@@ -1,14 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsArray,
-  IsDateString,
-  IsIn,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-} from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { CREATIVE_STATUS_FILTERS } from '../transitions';
 
 export class CreativeExportQueryDto {
@@ -62,6 +54,16 @@ export class CreativeExportQueryDto {
           .filter(Boolean),
   )
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
   ids?: string[];
+
+  @ApiPropertyOptional({
+    enum: ['pdf', 'csv'],
+    default: 'pdf',
+    description: 'Export document format. Defaults to PDF; CSV stays available for tooling.',
+  })
+  @IsOptional()
+  @IsIn(['pdf', 'csv'])
+  format?: 'pdf' | 'csv';
 }

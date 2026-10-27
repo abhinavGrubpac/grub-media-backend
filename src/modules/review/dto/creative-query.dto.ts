@@ -1,14 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsArray,
-  IsDateString,
-  IsIn,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-} from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { CREATIVE_STATUS_FILTERS, CREATIVE_SORT_KEYS } from '../transitions';
 
@@ -90,6 +82,7 @@ export class CreativeQueryDto extends PaginationQueryDto {
           .filter(Boolean),
   )
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
   ids?: string[];
 }

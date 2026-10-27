@@ -50,13 +50,20 @@ export async function seedUser(
 ): Promise<{ id: string; email: string }> {
   const prisma = prismaOf(app);
   const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
+  // Role is the Role table: make sure the row exists, link user by FK.
+  const roleName = input.role ?? UserRole.EMPLOYEE;
+  const role = await prisma.client.role.upsert({
+    where: { name: roleName },
+    update: {},
+    create: { name: roleName },
+  });
   const user = await prisma.client.user.create({
     data: {
       email: input.email,
       passwordHash,
       firstName: input.firstName ?? 'Test',
       lastName: input.lastName ?? 'User',
-      role: input.role ?? UserRole.EMPLOYEE,
+      roleId: role.id,
     },
   });
   return { id: user.id, email: user.email };

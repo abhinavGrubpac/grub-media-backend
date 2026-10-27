@@ -21,7 +21,7 @@ const userRow = {
   passwordHash: 'HASH',
   firstName: 'A',
   lastName: 'B',
-  role: 'EMPLOYEE',
+  role: { name: 'EMPLOYEE' },
   status: 'ACTIVE',
   tokenVersion: 0,
   deletedAt: null,
@@ -54,8 +54,9 @@ function prismaMock(overrides: Record<string, jest.Mock> = {}) {
     ...overrides,
   };
   const userBundleMock = { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) };
+  const roleLookup = jest.fn().mockResolvedValue({ id: 'role_employee', name: 'EMPLOYEE' });
   return {
-    client: { user: userMock },
+    client: { user: userMock, role: { findUnique: roleLookup } },
     $transaction: jest
       .fn()
       .mockImplementation((cb: (tx: unknown) => unknown) =>
@@ -92,8 +93,9 @@ function build(
     update: jest.fn().mockResolvedValue(userRow),
   };
   const buildUserBundleMock = { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) };
+  const buildRoleLookup = jest.fn().mockResolvedValue({ id: 'role_employee', name: 'EMPLOYEE' });
   const prisma = {
-    client: { user: buildUserMock },
+    client: { user: buildUserMock, role: { findUnique: buildRoleLookup } },
     $transaction: jest
       .fn()
       .mockImplementation((cb: (tx: unknown) => unknown) =>
@@ -249,7 +251,7 @@ describe('UsersService', () => {
   });
 
   it('update throws Forbidden when ADMIN tries to modify a SUPER_ADMIN', async () => {
-    const superAdminRow = { ...userRow, role: 'SUPER_ADMIN' };
+    const superAdminRow = { ...userRow, role: { name: 'SUPER_ADMIN' } };
     const svc = new UsersService(
       prismaMock({ findFirst: jest.fn().mockResolvedValue(superAdminRow) }),
       mailerMock,

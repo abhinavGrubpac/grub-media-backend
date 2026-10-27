@@ -1,5 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Paginated } from '../../../common/dto/paginated';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
@@ -9,6 +21,7 @@ import type { AuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { BrandFlagDto } from '../dto/brand-flag.dto';
+import { BrandBulkFlagDto } from '../dto/brand-bulk-flag.dto';
 import { BrandKillDto } from '../dto/brand-kill.dto';
 import { BrandOptionDto, BrandOptionsQueryDto } from '../dto/brand-options.dto';
 import { BrandQueryDto } from '../dto/brand-query.dto';
@@ -100,6 +113,22 @@ export class BrandController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateBrandDto): Promise<BrandResponseDto> {
     return this.brandService.update(id, dto);
+  }
+
+  /**
+   * Multi-select bulk flag/unflag: one call instead of N × POST /:id/flag.
+   * Same compliance rules as setFlag; rows already in the target state or
+   * stopped are skipped with a reason in the response, not a batch failure.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('bulk-flag')
+  @ApiOperation({ summary: 'Flag or unflag a selection of brands in one call' })
+  bulkFlag(
+    @Body() dto: BrandBulkFlagDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ applied: number; skipped: { id: string; reason: string }[] }> {
+    return this.brandService.bulkFlag(dto.ids, dto.is_flagged, user.id);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)

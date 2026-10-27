@@ -209,15 +209,23 @@ export class AccessService {
     });
   }
   async assignAdmin(actor: string, employeeId: string, adminId: string) {
+    // Role lives in the Role table; compare the seeded role NAMES.
     const [employee, admin] = await Promise.all([
-      this.prisma.client.user.findUnique({ where: { id: employeeId } }),
-      this.prisma.client.user.findUnique({ where: { id: adminId } }),
+      this.prisma.client.user.findUnique({
+        where: { id: employeeId },
+        include: { role: true },
+      }),
+      this.prisma.client.user.findUnique({
+        where: { id: adminId },
+        include: { role: true },
+      }),
     ]);
     if (
       !employee ||
-      employee.role !== UserRole.EMPLOYEE ||
+      (employee.role?.name as UserRole) !== UserRole.EMPLOYEE ||
       !admin ||
-      (admin.role !== UserRole.ADMIN && admin.role !== UserRole.SUPER_ADMIN)
+      ((admin.role?.name as UserRole) !== UserRole.ADMIN &&
+        (admin.role?.name as UserRole) !== UserRole.SUPER_ADMIN)
     )
       throw new NotFoundException('Employee or admin not found');
     return this.prisma.client.adminEmployeeAssignment.upsert({

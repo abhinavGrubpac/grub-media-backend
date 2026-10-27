@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -327,6 +328,32 @@ export class ReferenceService {
     return this.toResponse(doc);
   }
 
+  /**
+   * Archives an explicit selection at once (documents tab multi-select):
+   * the counterpart of bulk-restore, replacing N × DELETE /:id with one call.
+   * Already-archived and missing ids are simply excluded from the write and
+   * reflected in the returned counts (no batch failure), and the whole
+   * selection commits in ONE transaction with a single bulk event.
+   */
+  async bulkArchive(ids: string[]): Promise<{ archived: number }> {
+    if (!ids.length) throw new BadRequestException('ids must not be empty');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.referenceDoc.updateMany({
+        where: { id: { in: ids }, isArchived: false },
+        data: { isArchived: true, archivedOn: new Date() },
+      });
+      await this.outbox.emitInTx(tx, {
+        eventType: EventTypes.referenceBulkArchived,
+        entityType: 'ReferenceDoc',
+        entityId: 'bulk',
+        key: 'bulk',
+        payload: { doc_ids: ids, archived: updated.count },
+      });
+      return updated;
+    });
+    return { archived: result.count };
+  }
+
   /** Unarchives an explicit selection at once (archived tab multi-select). */
   async bulkRestore(ids: string[]): Promise<{ restored: number }> {
     if (!ids.length) throw new BadRequestException('ids must not be empty');
@@ -403,6 +430,34 @@ export class ReferenceService {
         payload: { doc_id: id, title: existing.title },
       });
     });
+  }
+
+  /**
+   * Multi-select permanent delete from the archived tab: replaces N ×
+   * DELETE /:id/permanent with one request. Every id is applied through the
+   * standard single-doc path — identical guards (archive-first, refusal
+   * while the doc justifies review decisions) — and rows that fail those
+   * guards are skipped with a per-id reason instead of failing the batch.
+   */
+  async bulkHardDelete(
+    ids: string[],
+  ): Promise<{ deleted: number; skipped: { id: string; reason: string }[] }> {
+    if (!ids.length) throw new BadRequestException('ids must not be empty');
+    const skipped: { id: string; reason: string }[] = [];
+    let deleted = 0;
+    for (const id of [...new Set(ids)]) {
+      try {
+        await this.hardDelete(id);
+        deleted += 1;
+      } catch (error) {
+        skipped.push({
+          id,
+          reason:
+            error instanceof HttpException ? error.message : 'unexpected error deleting the doc',
+        });
+      }
+    }
+    return { deleted, skipped };
   }
 
   private requireTrimmed(value: string, field: string): string {

@@ -85,7 +85,10 @@ export class NotificationProjectorConsumer extends BaseEventConsumer {
   /** Users whose role grants the manager profile (creative:approve holders). */
   private async managerIds(): Promise<string[]> {
     const users = await this.prisma.client.user.findMany({
-      where: { role: { in: [UserRole.ADMIN, UserRole.SUPER_ADMIN] }, status: UserStatus.ACTIVE },
+      where: {
+        role: { is: { name: { in: [UserRole.ADMIN, UserRole.SUPER_ADMIN] } } },
+        status: UserStatus.ACTIVE,
+      },
       select: { id: true },
     });
     return [...new Set(users.map((user) => user.id))];

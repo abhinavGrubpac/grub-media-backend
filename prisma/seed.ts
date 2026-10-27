@@ -12,6 +12,27 @@ async function hashPassword(plain: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Roles (exactly the three system roles; runs before any user is created)
+// ---------------------------------------------------------------------------
+
+const SYSTEM_ROLES = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE] as const;
+
+/** Role names live in the Role table now; user rows link to it by roleId. */
+async function seedRoles(): Promise<void> {
+  for (const name of SYSTEM_ROLES) {
+    await prisma.role.upsert({ where: { name }, update: {}, create: { name } });
+  }
+  console.log(`  Roles: ${SYSTEM_ROLES.join(', ')} [upserted]`);
+}
+
+/** Resolves one of the three seeded role rows' id by name. */
+async function roleIdOf(name: UserRole): Promise<string> {
+  const row = await prisma.role.findUnique({ where: { name } });
+  if (!row) throw new Error(`Role "${name}" is not seeded`);
+  return row.id;
+}
+
+// ---------------------------------------------------------------------------
 // Permissions
 // ---------------------------------------------------------------------------
 
@@ -106,7 +127,7 @@ async function seedSuperAdmin(): Promise<string> {
   if (!email || !password) {
     // Env vars not set — find the existing super admin instead of creating one.
     const existing = await prisma.user.findFirst({
-      where: { role: UserRole.SUPER_ADMIN, deletedAt: null },
+      where: { role: { is: { name: UserRole.SUPER_ADMIN } }, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
     if (!existing) {
@@ -126,7 +147,7 @@ async function seedSuperAdmin(): Promise<string> {
       passwordHash: await hashPassword(password),
       firstName: 'Super',
       lastName: 'Admin',
-      role: UserRole.SUPER_ADMIN,
+      roleId: await roleIdOf(UserRole.SUPER_ADMIN),
       status: UserStatus.ACTIVE,
     },
   });
@@ -203,7 +224,7 @@ async function seedAdmins(superAdminId: string, orgId: string): Promise<string[]
         jurisdiction: admin.jurisdiction,
         joiningDate: admin.joiningDate,
         organizationId: admin.organizationId,
-        role: UserRole.ADMIN,
+        roleId: await roleIdOf(UserRole.ADMIN),
         status: UserStatus.ACTIVE,
         createdBy: superAdminId,
       },
@@ -257,7 +278,7 @@ async function seedEmployees(adminIds: string[], superAdminId: string): Promise<
         lastName: emp.lastName,
         employeeId: emp.employeeId,
         phoneNumber: emp.phoneNumber,
-        role: UserRole.EMPLOYEE,
+        roleId: await roleIdOf(UserRole.EMPLOYEE),
         status: emp.status ?? UserStatus.ACTIVE,
         createdBy: adminIds[i % adminIds.length] ?? superAdminId,
       },
@@ -621,6 +642,9 @@ async function seedAuditLogs(superAdminId: string, adminIds: string[]): Promise<
 
 async function main(): Promise<void> {
   console.log('\n🌱 Seeding database...\n');
+
+  console.log('→ Roles');
+  await seedRoles();
 
   console.log('→ Permissions');
   const permMap = await seedPermissions();

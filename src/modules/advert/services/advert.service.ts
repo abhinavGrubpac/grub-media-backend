@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -883,6 +884,52 @@ export class AdvertService {
     });
 
     return this.readEnriched(id);
+  }
+
+  /**
+   * Multi-select bulk status change (Advert Control): replaces N ×
+   * PATCH /:id/status with one request. Every advert is applied through the
+   * standard single-advert path — identical optimistic-lock check, resume
+   * window rules, audit trail, outbox events and reason payload. Adverts
+   * that cannot accept the status (stale expected_status, flight window
+   * rules, missing) are skipped with a per-id reason instead of failing the
+   * batch; each applied advert commits in its own transaction.
+   */
+  async bulkStatus(
+    ids: string[],
+    status: string,
+    actorId: string,
+    expectedStatus?: string,
+    reason?: string,
+  ): Promise<{
+    applied: { advert_id: string; status: string }[];
+    skipped: { advert_id: string; reason: string }[];
+  }> {
+    if (!isAdvertStatus(status)) {
+      throw new BadRequestException(
+        `status must be one of: SCHEDULED, LIVE, PAUSED, EXPIRED, REVOKED`,
+      );
+    }
+    const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+    if (unique.length === 0) {
+      throw new BadRequestException('ids must contain at least one non-empty advert id');
+    }
+
+    const applied: { advert_id: string; status: string }[] = [];
+    const skipped: { advert_id: string; reason: string }[] = [];
+    for (const id of unique) {
+      try {
+        await this.updateStatus(id, status, actorId, expectedStatus, reason);
+        applied.push({ advert_id: id, status });
+      } catch (error) {
+        skipped.push({
+          advert_id: id,
+          reason:
+            error instanceof HttpException ? error.message : 'unexpected error updating the advert',
+        });
+      }
+    }
+    return { applied, skipped };
   }
 
   /**
