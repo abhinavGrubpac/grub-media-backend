@@ -31,3 +31,4 @@ Used only where atomicity is required (e.g. `revokeAllForUser` bumps tokenVersio
 ## Ops notes
 - The generated init migration includes `CREATE SCHEMA IF NOT EXISTS "public"`. On managed Postgres that restricts `CREATE` on `public` (e.g. some Supabase setups), ensure the deploy role has the right or pre-create the schema.
 - Refresh-token lookup is O(1) by `sessionId`; at very high session volume, monitor `Session` table growth and add a periodic purge of expired/revoked rows.
+- If runtime logs show Prisma `P2022` for `User.role`, apply migrations (`npm run prisma:deploy`). A drift-repair migration (`20261027000100_backfill_user_role_column`) adds the missing enum/column safely for legacy DBs.

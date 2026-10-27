@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpPurpose, UserStatus } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
@@ -38,6 +38,8 @@ const DEV_OTP_BYPASS = '1234';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly users: UsersService,
     private readonly tokens: TokenService,
@@ -57,26 +59,40 @@ export class AuthService {
       });
     }
 
-    const user = await this.users.findByEmailWithHash(dto.email);
-    // Uniform failure: unknown email, wrong password, or non-active account all
-    // return the same error so there is no user-enumeration signal.
-    if (!user || user.deletedAt || user.status !== UserStatus.ACTIVE) {
-      throw new InvalidCredentialsException();
-    }
-    const valid = await this.users.verifyPassword(user.passwordHash, dto.password);
-    if (!valid) {
-      throw new InvalidCredentialsException();
-    }
-    // NOTE: no transparent rehash here. password_hash is a shared column with
-    // the sibling backend (bcrypt); overwriting it with argon2 would break
-    // sibling logins. Dual-verify keeps both systems working.
+    try {
+      const user = await this.users.findByEmailWithHash(dto.email);
+      this.logger.debug(`Login attempt for ${dto.email}: user_found=${!!user}`);
 
-    await this.redis.del(key);
-    const pair = await this.tokens.issuePair(user, ctx);
-    return {
-      ...pair,
-      user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
-    };
+      // Uniform failure: unknown email, wrong password, or non-active account all
+      // return the same error so there is no user-enumeration signal.
+      if (!user || user.deletedAt || user.status !== UserStatus.ACTIVE) {
+        this.logger.debug(
+          `Login failed for ${dto.email}: user_found=${!!user}, deleted=${user?.deletedAt}, status=${user?.status}`,
+        );
+        throw new InvalidCredentialsException();
+      }
+      const valid = await this.users.verifyPassword(user.passwordHash, dto.password);
+      if (!valid) {
+        this.logger.debug(`Login failed for ${dto.email}: password invalid`);
+        throw new InvalidCredentialsException();
+      }
+      // NOTE: no transparent rehash here. password_hash is a shared column with
+      // the sibling backend (bcrypt); overwriting it with argon2 would break
+      // sibling logins. Dual-verify keeps both systems working.
+
+      await this.redis.del(key);
+      const pair = await this.tokens.issuePair(user, ctx);
+      this.logger.debug(`Login successful for ${dto.email}`);
+      return {
+        ...pair,
+        user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Login error for ${dto.email}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   async refresh(refreshToken: string, ctx: RequestCtx): Promise<TokenResponseDto> {

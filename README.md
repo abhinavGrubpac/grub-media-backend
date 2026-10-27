@@ -76,6 +76,7 @@ npm run prisma:deploy    # migrate deploy (release)
 npm run prisma:studio
 ```
 Soft delete is on `User` only (`deletedAt`), enforced by a Prisma client extension — always read via `prisma.client.*`. See `docs/database.md`.
+If you hit Prisma `P2022` like `The column User.role does not exist`, your DB is behind schema migrations — run `npm run prisma:deploy` and restart the API.
 
 ## Testing
 ```bash

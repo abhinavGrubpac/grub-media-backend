@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { UserRole, UserStatus } from '@prisma/client';
@@ -14,6 +14,8 @@ export interface JwtPayload {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  private readonly logger = new Logger(JwtStrategy.name);
+
   constructor(
     config: ConfigService,
     private readonly prisma: PrismaService,
@@ -33,7 +35,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    */
   async validate(payload: JwtPayload): Promise<AuthUser> {
     const user = await this.prisma.client.user.findFirst({ where: { id: payload.sub } });
-    if (!user || user.status !== UserStatus.ACTIVE || user.tokenVersion !== payload.tokenVersion) {
+    this.logger.debug(
+      `JWT validation for user ${payload.sub}: found=${!!user}, status=${user?.status}, tokenVersion=${user?.tokenVersion} (expected=${payload.tokenVersion})`,
+    );
+
+    if (!user) {
+      this.logger.warn(`JWT validation failed: user ${payload.sub} not found`);
+      throw new UnauthorizedException();
+    }
+    if (user.status !== UserStatus.ACTIVE) {
+      this.logger.warn(
+        `JWT validation failed: user ${payload.sub} status is ${user.status}, not ACTIVE`,
+      );
+      throw new UnauthorizedException();
+    }
+    if (user.tokenVersion !== payload.tokenVersion) {
+      this.logger.warn(
+        `JWT validation failed: user ${payload.sub} tokenVersion mismatch (stored=${user.tokenVersion}, token=${payload.tokenVersion})`,
+      );
       throw new UnauthorizedException();
     }
     return { id: user.id, role: user.role as UserRole, tokenVersion: user.tokenVersion };
