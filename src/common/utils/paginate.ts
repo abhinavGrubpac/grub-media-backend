@@ -1,8 +1,18 @@
 import { PaginatedMeta } from '../dto/paginated';
 import { PaginationQueryDto } from '../dto/pagination-query.dto';
 
-/** Translate page/limit into Prisma `skip`/`take`. */
-export function toSkipTake(dto: PaginationQueryDto): { skip: number; take: number } {
+/**
+ * Translate page/limit into Prisma `skip`/`take`.
+ * Accepts anything carrying page/limit — PaginationQueryDto itself, or a query
+ * DTO that defines its own pagination fields (e.g. LogSearchQueryDto).
+ */
+export function toSkipTake(
+  dto: Pick<PaginationQueryDto, 'page' | 'limit'> &
+    Partial<Pick<PaginationQueryDto, 'sortBy' | 'sortOrder'>>,
+): {
+  skip: number;
+  take: number;
+} {
   return { skip: (dto.page - 1) * dto.limit, take: dto.limit };
 }
 

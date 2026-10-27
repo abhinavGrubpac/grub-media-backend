@@ -28,6 +28,7 @@ import { IntakeModule } from './modules/intake/intake.module';
 import { BrandModule } from './modules/brand/brand.module';
 import { ReferenceModule } from './modules/reference/reference.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { LogsModule } from './modules/logs/logs.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -112,6 +113,7 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     IntakeModule,
     BrandModule,
     ReferenceModule,
+    LogsModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.
