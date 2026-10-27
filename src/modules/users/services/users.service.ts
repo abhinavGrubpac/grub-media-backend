@@ -337,6 +337,25 @@ export class UsersService {
     return result.count;
   }
 
+  /**
+   * Bulk-suspend: moves ACTIVE/INACTIVE users to SUSPENDED. Mirrors the
+   * single-user `suspend` guards — the actor's own account is skipped, and a
+   * non-super-admin cannot suspend a Super Admin. Already-suspended and
+   * soft-deleted rows are ignored. Returns the number of rows changed.
+   */
+  async bulkSuspend(ids: string[], actorId: string, actorRole: UserRole): Promise<number> {
+    const result = await this.prisma.client.user.updateMany({
+      where: {
+        id: { in: ids, not: actorId },
+        status: { in: [UserStatus.ACTIVE, UserStatus.INACTIVE] },
+        deletedAt: null,
+        ...(actorRole !== UserRole.SUPER_ADMIN ? { role: { not: UserRole.SUPER_ADMIN } } : {}),
+      },
+      data: { status: UserStatus.SUSPENDED, updatedBy: actorId },
+    });
+    return result.count;
+  }
+
   async exportCsv(dto: ExportUsersDto): Promise<string> {
     const search = dto.search?.trim();
     const statusMap = {
