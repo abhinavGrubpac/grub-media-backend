@@ -8,15 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import * as argon2 from 'argon2';
 import * as bcrypt from 'bcrypt';
-import {
-  OtpPurpose,
-  Organization,
-  Prisma,
-  Role,
-  UserRole,
-  UserStatus,
-  type User,
-} from '@prisma/client';
+import { OtpPurpose, Organization, UserRole, UserStatus, type User } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../database/prisma.service';
 import { MailerService } from '../../mailer/mailer.service';
@@ -43,9 +35,6 @@ import { SetPasswordDto } from '../../auth/dto/set-password.dto';
 const OTP_TTL_MINUTES = 10;
 const DEV_OTP_BYPASS = '1234';
 
-/** User row with the Role-table relation loaded (the replacement for role name on the row). */
-type UserWithRole = User & { organization?: Organization | null; role: Role };
-
 @Injectable()
 export class UsersService {
   constructor(
@@ -55,14 +44,8 @@ export class UsersService {
     private readonly storage: StorageService,
   ) {}
 
-  private toDto(user: UserWithRole): UserResponseDto {
-    // The FK row carries the name the API contract (and the DTO) still uses.
-    const { role, ...rest } = user;
-    return plainToInstance(
-      UserResponseDto,
-      { ...rest, role: role?.name as UserRole },
-      { excludeExtraneousValues: true },
-    );
+  private toDto(user: User & { organization?: Organization | null }): UserResponseDto {
+    return plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true });
   }
 
   /**
@@ -116,10 +99,10 @@ export class UsersService {
         jurisdiction: dto.jurisdiction,
         joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
         organizationId: dto.organizationId,
-        roleId: await this.roleId(dto.role ?? UserRole.EMPLOYEE),
+        role: dto.role,
         createdBy: actorId,
       },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -127,11 +110,8 @@ export class UsersService {
   /** Raw row incl. passwordHash — for the auth module only. */
   async findByEmailWithHash(
     email: string,
-  ): Promise<(UserWithRole & { passwordHash: string }) | null> {
-    return this.prisma.client.user.findFirst({
-      where: { email },
-      include: { organization: true, role: true },
-    });
+  ): Promise<(User & { organization?: Organization | null }) | null> {
+    return this.prisma.client.user.findFirst({ where: { email }, include: { organization: true } });
   }
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -148,7 +128,7 @@ export class UsersService {
         avatarUrl: dto.avatarUrl,
         jurisdiction: dto.jurisdiction,
       },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -165,7 +145,7 @@ export class UsersService {
     const updated = await this.prisma.client.user.update({
       where: { id: userId },
       data: { avatarUrl },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(updated);
   }
@@ -177,10 +157,9 @@ export class UsersService {
     actorRole: UserRole,
   ): Promise<UserResponseDto> {
     const target = await this.getOrThrow(id);
-    const targetRoleName = target.role.name as UserRole;
-    this.assertHierarchy(actorRole, targetRoleName, dto.role);
+    this.assertHierarchy(actorRole, target.role as UserRole, dto.role);
 
-    const roleChanging = dto.role !== undefined && dto.role !== targetRoleName;
+    const roleChanging = dto.role !== undefined && dto.role !== target.role;
 
     const user = await this.prisma.$transaction(async (tx) => {
       if (roleChanging) {
@@ -196,10 +175,10 @@ export class UsersService {
           jurisdiction: dto.jurisdiction,
           joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : undefined,
           organizationId: dto.organizationId,
-          roleId: dto.role !== undefined ? await this.roleId(dto.role) : undefined,
+          role: dto.role,
           updatedBy: actorId,
         },
-        include: { organization: true, role: true },
+        include: { organization: true },
       });
     });
     return this.toDto(user);
@@ -217,7 +196,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role.name as UserRole);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.SUSPENDED) {
       throw new BadRequestException({
@@ -228,14 +207,14 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.SUSPENDED, updatedBy: actorId },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
 
   async activate(id: string, actorId: string, actorRole: UserRole): Promise<UserResponseDto> {
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role.name as UserRole);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.ACTIVE) {
       throw new BadRequestException({
@@ -246,7 +225,7 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.ACTIVE, updatedBy: actorId },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -260,7 +239,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role.name as UserRole);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     if (target.status === UserStatus.INACTIVE) {
       throw new BadRequestException({
@@ -271,7 +250,7 @@ export class UsersService {
     const user = await this.prisma.client.user.update({
       where: { id },
       data: { status: UserStatus.INACTIVE, updatedBy: actorId },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     return this.toDto(user);
   }
@@ -284,7 +263,7 @@ export class UsersService {
       });
     }
     const target = await this.getOrThrow(id);
-    this.assertHierarchy(actorRole, target.role.name as UserRole);
+    this.assertHierarchy(actorRole, target.role as UserRole);
 
     await this.prisma.client.user.update({ where: { id }, data: { deletedAt: new Date() } });
   }
@@ -301,21 +280,13 @@ export class UsersService {
       return { data: [], meta: buildMeta(0, query.page, query.limit) };
     }
 
-    // For non-SUPER_ADMINs, always exclude SUPER_ADMIN accounts.
-    // Role NAMES are translated into Role-table relation filters: the filter
-    // value is the name one of the three seeded rows carries.
-    const roleFilter: Prisma.UserWhereInput['role'] = isRestricted
-      ? query.role
-        ? { is: { name: query.role } }
-        : { is: { name: { not: UserRole.SUPER_ADMIN } } }
-      : query.role
-        ? { is: { name: query.role } }
-        : undefined;
+    // For non-SUPER_ADMINs, always exclude SUPER_ADMIN accounts
+    const roleWhere = isRestricted ? (query.role ?? { not: UserRole.SUPER_ADMIN }) : query.role;
 
     const search = query.search?.trim();
     const where = {
       deletedAt: null,
-      role: roleFilter,
+      role: roleWhere,
       status: query.status,
       ...(search
         ? {
@@ -343,7 +314,7 @@ export class UsersService {
         skip,
         take,
         orderBy,
-        include: { organization: true, role: true },
+        include: { organization: true },
       }),
       this.prisma.client.user.count({ where }),
     ]);
@@ -381,7 +352,7 @@ export class UsersService {
         ? { id: { in: dto.ids ?? [] }, deletedAt: null }
         : {
             deletedAt: null,
-            role: dto.role ? { is: { name: dto.role } } : undefined,
+            role: dto.role,
             status: statusMap[dto.type],
             ...(search
               ? {
@@ -400,7 +371,6 @@ export class UsersService {
     const rows = await this.prisma.client.user.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { role: true },
     });
 
     const esc = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
@@ -415,7 +385,7 @@ export class UsersService {
           u.phoneNumber,
           u.employeeId,
           u.jurisdiction,
-          u.role.name,
+          u.role,
           u.status,
           u.joiningDate?.toISOString(),
           u.createdAt.toISOString(),
@@ -545,21 +515,10 @@ export class UsersService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  /**
-   * Resolves the id of one of the three seeded system roles by its name. The
-   * migration and seed guarantee these rows exist; a miss is a broken seed,
-   * so it fails loudly instead of silently assigning no role.
-   */
-  private async roleId(name: UserRole): Promise<string> {
-    const row = await this.prisma.client.role.findUnique({ where: { name } });
-    if (!row) throw new Error(`Role "${name}" is not seeded`);
-    return row.id;
-  }
-
-  private async getOrThrow(id: string): Promise<UserWithRole> {
+  private async getOrThrow(id: string): Promise<User & { organization?: Organization | null }> {
     const user = await this.prisma.client.user.findFirst({
       where: { id },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     if (!user) throw new UserNotFoundException();
     return user;

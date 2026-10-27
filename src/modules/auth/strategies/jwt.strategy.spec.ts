@@ -14,7 +14,7 @@ describe('JwtStrategy.validate', () => {
   it('returns the AuthUser for an active user whose tokenVersion matches', async () => {
     const { strategy } = build({
       id: 'u1',
-      role: { name: 'EMPLOYEE' },
+      role: 'EMPLOYEE',
       status: 'ACTIVE',
       tokenVersion: 3,
     });
@@ -33,7 +33,7 @@ describe('JwtStrategy.validate', () => {
   it('rejects an inactive (suspended/deactivated) user', async () => {
     const { strategy } = build({
       id: 'u1',
-      role: { name: 'EMPLOYEE' },
+      role: 'EMPLOYEE',
       status: 'SUSPENDED',
       tokenVersion: 3,
     });
@@ -41,12 +41,7 @@ describe('JwtStrategy.validate', () => {
   });
 
   it('rejects a token whose tokenVersion is stale (logout-everywhere)', async () => {
-    const { strategy } = build({
-      id: 'u1',
-      role: { name: 'EMPLOYEE' },
-      status: 'ACTIVE',
-      tokenVersion: 4,
-    });
+    const { strategy } = build({ id: 'u1', role: 'EMPLOYEE', status: 'ACTIVE', tokenVersion: 4 });
     await expect(strategy.validate(payload)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

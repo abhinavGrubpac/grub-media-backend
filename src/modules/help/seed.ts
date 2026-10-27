@@ -178,12 +178,6 @@ async function seedSuperAdmin(): Promise<void> {
     return;
   }
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-  // Role is the Role table: ensure the three system rows exist, link by FK.
-  for (const name of [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE]) {
-    await prisma.role.upsert({ where: { name }, update: {}, create: { name } });
-  }
-  const superAdminRole = await prisma.role.findUnique({ where: { name: UserRole.SUPER_ADMIN } });
-  if (!superAdminRole) throw new Error('SUPER_ADMIN role is not seeded');
   await prisma.user.upsert({
     where: { email },
     update: {},
@@ -192,7 +186,7 @@ async function seedSuperAdmin(): Promise<void> {
       passwordHash,
       firstName: 'Super',
       lastName: 'Admin',
-      roleId: superAdminRole.id,
+      role: UserRole.SUPER_ADMIN,
     },
   });
   console.log(`Super admin ready: ${email}`);

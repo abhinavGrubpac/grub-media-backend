@@ -11,10 +11,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// The three system role NAMES. No column stores the enum since the User.role
-// column was replaced by a roleId FK into the Role table; the enum remains as
-// the canonical name set for the API contract (`role` fields still carry one
-// of these values) and is kept in the database so migrate stays drift-free.
+// The three system role names. Production stores this enum directly on
+// User.role; the API contract exposes the same names.
 enum UserRole {
   SUPER_ADMIN
   ADMIN
@@ -52,10 +50,9 @@ model User {
   organization        Organization?             @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   jurisdiction        String?
   joiningDate         DateTime?
-  // Role is a separate table (three seeded rows: SUPER_ADMIN | ADMIN | EMPLOYEE);
-  // User.roleId points at it and role NAME comparisons go through the relation.
-  roleId              String
-  role                Role                      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  // Matches the init migration and production: the role name is stored as an
+  // enum on the user row.
+  role                UserRole                  @default(EMPLOYEE)
   status              UserStatus                @default(ACTIVE)
   tokenVersion        Int                       @default(0)
   createdBy           String?
@@ -72,16 +69,6 @@ model User {
 
   @@index([deletedAt])
   @@index([organizationId])
-  @@index([roleId])
-}
-
-/// The three fixed system roles. Exactly what the migration/seed inserts;
-/// nothing in the app creates additional rows.
-model Role {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  users     User[]
 }
 
 model Organization {

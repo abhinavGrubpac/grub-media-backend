@@ -34,12 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * invalidates outstanding access tokens).
    */
   async validate(payload: JwtPayload): Promise<AuthUser> {
-    // Role is the separate Role table now; resolve its NAME on every request so
-    // role changes take effect without re-login (same as the old column read).
-    const user = await this.prisma.client.user.findFirst({
-      where: { id: payload.sub },
-      include: { role: true },
-    });
+    const user = await this.prisma.client.user.findFirst({ where: { id: payload.sub } });
     this.logger.debug(
       `JWT validation for user ${payload.sub}: found=${!!user}, status=${user?.status}, tokenVersion=${user?.tokenVersion} (expected=${payload.tokenVersion})`,
     );
@@ -60,6 +55,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       );
       throw new UnauthorizedException();
     }
-    return { id: user.id, role: user.role.name as UserRole, tokenVersion: user.tokenVersion };
+    return { id: user.id, role: user.role as UserRole, tokenVersion: user.tokenVersion };
   }
 }

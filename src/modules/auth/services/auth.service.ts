@@ -85,12 +85,7 @@ export class AuthService {
       this.logger.debug(`Login successful for ${dto.email}`);
       return {
         ...pair,
-        // Role is a table now — flatten to the name the response contract uses.
-        user: plainToInstance(
-          UserResponseDto,
-          { ...user, role: user.role?.name },
-          { excludeExtraneousValues: true },
-        ),
+        user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
       };
     } catch (error) {
       this.logger.error(
@@ -173,7 +168,7 @@ export class AuthService {
 
     const user = await this.prisma.client.user.findFirst({
       where: { email: dto.email },
-      include: { organization: true, role: true },
+      include: { organization: true },
     });
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new InvalidCredentialsException();
@@ -203,11 +198,7 @@ export class AuthService {
     const pair = await this.tokens.issuePair(user, ctx);
     return {
       ...pair,
-      user: plainToInstance(
-        UserResponseDto,
-        { ...user, role: user.role?.name },
-        { excludeExtraneousValues: true },
-      ),
+      user: plainToInstance(UserResponseDto, user, { excludeExtraneousValues: true }),
     };
   }
 

@@ -3,4 +3,3 @@
 -- migration is idempotent.
 ALTER TABLE "ReviewAction" ADD COLUMN IF NOT EXISTS "reason" TEXT;
 ALTER TABLE "CreativeVersion" ADD COLUMN IF NOT EXISTS "file_size_bytes" INTEGER;
--- Migration created to match database drift (already applied)

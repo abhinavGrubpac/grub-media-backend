@@ -570,7 +570,7 @@ async function main(): Promise<void> {
 
   const actor =
     (await prisma.user.findFirst({
-      where: { role: { is: { name: UserRole.SUPER_ADMIN } }, deletedAt: null },
+      where: { role: UserRole.SUPER_ADMIN, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     })) ??
     (await prisma.user.findFirst({ where: { deletedAt: null }, orderBy: { createdAt: 'asc' } }));

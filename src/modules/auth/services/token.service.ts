@@ -16,12 +16,7 @@ interface TokenPair {
   refreshToken: string;
 }
 
-// Role comes from the separate Role table (User.roleId FK), flattened to the
-// { name } the three system role names live in.
-type SessionRole = { name: string };
-type SessionUser = Pick<User, 'id' | 'status' | 'tokenVersion' | 'deletedAt'> & {
-  role: SessionRole;
-};
+type SessionUser = Pick<User, 'id' | 'role' | 'status' | 'tokenVersion' | 'deletedAt'>;
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -47,15 +42,13 @@ export class TokenService {
     private readonly config: ConfigService,
   ) {}
 
-  private signAccess(
-    user: Pick<User, 'id' | 'tokenVersion'> & { role: SessionRole },
-  ): Promise<string> {
+  private signAccess(user: Pick<User, 'id' | 'role' | 'tokenVersion'>): Promise<string> {
     const options = {
       secret: this.config.get<string>('jwt.accessSecret'),
       expiresIn: this.config.get<string>('jwt.accessTtl'),
     } as JwtSignOptions;
     return this.jwt.signAsync(
-      { sub: user.id, role: user.role.name, tokenVersion: user.tokenVersion },
+      { sub: user.id, role: user.role, tokenVersion: user.tokenVersion },
       options,
     );
   }
@@ -96,7 +89,7 @@ export class TokenService {
 
     const session = await this.prisma.client.session.findFirst({
       where: { id: sessionId },
-      include: { user: { include: { role: true } } },
+      include: { user: true },
     });
     if (!session || !(await argon2.verify(session.hashedToken, secret))) {
       throw new UnauthorizedException('Invalid refresh token');
