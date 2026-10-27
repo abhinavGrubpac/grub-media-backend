@@ -39,3 +39,4 @@ CREATE INDEX "User_roleId_idx" ON "User"("roleId");
 -- so it matches schema.prisma (kept as the canonical name set) and future
 -- `prisma migrate dev` runs do not flag drift.
 ALTER TABLE "User" DROP COLUMN "role";
+-- Migration created to match database drift (already applied)

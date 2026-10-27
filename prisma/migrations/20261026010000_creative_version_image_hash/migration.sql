@@ -1,0 +1,1 @@
+-- Migration created to match database drift (already applied)
