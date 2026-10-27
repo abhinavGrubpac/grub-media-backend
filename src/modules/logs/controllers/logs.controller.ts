@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { LogType } from '@prisma/client';
 import type { Response } from 'express';
 import { LogsService } from '../services/logs.service';
@@ -114,16 +114,61 @@ export class LogsController {
     return csv;
   }
 
+  /** Shared list handler: build the page, then audit the read. */
+  private async listStream(
+    logtype: LogType,
+    query: PaginationQueryDto,
+    u: AuthUser,
+  ): Promise<LogListResponseDTO> {
+    const result = await this.logs.list(logtype, query);
+    await this.auditRead(u, 'View Logs', `Viewed the ${logtype.toLowerCase()} logs`);
+    return result;
+  }
+
+  // Explicit per-stream routes mirror the documented endpoints and give each
+  // stream its own Swagger entry. They are declared before `:logtype` so Nest
+  // matches them first; `:logtype` still handles any other casing (e.g.
+  // lowercase `system`) via ParseLogTypePipe.
+
+  @Get('SYSTEM')
+  @ApiOperation({ summary: 'List the SYSTEM log stream, newest first (page, limit)' })
+  @ResponseMessage('Logs fetched successfully')
+  listSystem(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() u: AuthUser,
+  ): Promise<LogListResponseDTO> {
+    return this.listStream(LogType.SYSTEM, query, u);
+  }
+
+  @Get('ACTIVITY')
+  @ApiOperation({ summary: 'List the ACTIVITY log stream, newest first (page, limit)' })
+  @ResponseMessage('Logs fetched successfully')
+  listActivity(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() u: AuthUser,
+  ): Promise<LogListResponseDTO> {
+    return this.listStream(LogType.ACTIVITY, query, u);
+  }
+
+  @Get('EMPLOYEE')
+  @ApiOperation({ summary: 'List the EMPLOYEE log stream, newest first (page, limit)' })
+  @ResponseMessage('Logs fetched successfully')
+  listEmployee(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() u: AuthUser,
+  ): Promise<LogListResponseDTO> {
+    return this.listStream(LogType.EMPLOYEE, query, u);
+  }
+
   @Get(':logtype')
   @ApiOperation({ summary: 'List one log stream, newest first (page, limit)' })
+  @ApiParam({ name: 'logtype', enum: LogType, description: 'Case-insensitive log stream' })
   @ResponseMessage('Logs fetched successfully')
   async list(
     @Param('logtype', ParseLogTypePipe) logtype: LogType,
     @Query() query: PaginationQueryDto,
     @CurrentUser() u: AuthUser,
   ): Promise<LogListResponseDTO> {
-    const result = await this.logs.list(logtype, query);
-    await this.auditRead(u, 'View Logs', `Viewed the ${logtype.toLowerCase()} logs`);
-    return result;
+    return this.listStream(logtype, query, u);
   }
 }
