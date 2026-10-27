@@ -166,6 +166,13 @@ export class CreativeVersionResponseDto {
   @Expose()
   created_by_name!: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Profile logo/avatar URL of the uploader, when available',
+    nullable: true,
+  })
+  @Expose()
+  created_by_logo!: string | null;
+
   @ApiProperty()
   @Expose()
   created_at!: Date;

@@ -1285,6 +1285,7 @@ export class CreativeService {
         status: version.status,
         created_by: version.createdBy,
         created_by_name: actorProfiles.get(version.createdBy)?.name ?? null,
+        created_by_logo: actorProfiles.get(version.createdBy)?.logo ?? null,
         created_at: version.createdAt,
         admin_approved_by: version.adminApprovedBy ?? null,
         admin_approved_at: version.adminApprovedAt ?? null,

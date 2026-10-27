@@ -605,6 +605,12 @@ describe('CreativeService.takeAction', () => {
         lastName: 'Reviewer',
         avatarUrl: 'https://cdn.example.com/rita.png',
       },
+      {
+        id: 'user1',
+        firstName: 'Uma',
+        lastName: 'Uploader',
+        avatarUrl: 'https://cdn.example.com/uma.png',
+      },
     ]);
 
     const result = await service.takeAction(
@@ -622,6 +628,8 @@ describe('CreativeService.takeAction', () => {
       actor_name: 'Rita Reviewer',
       logo: 'https://cdn.example.com/rita.png',
     });
+    expect(result.created_by_name).toBe('Uma Uploader');
+    expect(result.created_by_logo).toBe('https://cdn.example.com/uma.png');
     expect(result.actions).toHaveLength(1);
     expect(result.actions?.[0]).toMatchObject({
       action: 'APPROVE',
