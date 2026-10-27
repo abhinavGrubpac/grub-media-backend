@@ -23,6 +23,7 @@ import { UserQueryDto } from '../dto/user-query.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { ProfileUpdateDto } from '../dto/profile-update.dto';
 import { BulkActivateDto } from '../dto/bulk-activate.dto';
+import { BulkSuspendDto } from '../dto/bulk-suspend.dto';
 import { Paginated } from '../../../common/dto/paginated';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
@@ -154,6 +155,18 @@ export class UsersController {
   @ResponseMessage('Users activated')
   async bulkActivate(@Body() dto: BulkActivateDto): Promise<{ activated: number }> {
     return { activated: await this.users.bulkActivate(dto.ids) };
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @RequirePermissions('users.update')
+  @Put('bulk-suspend')
+  @ApiOperation({ summary: 'Bulk-suspend active or inactive users' })
+  @ResponseMessage('Users suspended')
+  async bulkSuspend(
+    @Body() dto: BulkSuspendDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<{ suspended: number }> {
+    return { suspended: await this.users.bulkSuspend(dto.ids, actor.id, actor.role) };
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
