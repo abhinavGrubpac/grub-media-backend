@@ -48,6 +48,16 @@ export class AdvertSearchQueryDto {
   @MaxLength(100)
   industry?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Free-text filter on address, city, zone, creative, brand, or industry. ' +
+      'Without lat/lng this is a plain filtered list.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  search?: string;
+
   @ApiPropertyOptional({ description: 'Filter by brand' })
   @IsOptional()
   @IsString()

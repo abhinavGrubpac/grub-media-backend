@@ -217,6 +217,7 @@ function dayEnd(value: string): Date {
  */
 export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhereInput {
   const brandId = filters.brandId ?? filters.brand_id;
+  const search = filters.search?.trim();
   let start: Date | undefined;
   let end: Date | undefined;
   if (filters.start_date) {
@@ -246,15 +247,24 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
     ...(filters.ids?.length ? { id: { in: filters.ids } } : {}),
     ...(filters.status ? { status: filters.status as AdvertStatus } : {}),
     ...(Object.keys(creative).length ? { version: { creative } } : {}),
-    ...(filters.search
+    ...(search
       ? {
           OR: [
-            { id: { contains: filters.search } },
-            { addressText: { contains: filters.search, mode: 'insensitive' } },
+            { id: { contains: search } },
+            { addressText: { contains: search, mode: 'insensitive' } },
+            { cityName: { contains: search, mode: 'insensitive' } },
+            { zoneName: { contains: search, mode: 'insensitive' } },
             {
               version: {
                 creative: {
-                  brand: { is: { brandName: { contains: filters.search, mode: 'insensitive' } } },
+                  creativeName: { contains: search, mode: 'insensitive' },
+                },
+              },
+            },
+            {
+              version: {
+                creative: {
+                  brand: { is: { brandName: { contains: search, mode: 'insensitive' } } },
                 },
               },
             },
@@ -262,7 +272,7 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
               version: {
                 creative: {
                   brand: {
-                    is: { industryCategory: { contains: filters.search, mode: 'insensitive' } },
+                    is: { industryCategory: { contains: search, mode: 'insensitive' } },
                   },
                 },
               },
@@ -421,6 +431,7 @@ export class AdvertService {
     radius?: number;
     radiusKm?: number;
     industry?: string;
+    search?: string;
     brand_id?: string;
     start?: Date;
     end?: Date;
@@ -455,6 +466,7 @@ export class AdvertService {
       lng: filters.lng ?? null,
       radius_km: hasLat && hasLng ? (filters.radiusKm ?? filters.radius ?? 5) : null,
       industry: filters.industry ?? null,
+      search: filters.search?.trim() || null,
       brand_id: filters.brand_id ?? null,
       start: filters.start?.toISOString() ?? null,
       end: filters.end?.toISOString() ?? null,
@@ -614,6 +626,7 @@ export class AdvertService {
       lat?: number;
       lng?: number;
       industry?: string;
+      search?: string;
       brand_id?: string;
       start?: Date;
       end?: Date;
@@ -639,6 +652,18 @@ export class AdvertService {
       filters.start !== undefined ? Prisma.sql`AND a."endDate" >= ${filters.start}` : Prisma.empty;
     const endClause =
       filters.end !== undefined ? Prisma.sql`AND a."startDate" <= ${filters.end}` : Prisma.empty;
+    const search = filters.search?.trim();
+    const searchClause = search
+      ? Prisma.sql`AND (
+          a."id" ILIKE ${`%${search}%`}
+          OR a."address_text" ILIKE ${`%${search}%`}
+          OR a."city_name" ILIKE ${`%${search}%`}
+          OR a."zone_name" ILIKE ${`%${search}%`}
+          OR c."creative_name" ILIKE ${`%${search}%`}
+          OR b."brand_name" ILIKE ${`%${search}%`}
+          OR b."industry_category" ILIKE ${`%${search}%`}
+        )`
+      : Prisma.empty;
     const orderClause =
       sort === 'distance_desc'
         ? Prisma.sql`ORDER BY "distanceKm" DESC, a."id" ASC`
@@ -697,7 +722,7 @@ export class AdvertService {
       JOIN "Creative" c ON c."id" = v."creative_id"
       JOIN "Brand" b ON b."id" = c."brand_id"
       WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusKm * 1000})
-        ${industryClause} ${brandClause} ${startClause} ${endClause}
+        ${industryClause} ${brandClause} ${startClause} ${endClause} ${searchClause}
       ${orderClause}
       LIMIT ${imageMode ? IMAGE_SEARCH_CANDIDATE_LIMIT : take} OFFSET ${imageMode ? 0 : skip}
     `);
@@ -710,6 +735,7 @@ export class AdvertService {
   private async plainSearch(
     filters: {
       industry?: string;
+      search?: string;
       brand_id?: string;
       start?: Date;
       end?: Date;
@@ -719,6 +745,7 @@ export class AdvertService {
     imageMode = false,
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
     // No coordinates: the same filters through Prisma (sort applies to geo mode only).
+    const search = filters.search?.trim();
     const creative: Prisma.CreativeWhereInput = {
       ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
       ...(filters.industry
@@ -727,6 +754,41 @@ export class AdvertService {
     };
     const where: Prisma.AdvertWhereInput = {
       ...(Object.keys(creative).length ? { version: { creative } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { id: { contains: search } },
+              { addressText: { contains: search, mode: 'insensitive' } },
+              { cityName: { contains: search, mode: 'insensitive' } },
+              { zoneName: { contains: search, mode: 'insensitive' } },
+              {
+                version: {
+                  creative: {
+                    creativeName: { contains: search, mode: 'insensitive' },
+                  },
+                },
+              },
+              {
+                version: {
+                  creative: {
+                    brand: {
+                      is: { brandName: { contains: search, mode: 'insensitive' } },
+                    },
+                  },
+                },
+              },
+              {
+                version: {
+                  creative: {
+                    brand: {
+                      is: { industryCategory: { contains: search, mode: 'insensitive' } },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
       ...(filters.start || filters.end
         ? {
             AND: [

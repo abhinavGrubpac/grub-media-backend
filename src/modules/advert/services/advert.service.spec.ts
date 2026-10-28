@@ -508,6 +508,22 @@ describe('AdvertService.findAll', () => {
 
     expect(advertSearchHistory.create).not.toHaveBeenCalled();
   });
+
+  it('matches text searches against city and zone columns', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({ page: 1, limit: 20, sortOrder: 'desc', search: 'Nashik' });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { cityName: { contains: 'Nashik', mode: 'insensitive' } },
+        { zoneName: { contains: 'Nashik', mode: 'insensitive' } },
+      ]),
+    );
+  });
 });
 
 describe('AdvertService.exportAdverts', () => {
@@ -650,6 +666,31 @@ describe('AdvertService.searchByRadius', () => {
       expect.objectContaining({ lat: null, lng: null, radius_km: null }),
     );
     expect(advertSearchHistory.create).toHaveBeenCalled();
+  });
+
+  it('accepts text search on the plain-search fallback', async () => {
+    const { service, advert, advertSearchHistory } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+
+    const result = await service.searchByRadius({ search: ' Nashik ', actor_id: 'manager1' });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        { cityName: { contains: 'Nashik', mode: 'insensitive' } },
+        { addressText: { contains: 'Nashik', mode: 'insensitive' } },
+      ]),
+    );
+    expect(result.search.search).toBe('Nashik');
+    expect(advertSearchHistory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'manager1',
+          params: expect.objectContaining({ search: 'Nashik' }),
+        }),
+      }),
+    );
   });
 
   it('skips history for anonymous callers', async () => {
