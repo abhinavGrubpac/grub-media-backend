@@ -24,6 +24,7 @@ export interface BrandUpstreamInput {
   brand_name: string;
   industry_category?: string | null;
   contact_email?: string | null;
+  parent_company?: string | null;
   /** Attribution: which upstream portal produced this write. */
   upstream_portal?: string;
 }
@@ -33,6 +34,7 @@ export interface BrandComplianceView {
   brand_name: string;
   industry_category: string | null;
   contact_email: string | null;
+  parent_company: string | null;
   upstream_brand_id: string | null;
   upstream_agency_id: string | null;
   /** Government-owned overlay — readable upstream, never writable by it. */
@@ -56,6 +58,7 @@ export interface BrandExportRow {
   brand_name: string;
   industry_category: string | null;
   contact_email: string | null;
+  parent_company: string | null;
   is_active: boolean;
   auto_approve: boolean;
   is_flagged: boolean;
@@ -199,6 +202,7 @@ export class BrandService {
       brand_name: brand.brandName,
       industry_category: brand.industryCategory,
       contact_email: brand.contactEmail,
+      parent_company: brand.parentCompany ?? null,
       is_active: brand.isActive,
       auto_approve: brand.autoApprove,
       is_flagged: brand.isFlagged,
@@ -216,6 +220,7 @@ export class BrandService {
           contactEmail: dto.contact_email ?? null,
           logoUrl: dto.logo_url ?? null,
           address: dto.address ?? null,
+          parentCompany: dto.parent_company ?? null,
           isActive: dto.is_active ?? true,
           autoApprove: dto.auto_approve ?? false,
         },
@@ -228,6 +233,7 @@ export class BrandService {
           brand_id: created.id,
           brand_name: created.brandName,
           industry_category: created.industryCategory,
+          parent_company: created.parentCompany,
           auto_approve: created.autoApprove,
         },
       });
@@ -265,6 +271,7 @@ export class BrandService {
           ...(dto.contact_email !== undefined ? { contactEmail: dto.contact_email } : {}),
           ...(dto.logo_url !== undefined ? { logoUrl: dto.logo_url } : {}),
           ...(dto.address !== undefined ? { address: dto.address } : {}),
+          ...(dto.parent_company !== undefined ? { parentCompany: dto.parent_company } : {}),
           ...(dto.is_active !== undefined ? { isActive: dto.is_active } : {}),
           ...(dto.auto_approve !== undefined ? { autoApprove: dto.auto_approve } : {}),
         },
@@ -280,6 +287,7 @@ export class BrandService {
             contact_email: previous.contactEmail,
             logo_url: (previous as { logoUrl?: string | null }).logoUrl ?? null,
             address: (previous as { address?: string | null }).address ?? null,
+            parent_company: previous.parentCompany ?? null,
             auto_approve: previous.autoApprove,
             is_active: previous.isActive,
           },
@@ -289,6 +297,7 @@ export class BrandService {
             contact_email: updated.contactEmail,
             logo_url: (updated as { logoUrl?: string | null }).logoUrl ?? null,
             address: (updated as { address?: string | null }).address ?? null,
+            parent_company: updated.parentCompany ?? null,
             auto_approve: updated.autoApprove,
             is_active: updated.isActive,
           },
@@ -507,6 +516,7 @@ export class BrandService {
             brandName: input.brand_name,
             industryCategory: input.industry_category ?? null,
             contactEmail: input.contact_email ?? null,
+            parentCompany: input.parent_company ?? null,
             upstreamBrandId: input.upstream_brand_id,
             upstreamAgencyId: input.upstream_agency_id,
           },
@@ -520,6 +530,7 @@ export class BrandService {
             brand_id: created.id,
             brand_name: created.brandName,
             industry_category: created.industryCategory,
+            parent_company: created.parentCompany,
             auto_approve: created.autoApprove,
             origin: 'upstream',
           },
@@ -534,6 +545,7 @@ export class BrandService {
       existing.brandName !== input.brand_name ||
       existing.industryCategory !== (input.industry_category ?? null) ||
       existing.contactEmail !== (input.contact_email ?? null) ||
+      (existing.parentCompany ?? null) !== (input.parent_company ?? null) ||
       existing.upstreamAgencyId !== input.upstream_agency_id;
     if (!changed) {
       const [enriched] = await this.withAgencies([existing]);
@@ -558,6 +570,7 @@ export class BrandService {
           brandName: input.brand_name,
           industryCategory: input.industry_category ?? null,
           contactEmail: input.contact_email ?? null,
+          parentCompany: input.parent_company ?? null,
           upstreamAgencyId: input.upstream_agency_id,
         },
       });
@@ -571,11 +584,13 @@ export class BrandService {
             brand_name: existing.brandName,
             industry_category: existing.industryCategory,
             contact_email: existing.contactEmail,
+            parent_company: existing.parentCompany ?? null,
           },
           newValue: {
             brand_name: updated.brandName,
             industry_category: updated.industryCategory,
             contact_email: updated.contactEmail,
+            parent_company: updated.parentCompany ?? null,
           },
           origin: 'upstream',
         },
@@ -595,6 +610,7 @@ export class BrandService {
       brand_name: brand.brandName,
       industry_category: brand.industryCategory,
       contact_email: brand.contactEmail,
+      parent_company: brand.parentCompany,
       upstream_brand_id: brand.upstreamBrandId,
       upstream_agency_id: brand.upstreamAgencyId,
       government: {
@@ -642,6 +658,7 @@ export class BrandService {
         contact_email: brand.contactEmail,
         logo_url: (brand as { logoUrl?: string | null }).logoUrl ?? null,
         address: (brand as { address?: string | null }).address ?? null,
+        parent_company: brand.parentCompany ?? null,
         is_active: brand.isActive,
         auto_approve: brand.autoApprove,
         is_flagged: brand.isFlagged,

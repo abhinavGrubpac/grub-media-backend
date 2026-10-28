@@ -61,6 +61,7 @@ export class BrandController {
         row.brand_name,
         row.industry_category,
         row.contact_email,
+        row.parent_company,
         row.is_active ? 'active' : 'stopped',
         row.auto_approve ? 'on' : 'off',
         row.is_flagged ? 'flagged' : 'unflagged',
@@ -74,7 +75,7 @@ export class BrandController {
     res.setHeader('Content-Disposition', 'attachment; filename="brands.csv"');
     res.send(
       [
-        'id,brand_name,industry_category,contact_email,activity,auto_approval,flag_status,agency_name,updated_at',
+        'id,brand_name,industry_category,contact_email,parent_company,activity,auto_approval,flag_status,agency_name,updated_at',
         ...lines,
       ].join('\n'),
     );

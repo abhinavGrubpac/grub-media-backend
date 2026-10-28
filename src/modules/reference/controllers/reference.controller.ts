@@ -26,6 +26,12 @@ import { ReferenceUpdateDto } from '../dto/reference-update.dto';
 import { ReferenceUploadUrlDto } from '../dto/reference-upload-url.dto';
 import { ReferenceService } from '../services/reference.service';
 
+/**
+ * Route order matters: Express matches in declaration order, so every
+ * static/bulk path is declared BEFORE the single-segment dynamic routes
+ * (`/:id`). Otherwise `DELETE /bulk-hard-delete` would be swallowed by
+ * `DELETE /:id` and treated as a document id.
+ */
 @ApiTags('references')
 @ApiBearerAuth()
 @Controller({ path: 'references', version: '1' })
@@ -38,19 +44,6 @@ export class ReferenceController {
   @Get()
   findAll(@Query() query: ReferenceListQueryDto): Promise<ReferenceDocResponseDto[]> {
     return this.referenceService.findAll(query);
-  }
-
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Get(':id')
-  findOne(@Param('id') id: string): Promise<ReferenceDocResponseDto> {
-    return this.referenceService.findOne(id);
-  }
-
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
-  @Get(':id/download')
-  @ApiOperation({ summary: 'Download URL for a document (presigned S3 GET)' })
-  download(@Param('id') id: string): Promise<{ download_url: string; file_url: string }> {
-    return this.referenceService.downloadUrl(id);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
@@ -88,6 +81,80 @@ export class ReferenceController {
     return this.referenceService.restoreAll(query);
   }
 
+  /**
+   * Multi-select soft archive (documents tab): one call instead of
+   * N × DELETE /:id. Already-archived/missing ids are excluded from the
+   * write and reflected in the counts.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('bulk-archive')
+  @ApiOperation({ summary: 'Archive a selection of documents at once' })
+  @ResponseMessage('Reference documents archived')
+  bulkArchive(@Body() dto: BulkSelectionDto): Promise<{ archived: number }> {
+    return this.referenceService.bulkArchive(dto.ids);
+  }
+
+  /**
+   * REST alias of POST /bulk-archive. Declared before `DELETE /:id` so the
+   * literal path is never mistaken for a document id.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Delete('bulk-archive')
+  @ApiOperation({ summary: 'Archive a selection of documents at once (DELETE alias)' })
+  @ResponseMessage('Reference documents archived')
+  bulkArchiveDeleteAlias(@Body() dto: BulkSelectionDto): Promise<{ archived: number }> {
+    return this.referenceService.bulkArchive(dto.ids);
+  }
+
+  /**
+   * Multi-select permanent delete (archived tab): one call instead of
+   * N × DELETE /:id/permanent. Same guards as the single delete — docs that
+   * justify review decisions or are not archived are skipped with a reason.
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('bulk-hard-delete')
+  @ApiOperation({ summary: 'Permanently delete a selection of archived documents at once' })
+  @ResponseMessage('Reference documents permanently deleted')
+  bulkHardDelete(
+    @Body() dto: BulkSelectionDto,
+  ): Promise<{ deleted: number; skipped: { id: string; reason: string }[] }> {
+    return this.referenceService.bulkHardDelete(dto.ids);
+  }
+
+  /**
+   * REST alias of POST /bulk-hard-delete. Declared before `DELETE /:id` so
+   * `DELETE /references/bulk-hard-delete` reaches the bulk handler instead of
+   * archiving a document whose id is the literal string "bulk-hard-delete".
+   */
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Delete('bulk-hard-delete')
+  @ApiOperation({
+    summary: 'Permanently delete a selection of archived documents at once (DELETE alias)',
+  })
+  @ResponseMessage('Reference documents permanently deleted')
+  bulkHardDeleteDeleteAlias(
+    @Body() dto: BulkSelectionDto,
+  ): Promise<{ deleted: number; skipped: { id: string; reason: string }[] }> {
+    return this.referenceService.bulkHardDelete(dto.ids);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Get(':id')
+  findOne(@Param('id') id: string): Promise<ReferenceDocResponseDto> {
+    return this.referenceService.findOne(id);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
+  @Get(':id/download')
+  @ApiOperation({ summary: 'Download URL for a document (presigned S3 GET)' })
+  download(@Param('id') id: string): Promise<{ download_url: string; file_url: string }> {
+    return this.referenceService.downloadUrl(id);
+  }
+
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Patch(':id')
   update(
@@ -117,35 +184,5 @@ export class ReferenceController {
   @ResponseMessage('Reference document restored')
   restore(@Param('id') id: string): Promise<ReferenceDocResponseDto> {
     return this.referenceService.restore(id);
-  }
-
-  /**
-   * Multi-select soft archive (documents tab): one call instead of
-   * N × DELETE /:id. Already-archived/missing ids are excluded from the
-   * write and reflected in the counts.
-   */
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @HttpCode(HttpStatus.OK)
-  @Post('bulk-archive')
-  @ApiOperation({ summary: 'Archive a selection of documents at once' })
-  @ResponseMessage('Reference documents archived')
-  bulkArchive(@Body() dto: BulkSelectionDto): Promise<{ archived: number }> {
-    return this.referenceService.bulkArchive(dto.ids);
-  }
-
-  /**
-   * Multi-select permanent delete (archived tab): one call instead of
-   * N × DELETE /:id/permanent. Same guards as the single delete — docs that
-   * justify review decisions or are not archived are skipped with a reason.
-   */
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @HttpCode(HttpStatus.OK)
-  @Post('bulk-hard-delete')
-  @ApiOperation({ summary: 'Permanently delete a selection of archived documents at once' })
-  @ResponseMessage('Reference documents permanently deleted')
-  bulkHardDelete(
-    @Body() dto: BulkSelectionDto,
-  ): Promise<{ deleted: number; skipped: { id: string; reason: string }[] }> {
-    return this.referenceService.bulkHardDelete(dto.ids);
   }
 }

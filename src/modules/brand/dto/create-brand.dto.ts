@@ -31,6 +31,12 @@ export class CreateBrandDto {
   @Length(1, 500)
   address?: string;
 
+  @ApiPropertyOptional({ description: 'Parent company name', maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  parent_company?: string;
+
   @ApiPropertyOptional({
     description: 'Government kill-switch state; false stops all brand activity',
     default: true,

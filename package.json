@@ -10,9 +10,12 @@
   },
   "scripts": {
     "build": "nest build && tsc -p tsconfig.seed.json",
+    "prestart": "node scripts/free-port.js",
     "start": "nest start",
+    "prestart:dev": "node scripts/free-port.js",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main.js",
+    "prestart:prod": "node scripts/free-port.js",
+    "start:prod": "node dist/src/main.js",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

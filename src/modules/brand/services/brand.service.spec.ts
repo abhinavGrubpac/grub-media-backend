@@ -8,6 +8,7 @@ const fullBrand = {
   contactEmail: 'acme@example.com',
   logoUrl: 'https://cdn.example.com/acme.png',
   address: 'MG Road, Bengaluru',
+  parentCompany: null,
   isActive: true,
   autoApprove: false,
   isFlagged: false,
@@ -177,18 +178,24 @@ describe('BrandService', () => {
     await expect(service.findOne('missing')).rejects.toThrow(NotFoundException);
   });
 
-  it('create writes logo/address and emits brand.created in the same transaction', async () => {
+  it('create writes logo/address/parent company and emits brand.created in the same transaction', async () => {
     const { service, brand, outbox } = makeDeps();
-    brand.create.mockResolvedValue({ ...fullBrand, brandName: 'Newco' });
+    brand.create.mockResolvedValue({
+      ...fullBrand,
+      brandName: 'Newco',
+      parentCompany: 'Tata Group',
+    });
 
     const response = await service.create({
       brand_name: 'Newco',
       auto_approve: true,
       logo_url: 'https://cdn.example.com/newco.png',
       address: 'Park Street',
+      parent_company: 'Tata Group',
     });
 
     expect(response.brand_name).toBe('Newco');
+    expect(response.parent_company).toBe('Tata Group');
     expect(brand.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -196,6 +203,7 @@ describe('BrandService', () => {
           autoApprove: true,
           logoUrl: 'https://cdn.example.com/newco.png',
           address: 'Park Street',
+          parentCompany: 'Tata Group',
         }),
       }),
     );
@@ -206,6 +214,21 @@ describe('BrandService', () => {
         payload: expect.objectContaining({ brand_name: 'Newco' }),
       }),
     );
+  });
+
+  it('update persists parent company changes', async () => {
+    const { service, brand } = makeDeps();
+    brand.findUnique.mockResolvedValue(fullBrand);
+    brand.update.mockResolvedValue({ ...fullBrand, parentCompany: 'Tata Group' });
+
+    const response = await service.update('b1', { parent_company: 'Tata Group' });
+
+    expect(brand.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ parentCompany: 'Tata Group' }),
+      }),
+    );
+    expect(response.parent_company).toBe('Tata Group');
   });
 
   it('setFlag emits non_compliant_flagged when raising the flag', async () => {

@@ -45,6 +45,10 @@ export class BrandResponseDto {
   @Expose()
   address!: string | null;
 
+  @ApiPropertyOptional({ description: 'Parent company name', nullable: true })
+  @Expose()
+  parent_company!: string | null;
+
   @ApiProperty({ description: 'Government kill-switch state' })
   @Expose()
   is_active!: boolean;

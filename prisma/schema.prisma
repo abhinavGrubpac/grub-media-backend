@@ -218,6 +218,7 @@ model Brand {
   contactEmail     String?    @map("contact_email")
   logoUrl          String?
   address          String?
+  parentCompany    String?    @map("parent_company")
   isActive         Boolean    @default(true) @map("is_active")
   autoApprove      Boolean    @default(false) @map("auto_approve")
   isFlagged        Boolean    @default(false)

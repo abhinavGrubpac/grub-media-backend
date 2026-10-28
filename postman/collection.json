@@ -1466,7 +1466,7 @@
                 "bulk-archive"
               ]
             },
-            "description": "ids* — soft-archive a selection at once (documents tab multi-select): one call instead of N × DELETE /references/:id. Already-archived and missing ids are excluded from the write and reflected in the count. ✅ 200 { archived: N }",
+            "description": "ids* — soft-archive a selection at once (documents tab multi-select): one call instead of N × DELETE /references/:id. Already-archived and missing ids are excluded from the write and reflected in the count. Accepted verbs: POST (canonical) and DELETE (REST alias), same JSON body. ✅ 200 { archived: N }",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
@@ -1501,7 +1501,42 @@
                 "bulk-hard-delete"
               ]
             },
-            "description": "ids* — permanent delete of archived docs in ONE call instead of N × DELETE /references/:id/permanent. Same guards per doc (archive-first, cannot delete a doc that justifies review decisions); blocked docs are skipped with a per-id reason. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
+            "description": "ids* — permanent delete of archived docs in ONE call instead of N × DELETE /references/:id/permanent. Same guards per doc (archive-first, cannot delete a doc that justifies review decisions); blocked docs are skipped with a per-id reason. Accepted verbs: POST (canonical) and DELETE (REST alias), same JSON body. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Selection Permanently (bulk, DELETE alias)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/references/bulk-hard-delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "references",
+                "bulk-hard-delete"
+              ]
+            },
+            "description": "REST alias of POST /references/bulk-hard-delete. Same body, guards and response. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",
@@ -1661,7 +1696,7 @@
                 }
               ]
             },
-            "description": "same filters as list; columns include activity/auto_approval/flag_status/agency_name"
+            "description": "same filters as list; columns include parent_company/activity/auto_approval/flag_status/agency_name"
           }
         },
         {
@@ -1681,7 +1716,7 @@
                 "{{brandId}}"
               ]
             },
-            "description": "includes logo_url, address, agency{agency_name,city,address}"
+            "description": "includes logo_url, address, parent_company, agency{agency_name,city,address}"
           }
         },
         {
@@ -1705,10 +1740,10 @@
                 "brands"
               ]
             },
-            "description": "brand_name*, industry_category, contact_email, logo_url, address, is_active, auto_approve",
+            "description": "brand_name*, industry_category, contact_email, logo_url, address, parent_company, is_active, auto_approve",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"brand_name\": \"Acme\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme.png\",\n  \"address\": \"MG Road, Bengaluru\",\n  \"is_active\": true,\n  \"auto_approve\": false\n}",
+              "raw": "{\n  \"brand_name\": \"Acme\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme.png\",\n  \"address\": \"MG Road, Bengaluru\",\n  \"parent_company\": \"Tata Group\",\n  \"is_active\": true,\n  \"auto_approve\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1752,10 +1787,10 @@
                 "{{brandId}}"
               ]
             },
-            "description": "All optional incl. logo_url and address",
+            "description": "All optional incl. logo_url, address and parent_company",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"brand_name\": \"Acme (rev 2)\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme-v2.png\",\n  \"address\": \"Brigade Road\",\n  \"is_active\": true,\n  \"auto_approve\": true\n}",
+              "raw": "{\n  \"brand_name\": \"Acme (rev 2)\",\n  \"industry_category\": \"Food\",\n  \"contact_email\": \"brand@example.com\",\n  \"logo_url\": \"https://cdn.example.com/acme-v2.png\",\n  \"address\": \"Brigade Road\",\n  \"parent_company\": \"Tata Group\",\n  \"is_active\": true,\n  \"auto_approve\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"

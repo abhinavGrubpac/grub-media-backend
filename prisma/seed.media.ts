@@ -7,7 +7,7 @@
  * bundles, help) is created or modified.
  *
  * Idempotent by design — safe to re-run anywhere:
- *   • brands / creatives / versions are keyed on their upstream ids,
+ *   • agencies / brands / creatives / versions are keyed on their upstream ids,
  *   • review actions are created only when a version has none yet,
  *   • reference docs are matched by title, creative links by (version, doc),
  *   • adverts insert only when their upstream_advert_id is absent.
@@ -35,11 +35,34 @@ interface BrandSeed {
   industryCategory: string;
   contactEmail: string;
   address: string;
+  parentCompany: string;
   upstreamAgencyId: string | null;
   createdAt: string;
   isFlagged?: boolean;
   flaggedOn?: string;
 }
+
+interface AgencySeed {
+  upstreamAgencyId: string;
+  agencyName: string;
+  city: string;
+  address: string;
+}
+
+const AGENCIES: AgencySeed[] = [
+  {
+    upstreamAgencyId: 'MAH-OOH-AG-001',
+    agencyName: 'The Times Group',
+    city: 'Mumbai',
+    address: 'The Times of India Building, Dr. D.N. Road, Mumbai - 400001',
+  },
+  {
+    upstreamAgencyId: 'MAH-OOH-AG-002',
+    agencyName: 'Dentsu',
+    city: 'Mumbai',
+    address: 'Dentsu India, Lower Parel, Mumbai - 400013',
+  },
+];
 
 const BRANDS: BrandSeed[] = [
   {
@@ -48,6 +71,7 @@ const BRANDS: BrandSeed[] = [
     industryCategory: 'Tourism & Culture',
     contactEmail: 'info@maharashtratourism.gov.in',
     address: 'Express Towers, Nariman Point, Mumbai - 400021',
+    parentCompany: 'Government of Maharashtra',
     upstreamAgencyId: 'MAH-OOH-AG-001',
     createdAt: '2026-04-10',
   },
@@ -57,6 +81,7 @@ const BRANDS: BrandSeed[] = [
     industryCategory: 'Municipal Administration',
     contactEmail: 'comm@mcgm.gov.in',
     address: 'MCGM Headquarters, Mahapalika Marg, Mumbai - 400001',
+    parentCompany: 'Government of Maharashtra',
     upstreamAgencyId: 'MAH-OOH-AG-002',
     createdAt: '2026-09-01',
   },
@@ -66,7 +91,8 @@ const BRANDS: BrandSeed[] = [
     industryCategory: 'Public Transport',
     contactEmail: 'feedback@msrtc.maharashtra.gov.in',
     address: 'MSRTC Head Office, Mumbai Central, Mumbai - 400008',
-    upstreamAgencyId: null,
+    parentCompany: 'Government of Maharashtra',
+    upstreamAgencyId: 'MAH-OOH-AG-002',
     createdAt: '2026-09-10',
     isFlagged: true,
     flaggedOn: '2026-09-20',
@@ -77,6 +103,7 @@ const BRANDS: BrandSeed[] = [
     industryCategory: 'Public Safety',
     contactEmail: 'citizen@mahapolice.gov.in',
     address: 'Police Headquarters, Shahid Bhagat Singh Marg, Colaba, Mumbai - 400001',
+    parentCompany: 'Government of Maharashtra',
     upstreamAgencyId: 'MAH-OOH-AG-002',
     createdAt: '2026-09-15',
   },
@@ -86,6 +113,7 @@ const BRANDS: BrandSeed[] = [
     industryCategory: 'Power & Energy',
     contactEmail: 'customercare@mahadiscom.in',
     address: 'Prakashgad, Bandra (East), Mumbai - 400051',
+    parentCompany: 'Government of Maharashtra',
     upstreamAgencyId: 'MAH-OOH-AG-001',
     createdAt: '2026-06-10',
   },
@@ -579,6 +607,20 @@ async function main(): Promise<void> {
   }
   console.log(`  Actor: ${actor.email} (${actor.id})`);
 
+  // ── Agencies ──────────────────────────────────────────────────────────────
+  console.log('\n→ Agencies');
+  let agenciesCreated = 0;
+  for (const a of AGENCIES) {
+    const existing = await prisma.agencyRef.findUnique({
+      where: { upstreamAgencyId: a.upstreamAgencyId },
+    });
+    if (!existing) {
+      await prisma.agencyRef.create({ data: a });
+      agenciesCreated++;
+    }
+    console.log(`    ${existing ? 'exists ' : 'created'} ${a.agencyName} (${a.upstreamAgencyId})`);
+  }
+
   // ── Brands ────────────────────────────────────────────────────────────────
   console.log('\n→ Brands');
   const brandIds = new Map<string, string>();
@@ -596,6 +638,7 @@ async function main(): Promise<void> {
           industryCategory: b.industryCategory,
           contactEmail: b.contactEmail,
           address: b.address,
+          parentCompany: b.parentCompany,
           upstreamAgencyId: b.upstreamAgencyId,
           createdAt: ts(b.createdAt),
           ...(b.isFlagged
@@ -773,6 +816,9 @@ async function main(): Promise<void> {
   }
 
   console.log('\n──────────────────────────────────────────────');
+  console.log(
+    `  Agencies:          ${agenciesCreated} created / ${AGENCIES.length - agenciesCreated} existing`,
+  );
   console.log(
     `  Brands:            ${brandsCreated} created / ${BRANDS.length - brandsCreated} existing`,
   );
