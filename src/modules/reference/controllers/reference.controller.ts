@@ -109,14 +109,14 @@ export class ReferenceController {
   }
 
   /**
-   * Multi-select permanent delete (archived tab): one call instead of
-   * N × DELETE /:id/permanent. Same guards as the single delete — docs that
-   * justify review decisions or are not archived are skipped with a reason.
+   * Multi-select permanent delete: one call instead of N ×
+   * DELETE /:id/permanent. Docs that still justify review decisions are
+   * skipped with a reason.
    */
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   @Post('bulk-hard-delete')
-  @ApiOperation({ summary: 'Permanently delete a selection of archived documents at once' })
+  @ApiOperation({ summary: 'Permanently delete a selection of documents at once' })
   @ResponseMessage('Reference documents permanently deleted')
   bulkHardDelete(
     @Body() dto: BulkSelectionDto,
@@ -133,7 +133,7 @@ export class ReferenceController {
   @HttpCode(HttpStatus.OK)
   @Delete('bulk-hard-delete')
   @ApiOperation({
-    summary: 'Permanently delete a selection of archived documents at once (DELETE alias)',
+    summary: 'Permanently delete a selection of documents at once (DELETE alias)',
   })
   @ResponseMessage('Reference documents permanently deleted')
   bulkHardDeleteDeleteAlias(

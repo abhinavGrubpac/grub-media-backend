@@ -359,15 +359,11 @@ describe('ReferenceService.archive / restore', () => {
     await expect(service.bulkArchive([])).rejects.toThrow(BadRequestException);
   });
 
-  it('bulk-hard-delete applies the single-doc guards per id and skips blockers', async () => {
+  it('bulk-hard-delete permanently deletes active docs and skips linked ones', async () => {
     const { service, referenceDoc, client, outbox } = makeDeps();
-    // a: archived, no links → deleted. b: still justifying decisions → skipped.
+    // a: active, no links → deleted. b: still justifying decisions → skipped.
     referenceDoc.findUnique.mockImplementation((args: { where: { id: string } }) =>
-      Promise.resolve(
-        args.where.id === 'a'
-          ? { ...docRow, id: 'a', isArchived: true }
-          : { ...docRow, id: 'b', isArchived: true },
-      ),
+      Promise.resolve(args.where.id === 'a' ? { ...docRow, id: 'a' } : { ...docRow, id: 'b' }),
     );
     client.creativeReference.count.mockImplementation((args: { where: { docId: string } }) =>
       Promise.resolve(args.where.docId === 'b' ? 1 : 0),
@@ -408,26 +404,19 @@ describe('ReferenceService.archive / restore', () => {
 });
 
 describe('ReferenceService.hardDelete', () => {
-  it('permanently deletes archived, unlinked documents', async () => {
+  it('permanently deletes active, unlinked documents without archiving first', async () => {
     const { service, referenceDoc, creativeReference, outbox } = makeDeps();
-    referenceDoc.findUnique.mockResolvedValue({ ...docRow, isArchived: true });
+    referenceDoc.findUnique.mockResolvedValue(docRow);
     creativeReference.count.mockResolvedValue(0);
 
     await service.hardDelete('doc1');
 
+    expect(referenceDoc.update).not.toHaveBeenCalled();
     expect(referenceDoc.delete).toHaveBeenCalledWith({ where: { id: 'doc1' } });
     expect(outbox.emitInTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ eventType: 'reference.deleted' }),
     );
-  });
-
-  it('rejects permanent deletes of active documents (archive first)', async () => {
-    const { service, referenceDoc, creativeReference } = makeDeps();
-    referenceDoc.findUnique.mockResolvedValue(docRow);
-    creativeReference.count.mockResolvedValue(0);
-
-    await expect(service.hardDelete('doc1')).rejects.toThrow(/archived before permanent/);
   });
 
   it('blocks deletes that would orphan review justifications', async () => {

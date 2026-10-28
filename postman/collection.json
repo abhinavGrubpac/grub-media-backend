@@ -1501,7 +1501,7 @@
                 "bulk-hard-delete"
               ]
             },
-            "description": "ids* — permanent delete of archived docs in ONE call instead of N × DELETE /references/:id/permanent. Same guards per doc (archive-first, cannot delete a doc that justifies review decisions); blocked docs are skipped with a per-id reason. Accepted verbs: POST (canonical) and DELETE (REST alias), same JSON body. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
+            "description": "ids* — permanent delete of documents in ONE call instead of N × DELETE /references/:id/permanent. Same guard per doc (cannot delete a doc that justifies review decisions); blocked docs are skipped with a per-id reason. Accepted verbs: POST (canonical) and DELETE (REST alias), same JSON body. ✅ 200 { deleted: N, skipped: [{id, reason}] }",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ids\": [\n    \"{{docId}}\"\n  ]\n}",

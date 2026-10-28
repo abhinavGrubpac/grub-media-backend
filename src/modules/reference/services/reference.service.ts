@@ -72,9 +72,10 @@ function resolveOrderBy(
 }
 
 /**
- * Regulatory document library (REQUIREMENTS.md §3.3). Active docs are archived
- * (soft delete) so past review decisions keep their justifications; archived
- * docs can be restored in bulk or permanently deleted when unlinked.
+ * Regulatory document library (REQUIREMENTS.md §3.3). Documents can be archived
+ * (soft delete) for a reversible hidden state, or permanently deleted when the
+ * user explicitly chooses Delete. Permanent deletion stays blocked while a doc
+ * justifies a review decision so audit history is kept.
  * Reviewers link documents to creative versions to justify rejections.
  */
 @Injectable()
@@ -401,20 +402,14 @@ export class ReferenceService {
   }
 
   /**
-   * Permanent delete from the archived list. Blocked while the doc justifies
-   * a review decision (CreativeReference exists) so audit history is kept.
+   * Permanently deletes a document whether it is active or archived. Blocked
+   * while the doc justifies a review decision (CreativeReference exists) so
+   * audit history is kept.
    */
   async hardDelete(id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const existing = await tx.referenceDoc.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException(`Reference document ${id} not found`);
-      // Permanent deletes run from the archived list only — archive first so
-      // active library docs cannot be destroyed in one call.
-      if (!existing.isArchived) {
-        throw new ConflictException(
-          `Reference document ${id} must be archived before permanent deletion`,
-        );
-      }
       const links = await tx.creativeReference.count({ where: { docId: id } });
       if (links > 0) {
         throw new ConflictException(
@@ -433,11 +428,11 @@ export class ReferenceService {
   }
 
   /**
-   * Multi-select permanent delete from the archived tab: replaces N ×
+   * Multi-select permanent delete from either tab: replaces N ×
    * DELETE /:id/permanent with one request. Every id is applied through the
-   * standard single-doc path — identical guards (archive-first, refusal
-   * while the doc justifies review decisions) — and rows that fail those
-   * guards are skipped with a per-id reason instead of failing the batch.
+   * standard single-doc path — identical guard (refusal while the doc justifies
+   * review decisions) — and rows that fail are skipped with a per-id reason
+   * instead of failing the batch.
    */
   async bulkHardDelete(
     ids: string[],
