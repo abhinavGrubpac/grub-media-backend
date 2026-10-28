@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { Prisma, AdvertStatus, ReviewStatus } from '@prisma/client';
+import { Prisma, AdvertStatus, ReviewStatus, UserRole } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { StandardMeta, standardMeta, toSkipTake } from '../../../common/utils/paginate';
 import { PrismaService } from '../../../database/prisma.service';
@@ -139,6 +139,8 @@ export interface AdvertSearchEcho {
   sort: AdvertSearchSort;
   query_hash: string | null;
   max_distance: number | null;
+  /** Free-text search captured by GET /adverts?search=... (not geo mode). */
+  search?: string | null;
 }
 
 export interface AdvertSearchResult {
@@ -180,7 +182,6 @@ export const RECENT_SEARCH_PREVIEW_LIMIT = 4;
 
 /** 7-day revisit window for recent searches. */
 export const RECENT_SEARCH_DAYS = 7;
-export const RECENT_SEARCH_LIMIT = 20;
 
 export interface AdvertExportRow {
   id: string;
@@ -764,7 +765,7 @@ export class AdvertService {
     actorId: string | undefined,
     params: AdvertSearchEcho,
     resultCount: number,
-    rows: AdvertResponseDto[] = [],
+    rows: AdvertResponseDto[] | AdvertBrandGroupDto[] = [],
   ): Promise<void> {
     if (!actorId) return;
     try {
@@ -781,13 +782,20 @@ export class AdvertService {
     }
   }
 
-  /** Revisit window: this operator's searches from the last 7 days, newest first. */
-  async listRecentSearches(actorId: string): Promise<RecentAdvertSearch[]> {
+  /**
+   * Revisit window: searches from the last 7 days, newest first.
+   * Admins see the team's searches (the Advert Control modal promises "all
+   * advert searches from the past week"); employees see their own history.
+   */
+  async listRecentSearches(actorId: string, actorRole?: UserRole): Promise<RecentAdvertSearch[]> {
+    const canViewTeam = actorRole === UserRole.SUPER_ADMIN || actorRole === UserRole.ADMIN;
     const since = new Date(Date.now() - RECENT_SEARCH_DAYS * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.client.advertSearchHistory.findMany({
-      where: { userId: actorId, createdAt: { gte: since } },
+      where: {
+        createdAt: { gte: since },
+        ...(canViewTeam ? {} : { userId: actorId }),
+      },
       orderBy: { createdAt: 'desc' },
-      take: RECENT_SEARCH_LIMIT,
     });
     const now = Date.now();
     return rows.map((row) => ({
@@ -1130,6 +1138,7 @@ export class AdvertService {
 
   async findAll(
     query: AdvertListQueryDto,
+    actorId?: string,
   ): Promise<
     | { items: AdvertResponseDto[]; meta: StandardMeta }
     | { items: AdvertBrandGroupDto[]; meta: StandardMeta }
@@ -1152,10 +1161,38 @@ export class AdvertService {
     const rows = adverts.map((advert) =>
       this.toResponse(advert, undefined, { location: locations.get(advert.id) ?? null }),
     );
+    // Text searches from Advert Control go through the list endpoint, not
+    // /adverts/search, so record them here too. Only the first page is
+    // recorded to avoid duplicate history while paging.
+    const record = async (items: AdvertResponseDto[] | AdvertBrandGroupDto[]) => {
+      const search = query.search?.trim();
+      if (!actorId || page !== 1 || !search) return;
+      await this.recordSearch(
+        actorId,
+        {
+          lat: null,
+          lng: null,
+          radius_km: null,
+          industry: query.industry ?? null,
+          brand_id: query.brand_id ?? query.brandId ?? null,
+          start: query.start_date ?? null,
+          end: query.end_date ?? null,
+          sort: 'distance_asc',
+          query_hash: null,
+          max_distance: null,
+          search,
+        },
+        total,
+        items,
+      );
+    };
+
     if (query.group_by === 'brand') {
       const items = groupAdvertsByBrand(rows);
+      await record(items);
       return { items, meta: standardMeta(total, page, limit, items.length) };
     }
+    await record(rows);
     return { items: rows, meta: standardMeta(total, page, limit, rows.length) };
   }
 

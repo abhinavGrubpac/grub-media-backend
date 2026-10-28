@@ -909,7 +909,7 @@
                 "recent"
               ]
             },
-            "description": "7-day revisit window: this operator's recent searches, newest first."
+            "description": "7-day revisit window, newest first. SUPER_ADMIN and ADMIN receive every operator's searches; EMPLOYEE receives their own."
           },
           "response": []
         },

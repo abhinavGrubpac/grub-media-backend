@@ -55,11 +55,14 @@ export class AdvertController {
     return this.advertService.searchByRadius({ ...query, actor_id: user.id });
   }
 
-  /** 7-day revisit window: this operator's recent searches, newest first. */
+  /**
+   * 7-day revisit window, newest first. Admins see every operator's searches;
+   * employees see their own.
+   */
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)
   @Get('searches/recent')
   recentSearches(@CurrentUser() user: AuthUser): Promise<RecentAdvertSearch[]> {
-    return this.advertService.listRecentSearches(user.id);
+    return this.advertService.listRecentSearches(user.id, user.role);
   }
 
   /**
@@ -96,11 +99,12 @@ export class AdvertController {
   @Get()
   findAll(
     @Query() query: AdvertListQueryDto,
+    @CurrentUser() user: AuthUser,
   ): Promise<
     | { items: AdvertResponseDto[]; meta: StandardMeta }
     | { items: AdvertBrandGroupDto[]; meta: StandardMeta }
   > {
-    return this.advertService.findAll(query);
+    return this.advertService.findAll(query, user.id);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE)

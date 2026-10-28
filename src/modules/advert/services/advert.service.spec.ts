@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
 import { AdvertService } from './advert.service';
 
@@ -477,6 +478,36 @@ describe('AdvertService.findAll', () => {
       service.findAll({ page: 1, limit: 20, sortOrder: 'desc', sortBy: 'bogus' }),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it('records first-page text searches so they appear in recent searches', async () => {
+    const { service, advert, advertSearchHistory } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+
+    await service.findAll(
+      { page: 1, limit: 20, sortOrder: 'desc', search: ' Mumbai ' },
+      'manager1',
+    );
+
+    expect(advertSearchHistory.create).toHaveBeenCalledTimes(1);
+    expect(advertSearchHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'manager1',
+        resultCount: 1,
+        params: expect.objectContaining({ search: 'Mumbai' }),
+      }),
+    });
+  });
+
+  it('does not record text searches while paging', async () => {
+    const { service, advert, advertSearchHistory } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({ page: 2, limit: 20, sortOrder: 'desc', search: 'Mumbai' }, 'manager1');
+
+    expect(advertSearchHistory.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('AdvertService.exportAdverts', () => {
@@ -810,9 +841,9 @@ describe('AdvertService.listRecentSearches', () => {
       expect.objectContaining({
         where: expect.objectContaining({ userId: 'manager1' }),
         orderBy: { createdAt: 'desc' },
-        take: 20,
       }),
     );
+    expect(advertSearchHistory.findMany.mock.calls[0][0].take).toBeUndefined();
     expect(rows).toEqual([
       {
         id: 's1',
@@ -823,6 +854,20 @@ describe('AdvertService.listRecentSearches', () => {
         hours_ago: 5,
       },
     ]);
+  });
+
+  it('returns team-wide history for admins and own history for employees', async () => {
+    const { service, advertSearchHistory } = makeDeps();
+    advertSearchHistory.findMany.mockResolvedValue([]);
+
+    await service.listRecentSearches('admin1', UserRole.ADMIN);
+    expect(advertSearchHistory.findMany.mock.calls[0][0].where.userId).toBeUndefined();
+
+    await service.listRecentSearches('super1', UserRole.SUPER_ADMIN);
+    expect(advertSearchHistory.findMany.mock.calls[1][0].where.userId).toBeUndefined();
+
+    await service.listRecentSearches('employee1', UserRole.EMPLOYEE);
+    expect(advertSearchHistory.findMany.mock.calls[2][0].where.userId).toBe('employee1');
   });
 
   it('returns the stored media preview for newer rows', async () => {
