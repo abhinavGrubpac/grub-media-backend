@@ -280,6 +280,8 @@ async function seedBundles(
 ): Promise<Map<string, string>> {
   const bundleIdMap = new Map<string, string>();
 
+  const allPermissionKeys = PERMISSION_DEFS.map((d) => `${d.module}:${d.page}:${d.action}`);
+
   const bundleDefs: {
     name: string;
     description: string;
@@ -287,71 +289,65 @@ async function seedBundles(
     permKeys: string[];
   }[] = [
     {
-      name: 'Viewer',
-      description: 'Read-only access across all modules',
+      name: 'SUPER_ADMIN',
+      description: 'Full access to every module and super-admin operation',
       createdBy: superAdminId,
-      permKeys: [
-        'dashboard:overview:read',
-        'employees:list:view_active',
-        'roles:list:read',
-        'clients:list:read',
-        'support:categories:read',
-        'support:faqs:read',
-        'support:tickets:read',
-      ],
+      permKeys: allPermissionKeys,
     },
     {
-      name: 'HR Manager',
-      description: 'Manage employees and view audit logs',
-      createdBy: superAdminId,
-      permKeys: [
-        'dashboard:overview:read',
-        'dashboard:overview:export',
-        'employees:list:view_active',
-        'employees:list:view_suspended',
-        'employees:list:view_dismissed',
-        'employees:list:view_logs',
-        'employees:list:create',
-        'employees:list:export',
-        'employees:detail:update',
-        'employees:detail:suspend',
-        'employees:detail:activate',
-      ],
-    },
-    {
-      name: 'Content Manager',
-      description: 'Full access to support/help content',
-      createdBy: adminIds[0] ?? superAdminId,
-      permKeys: [
-        'dashboard:overview:read',
-        'support:categories:read',
-        'support:categories:create',
-        'support:categories:update',
-        'support:categories:delete',
-        'support:faqs:read',
-        'support:faqs:create',
-        'support:faqs:update',
-        'support:faqs:delete',
-      ],
-    },
-    {
-      name: 'Admin Full Access',
+      name: 'ADMIN',
       description: 'Full access for admins except super-admin operations',
       createdBy: superAdminId,
-      permKeys: PERMISSION_DEFS.map((d) => `${d.module}:${d.page}:${d.action}`),
+      permKeys: allPermissionKeys,
+    },
+    {
+      name: 'EMPLOYEE',
+      description: 'Standard employee access',
+      createdBy: superAdminId,
+      permKeys: [
+        'clients:detail:archive',
+        'clients:detail:suspend',
+        'clients:list:create',
+        'clients:list:read',
+        'dashboard:overview:export',
+        'dashboard:overview:read',
+        'employees:detail:activate',
+        'employees:detail:suspend',
+        'employees:detail:update',
+        'employees:list:create',
+        'employees:list:export',
+        'employees:list:view_active',
+        'employees:list:view_dismissed',
+        'employees:list:view_logs',
+        'employees:list:view_suspended',
+        'roles:list:read',
+        'support:categories:create',
+        'support:categories:delete',
+        'support:categories:read',
+        'support:categories:update',
+        'support:faqs:create',
+        'support:faqs:delete',
+        'support:faqs:read',
+        'support:faqs:update',
+        'support:tickets:read',
+      ],
     },
   ];
 
   for (const def of bundleDefs) {
-    const bundle = await prisma.permissionBundle.upsert({
-      where: { createdBy_name: { createdBy: def.createdBy, name: def.name } },
-      update: {},
-      create: {
-        name: def.name,
-        description: def.description,
-        createdBy: def.createdBy,
-      },
+    const existing = await prisma.permissionBundle.findFirst({
+      where: { name: def.name },
+      orderBy: { createdAt: 'asc' },
     });
+    const bundle =
+      existing ??
+      (await prisma.permissionBundle.create({
+        data: {
+          name: def.name,
+          description: def.description,
+          createdBy: def.createdBy,
+        },
+      }));
     bundleIdMap.set(def.name, bundle.id);
 
     // Attach permissions
@@ -387,11 +383,15 @@ async function seedUserBundles(
   superAdminId: string,
 ): Promise<void> {
   const assignments: { userId: string; bundleName: string; assignedBy: string }[] = [
-    { userId: adminIds[0], bundleName: 'Admin Full Access', assignedBy: superAdminId },
-    { userId: adminIds[1], bundleName: 'Admin Full Access', assignedBy: superAdminId },
-    { userId: employeeIds[0], bundleName: 'Content Manager', assignedBy: adminIds[0] },
-    { userId: employeeIds[1], bundleName: 'HR Manager', assignedBy: adminIds[0] },
-    { userId: employeeIds[2], bundleName: 'Viewer', assignedBy: adminIds[1] },
+    { userId: superAdminId, bundleName: 'SUPER_ADMIN', assignedBy: superAdminId },
+    ...adminIds
+      .filter(Boolean)
+      .map((userId) => ({ userId, bundleName: 'ADMIN', assignedBy: superAdminId })),
+    ...employeeIds.filter(Boolean).map((userId) => ({
+      userId,
+      bundleName: 'EMPLOYEE',
+      assignedBy: adminIds[0] ?? superAdminId,
+    })),
   ];
 
   for (const a of assignments) {
