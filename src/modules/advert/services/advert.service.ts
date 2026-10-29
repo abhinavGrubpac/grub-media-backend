@@ -115,9 +115,8 @@ export function buildSearchPreview(
     address_text: row.address_text ?? null,
     city_name: row.city_name ?? null,
     status: row.status,
+    proximity: row.distance_m ?? null,
     distance_m: row.distance_m ?? null,
-    /** Legacy km alias retained while older clients migrate. */
-    distance_km: row.distance_m != null ? Math.round((row.distance_m / 1000) * 1000) / 1000 : null,
   }));
 }
 /** Group page rows under their brand headers (brand order = first appearance). */
@@ -211,9 +210,8 @@ export interface AdvertSearchPreview {
   address_text: string | null;
   city_name: string | null;
   status: string;
+  proximity: number | null;
   distance_m: number | null;
-  /** Legacy km alias retained while older clients migrate. */
-  distance_km?: number | null;
 }
 
 /** Preview rows kept per history entry (first page only). */
@@ -593,13 +591,20 @@ export class AdvertService {
     return this.readEnriched(advertId);
   }
 
-  /** Radius search via PostGIS ST_DWithin; search can resolve the anchor location from DB data. */
+  /**
+   * Location search (Advert Control). The location is always plain text:
+   * lat/lng are never accepted, and the searched text resolves to an anchor
+   * (lat/lng) at query time from the advert inventory's own city/zone/address
+   * data. Radius (radius_m, metres) requires that location — it cannot stand
+   * alone; a location without a radius matches all text-matching rows, sorted
+   * by proximity, with no distance cut-off. Every result row carries
+   * proximity (metres) measured from the resolved anchor. The searched text
+   * also stays a row filter (ids, address, city, zone, creative, brand,
+   * industry) so location and advanced filters AND-combine; unmappable text
+   * yields an empty result set. All distances are in metres.
+   */
   async searchByRadius(filters: {
-    lat?: number;
-    lng?: number;
-    /** Search radius in metres. */
-    radius?: number;
-    /** Canonical metres alias for radius. */
+    /** Resolve search radius in metres; requires a location search. */
     radius_m?: number;
     industry?: string | string[];
     search?: string;
@@ -625,41 +630,24 @@ export class AdvertService {
     max_distance?: number;
     actor_id?: string;
   }): Promise<AdvertSearchResult> {
-    const hasLat = filters.lat !== undefined;
-    const hasLng = filters.lng !== undefined;
-    if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
-      throw new BadRequestException('lat and lng must be searched together');
+    // lat/lng are out of contract: location is searched as text only.
+    const raw = filters as unknown as Record<string, unknown>;
+    if (raw.lat !== undefined || raw.lng !== undefined) {
+      throw new BadRequestException('location is searched as text only; lat/lng are not accepted');
     }
-    const hasRadius = filters.radius !== undefined || filters.radius_m !== undefined;
-    if (
-      hasRadius &&
-      filters.radius !== undefined &&
-      filters.radius_m !== undefined &&
-      filters.radius !== filters.radius_m
-    ) {
-      throw new BadRequestException('radius and radius_m must be the same metre value');
-    }
-    const radiusM = filters.radius_m ?? filters.radius ?? 5000;
+    const radiusM = filters.radius_m;
     const search = filters.search?.trim() || undefined;
-    // Validate/normalize the shared filter set before choosing geo vs plain.
+    if (radiusM !== undefined && !search) {
+      throw new BadRequestException(
+        'radius_m cannot be searched alone; supply a location (search) too',
+      );
+    }
+    // Validate/normalize the shared filter set before resolving anything.
     buildAdvertWhere(filters);
 
-    // Search + radius is a location search: resolve the searched place from
-    // existing city/zone/address data rather than requiring hardcoded lat/lng.
-    let resolvedLat = filters.lat;
-    let resolvedLng = filters.lng;
-    if (!hasLat && !hasLng && search && hasRadius) {
-      const anchor = await this.resolveSearchAnchor(search);
-      if (!anchor) {
-        throw new BadRequestException(`could not resolve a location from search "${search}"`);
-      }
-      resolvedLat = anchor.lat;
-      resolvedLng = anchor.lng;
-    }
-    if (hasRadius && resolvedLat === undefined && resolvedLng === undefined && !search) {
-      throw new BadRequestException('radius needs lat+lng or a location search');
-    }
-
+    // Resolve the searched place to an anchor at query time from the
+    // inventory's own city/zone/address data.
+    const anchor = search ? await this.resolveSearchAnchor(search) : null;
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 50;
     const sort = filters.sort ?? 'distance_asc';
@@ -670,11 +658,10 @@ export class AdvertService {
       IMAGE_SEARCH_MAX_DISTANCE,
     );
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
-    const isGeo = resolvedLat !== undefined && resolvedLng !== undefined;
     const echo: AdvertSearchEcho = {
-      lat: resolvedLat ?? null,
-      lng: resolvedLng ?? null,
-      radius_m: isGeo ? radiusM : null,
+      lat: anchor?.lat ?? null,
+      lng: anchor?.lng ?? null,
+      radius_m: anchor !== null && radiusM !== undefined ? radiusM : null,
       industry: echoMultiValue(filters.industry),
       search: search ?? null,
       brand_id: echoMultiValue(filters.brand_id),
@@ -692,13 +679,25 @@ export class AdvertService {
     };
     let rows: AdvertResponseDto[];
     let total: number;
-    if (isGeo) {
-      // When search located the anchor, radius alone is the row filter; when
-      // the caller supplied explicit coordinates, search remains a row filter.
-      const geoFilters = { ...filters, lat: resolvedLat, lng: resolvedLng };
-      if (!hasLat && !hasLng) geoFilters.search = undefined;
-      ({ rows, total } = await this.geoSearch(geoFilters, radiusM, sort, skip, take, imageMode));
+    if (search && !anchor) {
+      // The searched text maps to no known place: empty result set.
+      rows = [];
+      total = 0;
+    } else if (anchor) {
+      // Geo mode: the anchor always comes from the searched text. Radius
+      // filters rows only when supplied; proximity is measured on every row
+      // and the searched text stays a row filter alongside the advanced ones.
+      ({ rows, total } = await this.geoSearch(
+        filters,
+        anchor,
+        radiusM ?? null,
+        sort,
+        skip,
+        take,
+        imageMode,
+      ));
     } else {
+      // No location: plain filtered list (proximity stays null).
       ({ rows, total } = await this.plainSearch(filters, skip, take, imageMode));
     }
     if (imageMode) {
@@ -889,8 +888,6 @@ export class AdvertService {
 
   private async geoSearch(
     filters: {
-      lat?: number;
-      lng?: number;
       industry?: string | string[];
       search?: string;
       brand_id?: string | string[];
@@ -908,14 +905,15 @@ export class AdvertService {
       time_slot_end?: string;
       ids?: string[];
     },
-    radiusM: number,
+    anchor: { lat: number; lng: number },
+    radiusM: number | null,
     sort: AdvertSearchSort,
     skip: number,
     take: number,
     imageMode = false,
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
-    // Caller guarantees lat+lng on the geo path.
-    assertCoordinates(filters.lat as number, filters.lng as number);
+    // Caller guarantees the anchor is resolved (from the searched text) here.
+    assertCoordinates(anchor.lat, anchor.lng);
     const timeBounds = resolveAdvertTimeBounds(filters);
     const dailyWindow = normalizeDailyWindowFilter(filters.time_slot_start, filters.time_slot_end);
     // Image ranking happens in memory: pull the candidate pool, rank below.
@@ -987,6 +985,12 @@ export class AdvertService {
             ? Prisma.sql`ORDER BY a."id" DESC`
             : Prisma.sql`ORDER BY "distanceM" ASC, a."id" ASC`;
 
+    // Radius is optional in geo mode: with one we cut by distance, without
+    // one, every text-matching row counts and is ranked by proximity.
+    const placementClause =
+      radiusM !== null
+        ? Prisma.sql`ST_DWithin(a."location"::geography, ST_MakePoint(${anchor.lng}, ${anchor.lat})::geography, ${radiusM})`
+        : Prisma.sql`TRUE`;
     const rows = await this.prisma.client.$queryRaw<
       Array<{
         id: string;
@@ -1032,13 +1036,13 @@ export class AdvertService {
              b."id" AS "brandId", b."brand_name" AS "brandName", b."isFlagged" AS "isFlagged",
              b."industry_category" AS "industryCategory",
              ST_AsText(a."location") AS "location",
-             ST_Distance(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography) AS "distanceM",
+             ST_Distance(a."location"::geography, ST_MakePoint(${anchor.lng}, ${anchor.lat})::geography) AS "distanceM",
              COUNT(*) OVER() AS "total"
       FROM "Advert" a
       JOIN "CreativeVersion" v ON v."id" = a."version_id"
       JOIN "Creative" c ON c."id" = v."creative_id"
       JOIN "Brand" b ON b."id" = c."brand_id"
-      WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusM})
+      WHERE ${placementClause}
         ${industryClause} ${brandClause} ${statusClause} ${brandStatusClause}
         ${cityClause} ${zoneClause} ${idsClause} ${dateClause} ${dailyClause} ${searchClause}
       ${orderClause}
@@ -1056,7 +1060,8 @@ export class AdvertService {
     take: number,
     imageMode = false,
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
-    // No coordinates: the same filters through Prisma (sort applies to geo mode only).
+    // No location: the same filters through Prisma (sort and proximity apply
+    // to geo mode only). Adverts without a location keep matching.
     const where = buildAdvertWhere(filters);
     const [adverts, total] = await Promise.all([
       this.prisma.client.advert.findMany({
@@ -1524,9 +1529,21 @@ export class AdvertService {
       }),
       this.prisma.client.advert.count({ where }),
     ]);
-    const locations = await this.fetchLocationWkt(adverts.map((advert) => advert.id));
+    const ids = adverts.map((advert) => advert.id);
+    const locations = await this.fetchLocationWkt(ids);
+    // Advert Control text searches measure proximity to the searched place:
+    // resolve an anchor best-effort (unresolvable text keeps proximity null).
+    const searchTerm = query.search?.trim();
+    const anchor = searchTerm ? await this.resolveSearchAnchor(searchTerm) : null;
+    const distances =
+      anchor && ids.length
+        ? await this.fetchDistancesM(anchor, ids)
+        : new Map<string, number | null>();
     const rows = adverts.map((advert) =>
-      this.toResponse(advert, undefined, { location: locations.get(advert.id) ?? null }),
+      this.toResponse(advert, undefined, {
+        location: locations.get(advert.id) ?? null,
+        distanceM: distances.get(advert.id) ?? null,
+      }),
     );
     // Text searches from Advert Control go through the list endpoint, not
     // /adverts/search, so record them here too. Only the first page is
@@ -1714,6 +1731,27 @@ export class AdvertService {
     return new Map(rows.map((row) => [row.id, row.wkt]));
   }
 
+  /** Per-advert distance in metres from a fixed anchor (page rows only). Adverts without a location map to null. */
+  private async fetchDistancesM(
+    anchor: { lat: number; lng: number },
+    ids: string[],
+  ): Promise<Map<string, number | null>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string; distanceM: unknown }>>(
+      Prisma.sql`
+        SELECT "id", ST_Distance("location"::geography, ST_MakePoint(${anchor.lng}, ${anchor.lat})::geography) AS "distanceM"
+        FROM "Advert"
+        WHERE "id" IN (${Prisma.join(ids)}) AND "location" IS NOT NULL
+      `,
+    );
+    return new Map(
+      rows.map((row) => {
+        const value = Number(row.distanceM);
+        return [row.id, Number.isFinite(value) ? value : null];
+      }),
+    );
+  }
+
   /** Re-read with version context + WKT location merged in. */
   private async readEnriched(id: string): Promise<AdvertResponseDto> {
     const row = await this.prisma.client.advert.findUnique({
@@ -1814,8 +1852,8 @@ export class AdvertService {
         brand_is_flagged: brand?.is_flagged ?? null,
         industry: industryCategory,
         industry_category: industryCategory,
+        proximity: distanceM != null ? Math.round(distanceM) : null,
         distance_m: distanceM != null ? Math.round(distanceM) : null,
-        distance_km: distanceM != null ? Math.round((distanceM / 1000) * 1000) / 1000 : null,
         hash_distance: extra?.hashDistance ?? null,
         available_actions: availableGovtActions(advert.status),
       },

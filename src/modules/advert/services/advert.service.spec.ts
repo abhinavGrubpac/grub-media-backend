@@ -502,6 +502,48 @@ describe('AdvertService.findAll', () => {
     });
   });
 
+  it('measures proximity to the searched place on the list endpoint', async () => {
+    const { service, advert, queryRaw } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+    // Call order inside findAll: WKT locations, then anchor lookup, then distances.
+    queryRaw
+      .mockResolvedValueOnce([{ id: 'a1', wkt: 'POINT(73.79 20.011)' }])
+      .mockResolvedValueOnce([{ lat: 20.011, lng: 73.79 }])
+      .mockResolvedValueOnce([{ id: 'a1', distanceM: 84.7 }]);
+
+    const result = await service.findAll({
+      search: 'Nashik',
+      page: 1,
+      limit: 20,
+      sortOrder: 'desc',
+    });
+
+    const row = result.items[0] as { proximity: number | null; distance_m: number | null };
+    expect(row.proximity).toBe(85);
+    expect(row.distance_m).toBe(85);
+  });
+
+  it('keeps proximity null when the search text or rows have no location anchor', async () => {
+    const { service, advert, queryRaw } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+    // Default mock: WKT locations exist but the anchor lookup finds nothing.
+    queryRaw.mockResolvedValue([]);
+
+    const result = await service.findAll({
+      search: 'Dominos',
+      page: 1,
+      limit: 20,
+      sortOrder: 'desc',
+    });
+
+    const row = result.items[0] as { proximity: number | null };
+    expect(row.proximity).toBeNull();
+    // Only the location lookup and anchor lookup ran; a null anchor skips the distance query.
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it('combines industry, schedule window, ids and DB sorting in one predicate', async () => {
     const { service, advert } = makeDeps();
     advert.findMany.mockResolvedValue([]);
@@ -784,17 +826,18 @@ describe('AdvertService.syncDueSchedules', () => {
 });
 
 describe('AdvertService.searchByRadius', () => {
-  it('rejects radius without location and partial coordinates', async () => {
+  it('rejects lat/lng input (location is text-only) and radius_m without a location', async () => {
     const { service } = makeDeps();
 
-    await expect(service.searchByRadius({ radius: 5 })).rejects.toThrow(BadRequestException);
-    await expect(service.searchByRadius({ lat: 12.9 })).rejects.toThrow(BadRequestException);
-    await expect(service.searchByRadius({ lng: 77.5 })).rejects.toThrow(BadRequestException);
+    await expect(
+      service.searchByRadius({ lat: 12.9716, lng: 77.5946, radius_m: 5 } as never),
+    ).rejects.toThrow(BadRequestException);
+    await expect(service.searchByRadius({ radius_m: 5 })).rejects.toThrow(BadRequestException);
   });
 
-  it('returns distance-sorted geo rows with echo, count and history record', async () => {
-    const { service, queryRaw, advertSearchHistory } = makeDeps();
-    queryRaw.mockResolvedValue([
+  it('resolves the anchor from the searched text and keeps the text filter in geo mode', async () => {
+    const { service, queryRaw } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 12.9716, lng: 77.5946 }]).mockResolvedValue([
       {
         ...advertRow,
         versionId2: 'v1',
@@ -815,9 +858,60 @@ describe('AdvertService.searchByRadius', () => {
     ]);
 
     const result = await service.searchByRadius({
-      lat: 12.9716,
-      lng: 77.5946,
-      radius: 5000,
+      search: 'Bengaluru',
+      radius_m: 5000,
+      page: 1,
+      limit: 50,
+      actor_id: 'manager1',
+    });
+
+    expect(result.meta).toEqual({
+      totalItems: 2,
+      itemCount: 1,
+      itemsPerPage: 50,
+      totalPages: 1,
+      currentPage: 1,
+    });
+    expect(result.search).toEqual(
+      expect.objectContaining({
+        lat: 12.9716,
+        lng: 77.5946,
+        radius_m: 5000,
+        sort: 'distance_asc',
+      }),
+    );
+    // Anchor query first, then the geo query: the geo SQL keeps the text filter.
+    const geoSql = queryRaw.mock.calls[1][0] as { text: string };
+    expect(geoSql.text).toContain('ST_Distance');
+    expect(geoSql.text).toContain('ST_DWithin');
+    expect(geoSql.text).toContain('ILIKE');
+  });
+
+  it('returns distance-sorted geo rows with echo, count and history record', async () => {
+    const { service, queryRaw, advertSearchHistory } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 12.9716, lng: 77.5946 }]).mockResolvedValue([
+      {
+        ...advertRow,
+        versionId2: 'v1',
+        versionNumber: 1,
+        versionStatus: 'APPROVED',
+        creativeId: 'c1',
+        creativeName: 'Festive Ad',
+        brandId: 'brand1',
+        brandName: 'Acme',
+        isFlagged: false,
+        industryCategory: 'Food',
+        mediaUrl: 's3://bucket/a.png',
+        mediaType: 'Image',
+        location: 'POINT(77.5946 12.9716)',
+        distanceM: 1234.56,
+        total: 2,
+      },
+    ]);
+
+    const result = await service.searchByRadius({
+      search: 'Bengaluru',
+      radius_m: 5000,
       page: 1,
       limit: 50,
       actor_id: 'manager1',
@@ -839,8 +933,8 @@ describe('AdvertService.searchByRadius', () => {
       }),
     );
     const row = result.items[0] as {
+      proximity: number;
       distance_m: number;
-      distance_km: number;
       location: string;
       industry: string;
       industry_category: string;
@@ -848,8 +942,8 @@ describe('AdvertService.searchByRadius', () => {
       brand_name: string;
       brand_is_flagged: boolean;
     };
+    expect(row.proximity).toBe(1235);
     expect(row.distance_m).toBe(1235);
-    expect(row.distance_km).toBe(1.235);
     expect(row.location).toBe('POINT(77.5946 12.9716)');
     expect(row.industry).toBe('Food');
     expect(row.industry_category).toBe('Food');
@@ -863,7 +957,42 @@ describe('AdvertService.searchByRadius', () => {
     );
   });
 
-  it('falls back to a paginated filtered list without coordinates', async () => {
+  it('measures proximity with no radius: no distance cut-off, all rows by proximity', async () => {
+    const { service, queryRaw } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 12.9716, lng: 77.5946 }]).mockResolvedValue([
+      {
+        ...advertRow,
+        versionId2: 'v1',
+        versionNumber: 1,
+        versionStatus: 'APPROVED',
+        creativeId: 'c1',
+        creativeName: 'Festive Ad',
+        brandId: 'brand1',
+        brandName: 'Acme',
+        isFlagged: false,
+        industryCategory: 'Food',
+        mediaUrl: 's3://bucket/a.png',
+        mediaType: 'Image',
+        location: 'POINT(77.5946 12.9716)',
+        distanceM: 8.2,
+        total: 1,
+      },
+    ]);
+
+    const result = await service.searchByRadius({ search: 'Bengaluru' });
+
+    expect(result.search).toEqual(
+      expect.objectContaining({ lat: 12.9716, lng: 77.5946, radius_m: null }),
+    );
+    expect(result.meta.totalItems).toBe(1);
+    // No radius clause, but proximity is still measured in metres.
+    const geoSql = queryRaw.mock.calls[1][0] as { text: string };
+    expect(geoSql.text).toContain('ST_Distance');
+    expect(geoSql.text).not.toContain('ST_DWithin');
+    expect((result.items[0] as { proximity: number }).proximity).toBe(8);
+  });
+
+  it('falls back to a paginated filtered list without a location', async () => {
     const { service, advert, advertSearchHistory } = makeDeps();
     advert.findMany.mockResolvedValue([advertRow]);
     advert.count.mockResolvedValue(1);
@@ -900,34 +1029,9 @@ describe('AdvertService.searchByRadius', () => {
     expect((result.items[0] as { time_range: string }).time_range).toBe('06:00 - 23:00');
   });
 
-  it('accepts text search on the plain-search fallback', async () => {
-    const { service, advert, advertSearchHistory } = makeDeps();
-    advert.findMany.mockResolvedValue([advertRow]);
-    advert.count.mockResolvedValue(1);
-
-    const result = await service.searchByRadius({ search: ' Nashik ', actor_id: 'manager1' });
-
-    const where = advert.findMany.mock.calls[0][0].where;
-    expect(where.OR).toEqual(
-      expect.arrayContaining([
-        { cityName: { contains: 'Nashik', mode: 'insensitive' } },
-        { addressText: { contains: 'Nashik', mode: 'insensitive' } },
-      ]),
-    );
-    expect(result.search.search).toBe('Nashik');
-    expect(advertSearchHistory.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          userId: 'manager1',
-          params: expect.objectContaining({ search: 'Nashik' }),
-        }),
-      }),
-    );
-  });
-
-  it('resolves search+radius from a mapped location and measures in metres', async () => {
-    const { service, queryRaw } = makeDeps();
-    queryRaw.mockResolvedValueOnce([{ lat: 20.011, lng: 73.79 }]).mockResolvedValueOnce([
+  it('runs a text search as a location search with history echo', async () => {
+    const { service, queryRaw, advertSearchHistory } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 20.011, lng: 73.79 }]).mockResolvedValue([
       {
         ...advertRow,
         versionId2: 'v1',
@@ -947,7 +1051,45 @@ describe('AdvertService.searchByRadius', () => {
       },
     ]);
 
-    const result = await service.searchByRadius({ search: 'Nashik', radius: 20 });
+    const result = await service.searchByRadius({ search: ' Nashik ', actor_id: 'manager1' });
+
+    expect(result.search).toEqual(
+      expect.objectContaining({ lat: 20.011, lng: 73.79, radius_m: null, search: 'Nashik' }),
+    );
+    expect((result.items[0] as { proximity: number }).proximity).toBe(18);
+    expect(advertSearchHistory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'manager1',
+          params: expect.objectContaining({ search: 'Nashik', lat: 20.011, lng: 73.79 }),
+        }),
+      }),
+    );
+  });
+
+  it('resolves search+radius in metres (radius_m is the only radius param)', async () => {
+    const { service, queryRaw } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 20.011, lng: 73.79 }]).mockResolvedValue([
+      {
+        ...advertRow,
+        versionId2: 'v1',
+        versionNumber: 1,
+        versionStatus: 'APPROVED',
+        creativeId: 'c1',
+        creativeName: 'Festive Ad',
+        brandId: 'brand1',
+        brandName: 'Acme',
+        isFlagged: false,
+        industryCategory: 'Food',
+        mediaUrl: 's3://bucket/a.png',
+        mediaType: 'Image',
+        location: 'POINT(73.79 20.011)',
+        distanceM: 18.4,
+        total: 1,
+      },
+    ]);
+
+    const result = await service.searchByRadius({ search: 'Nashik', radius_m: 20 });
 
     expect(result.search).toEqual(
       expect.objectContaining({
@@ -957,20 +1099,29 @@ describe('AdvertService.searchByRadius', () => {
         search: 'Nashik',
       }),
     );
-    const row = result.items[0] as { distance_m: number; distance_km: number };
+    const row = result.items[0] as { proximity: number; distance_m: number };
+    expect(row.proximity).toBe(18);
     expect(row.distance_m).toBe(18);
-    expect(row.distance_km).toBe(0.018);
   });
 
-  it('rejects radius alone and an unresolvable location search', async () => {
+  it('rejects radius alone and returns empty results for unmappable location text', async () => {
     const { service, queryRaw } = makeDeps();
 
-    await expect(service.searchByRadius({ radius: 20 })).rejects.toThrow(BadRequestException);
+    await expect(service.searchByRadius({ radius_m: 20 })).rejects.toThrow(BadRequestException);
 
-    queryRaw.mockResolvedValueOnce([]);
-    await expect(service.searchByRadius({ search: 'Nowhere', radius: 20 })).rejects.toThrow(
-      BadRequestException,
-    );
+    queryRaw.mockResolvedValue([]);
+    const result = await service.searchByRadius({ search: 'Nowhere', radius_m: 20 });
+    expect(result.items).toEqual([]);
+    expect(result.meta).toEqual({
+      totalItems: 0,
+      itemCount: 0,
+      itemsPerPage: 50,
+      totalPages: 0,
+      currentPage: 1,
+    });
+
+    const resultNoRadius = await service.searchByRadius({ search: 'Nowhere' });
+    expect(resultNoRadius.items).toEqual([]);
   });
 
   it('skips history for anonymous callers', async () => {
@@ -1153,7 +1304,13 @@ describe('AdvertService.listRecentSearches', () => {
     const { service, advertSearchHistory } = makeDeps();
     const searchedAt = new Date(Date.now() - 5 * 3600000);
     advertSearchHistory.findMany.mockResolvedValue([
-      { id: 's1', params: { radius_km: 5 }, resultCount: 3, preview: null, createdAt: searchedAt },
+      {
+        id: 's1',
+        params: { radius_m: 5000 },
+        resultCount: 3,
+        preview: null,
+        createdAt: searchedAt,
+      },
     ]);
 
     const rows = await service.listRecentSearches('manager1');
@@ -1168,7 +1325,7 @@ describe('AdvertService.listRecentSearches', () => {
     expect(rows).toEqual([
       {
         id: 's1',
-        params: { radius_km: 5 },
+        params: { radius_m: 5000 },
         adverts_matched: 3,
         preview: [],
         searched_at: searchedAt,
@@ -1231,11 +1388,11 @@ describe('AdvertService.listRecentSearches', () => {
         address_text: 'MG Road, Bengaluru',
         city_name: 'Bengaluru',
         status: 'LIVE',
-        distance_km: 2.09,
+        proximity: 2090,
       },
     ];
     advertSearchHistory.findMany.mockResolvedValue([
-      { id: 's2', params: { radius_km: 5 }, resultCount: 1, preview, createdAt: new Date() },
+      { id: 's2', params: { radius_m: 5000 }, resultCount: 1, preview, createdAt: new Date() },
     ]);
 
     const rows = await service.listRecentSearches('manager1');
@@ -1263,12 +1420,13 @@ describe('AdvertService.listRecentSearches', () => {
       distanceM: 1200,
       total: 5,
     });
-    queryRaw.mockResolvedValue([row('a1'), row('a2'), row('a3'), row('a4'), row('a5')]);
+    queryRaw
+      .mockResolvedValueOnce([{ lat: 12.9716, lng: 77.5946 }])
+      .mockResolvedValue([row('a1'), row('a2'), row('a3'), row('a4'), row('a5')]);
 
     await service.searchByRadius({
-      lat: 12.9716,
-      lng: 77.5946,
-      radius: 5000,
+      search: 'Bengaluru',
+      radius_m: 5000,
       page: 1,
       limit: 50,
       actor_id: 'manager1',
@@ -1287,6 +1445,10 @@ describe('AdvertService.listRecentSearches', () => {
     );
     const saved = (advertSearchHistory.create as jest.Mock).mock.calls[0][0].data.preview;
     expect(saved).toHaveLength(4);
-    expect(saved[0]).toMatchObject({ brand_name: 'Acme', city_name: expect.anything() });
+    expect(saved[0]).toMatchObject({
+      brand_name: 'Acme',
+      proximity: 1200,
+      city_name: expect.anything(),
+    });
   });
 });

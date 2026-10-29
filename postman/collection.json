@@ -852,7 +852,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/v1/adverts/search?lat=28.6139&lng=77.209&radius=5",
+              "raw": "{{baseUrl}}/api/v1/adverts/search?search=Connaught Place&radius_m=100",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -864,17 +864,13 @@
               ],
               "query": [
                 {
-                  "key": "lat",
-                  "value": "28.6139"
+                  "key": "search",
+                  "value": "Connaught Place"
                 },
                 {
-                  "key": "lng",
-                  "value": "77.209"
-                },
-                {
-                  "key": "radius",
-                  "value": "5",
-                  "description": "km, needs lat+lng"
+                  "key": "radius_m",
+                  "value": "100",
+                  "description": "metres, requires the location search text"
                 },
                 {
                   "key": "brand_id",
@@ -888,7 +884,7 @@
                 }
               ]
             },
-            "description": "Without lat/lng falls back to a plain filtered list."
+            "description": "Location search: radius_m is metres and needs the location (search text); location without radius_m returns all matching rows sorted by proximity.",
           },
           "response": []
         },

@@ -28,38 +28,10 @@ export class AdvertSearchQueryDto {
   @IsIn([...ADVERT_STATUSES])
   status?: (typeof ADVERT_STATUSES)[number];
 
-  @ApiPropertyOptional({ description: 'Latitude to search around', minimum: -90, maximum: 90 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(-90)
-  @Max(90)
-  lat?: number;
-
-  @ApiPropertyOptional({ description: 'Longitude to search around', minimum: -180, maximum: 180 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(-180)
-  @Max(180)
-  lng?: number;
-
   @ApiPropertyOptional({
     description:
-      'Search radius in metres. With search, coordinates are resolved from matching location data; ' +
-      'without search, radius needs lat+lng.',
-    minimum: 1,
-    maximum: 500000,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  @Max(500000)
-  radius?: number;
-
-  @ApiPropertyOptional({
-    description: 'Canonical metres alias for radius. Must match radius when both are supplied.',
+      'Search radius in metres. Requires a location search (search text): radius cannot be searched alone. ' +
+      'Without a radius the location matches place rows with no distance cut-off.',
     minimum: 1,
     maximum: 500000,
   })
@@ -85,8 +57,9 @@ export class AdvertSearchQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Free-text filter on address, city, zone, creative, brand, or industry. ' +
-      'Without lat/lng this is a plain filtered list.',
+      'The searched location as plain text (city, zone, address). lat/lng are never accepted; ' +
+      'coordinates are resolved from this text at query time and the text also filters rows by ' +
+      'address, city, zone, creative, brand, or industry. Unmappable text yields an empty result set.',
   })
   @IsOptional()
   @IsString()
@@ -226,7 +199,7 @@ export class AdvertSearchQueryDto {
 
   @ApiPropertyOptional({
     enum: [...ADVERT_SEARCH_SORTS],
-    description: 'distance sorts need lat+lng. Default distance_asc.',
+    description: 'Distance sorts need a location search (search text). Default distance_asc.',
   })
   @IsOptional()
   @IsIn([...ADVERT_SEARCH_SORTS])

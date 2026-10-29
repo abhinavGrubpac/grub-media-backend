@@ -193,11 +193,12 @@ export class AdvertResponseDto {
   distance_m?: number | null;
 
   @ApiPropertyOptional({
-    description: 'Legacy distance in km; retained while clients migrate',
+    description:
+      'Advert Control proximity column: distance in metres from the searched location to this advert (search/list with a resolvable search place; null otherwise)',
     nullable: true,
   })
   @Expose()
-  distance_km?: number | null;
+  proximity?: number | null;
 
   @ApiPropertyOptional({
     description: 'Hamming distance to the uploaded query image (by-image search only)',
