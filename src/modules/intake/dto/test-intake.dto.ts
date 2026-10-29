@@ -8,11 +8,13 @@ import {
   IsOptional,
   IsString,
   Length,
+  Matches,
   Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+import { TIME_OF_DAY_PATTERN } from '../../advert/validators';
 
 export class TestAgencyInput {
   @ApiProperty({ description: 'Agency identifier from the agency portal', maxLength: 200 })
@@ -147,15 +149,31 @@ export class TestScheduleInput {
   end_date!: Date;
 
   @ApiPropertyOptional({
-    description: 'Coverage radius in kilometres for map display',
-    minimum: 0.01,
-    maximum: 500,
+    description:
+      'Recurring daily display window start (HH:mm). Supply together with time_slot_end.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_start must be HH:mm (00:00-23:59)' })
+  time_slot_start?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Recurring daily display window end (HH:mm). Supply together with time_slot_start.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_end must be HH:mm (00:00-23:59)' })
+  time_slot_end?: string;
+
+  @ApiPropertyOptional({
+    description: 'Coverage radius in metres for map display',
+    minimum: 1,
+    maximum: 500000,
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
-  @Max(500)
+  @Min(1)
+  @Max(500000)
   radius?: number;
 
   @ApiPropertyOptional({ description: 'Display city from upstream', maxLength: 200 })

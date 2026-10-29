@@ -18,13 +18,19 @@ import { AdvertListQueryDto } from '../dto/advert-list-query.dto';
 import { AdvertBrandGroupDto, AdvertResponseDto } from '../dto/advert-response.dto';
 import {
   ADVERT_SORT_KEYS,
+  ADVERT_STATUSES,
   assertAdvertTransition,
   assertCoordinates,
   assertDateRange,
   assertSchedulableVersionStatus,
+  assertTimeOfDay,
   availableGovtActions,
+  formatTimeRange,
   isAdvertStatus,
   isSchedulableVersionStatus,
+  normalizeDailyTimeWindow,
+  normalizeDailyWindowFilter,
+  normalizeMultiValue,
   normalizeUpstreamAdvertStatus,
 } from '../validators';
 import {
@@ -47,9 +53,13 @@ export interface AdvertUpstreamInput {
   address_text: string;
   start_date: Date;
   end_date: Date;
+  /** Recurring daily display window (HH:mm); both or neither. */
+  time_slot_start?: string | null;
+  time_slot_end?: string | null;
   city_name?: string | null;
   zone_name?: string | null;
-  radius_km?: number | null;
+  /** Coverage radius in metres. */
+  radius_m?: number | null;
   image_hash?: string | null;
   upstream_portal?: string;
 }
@@ -63,15 +73,24 @@ export interface AdvertUpstreamTransitionInput {
 
 export interface AdvertListFilters {
   status?: string;
-  brand_id?: string;
-  brandId?: string;
+  brand_id?: string | string[];
+  brandId?: string | string[];
   search?: string;
-  industry?: string;
+  industry?: string | string[];
   brand_status?: 'flagged' | 'notflagged';
   city?: string;
   zone?: string;
   start_date?: string;
   end_date?: string;
+  /** Exact campaign time bounds; only valid together with both dates. */
+  start_time?: string;
+  end_time?: string;
+  /** Recurring daily display window overlap filter. */
+  time_slot_start?: string;
+  time_slot_end?: string;
+  /** Legacy instant bounds used by GET /adverts/search. */
+  start?: Date;
+  end?: Date;
   ids?: string[];
 }
 
@@ -96,7 +115,9 @@ export function buildSearchPreview(
     address_text: row.address_text ?? null,
     city_name: row.city_name ?? null,
     status: row.status,
-    distance_km: row.distance_km ?? null,
+    distance_m: row.distance_m ?? null,
+    /** Legacy km alias retained while older clients migrate. */
+    distance_km: row.distance_m != null ? Math.round((row.distance_m / 1000) * 1000) / 1000 : null,
   }));
 }
 /** Group page rows under their brand headers (brand order = first appearance). */
@@ -128,14 +149,30 @@ export function groupAdvertsByBrand(rows: AdvertResponseDto[]): AdvertBrandGroup
   return [...groups.values()];
 }
 
+/** Echo multi-select values as the stable comma-separated query form. */
+function echoMultiValue(value: string | string[] | null | undefined): string | null {
+  const values = normalizeMultiValue(value);
+  return values.length ? values.join(',') : null;
+}
+
 export interface AdvertSearchEcho {
   lat: number | null;
   lng: number | null;
-  radius_km: number | null;
+  /** Proximity radius in metres. */
+  radius_m: number | null;
   industry: string | null;
   brand_id: string | null;
   start: string | null;
   end: string | null;
+  /** Date-range filter echoed exactly as supplied. */
+  start_date: string | null;
+  end_date: string | null;
+  /** Exact campaign time-window filter. */
+  start_time: string | null;
+  end_time: string | null;
+  /** Recurring daily-window overlap filter. */
+  time_slot_start: string | null;
+  time_slot_end: string | null;
   sort: AdvertSearchSort;
   query_hash: string | null;
   max_distance: number | null;
@@ -174,7 +211,9 @@ export interface AdvertSearchPreview {
   address_text: string | null;
   city_name: string | null;
   status: string;
-  distance_km: number | null;
+  distance_m: number | null;
+  /** Legacy km alias retained while older clients migrate. */
+  distance_km?: number | null;
 }
 
 /** Preview rows kept per history entry (first page only). */
@@ -182,6 +221,38 @@ export const RECENT_SEARCH_PREVIEW_LIMIT = 4;
 
 /** 7-day revisit window for recent searches. */
 export const RECENT_SEARCH_DAYS = 7;
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * Stable identity for one logical search. Multi-select filters are order
+ * independent, and object key order from JSONB is irrelevant, so repeated
+ * requests for the same search resolve to the same key.
+ */
+function searchHistoryKey(params: unknown): string {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    return stableJson(params);
+  }
+  const normalized: Record<string, unknown> = { ...(params as Record<string, unknown>) };
+  for (const field of ['industry', 'brand_id'] as const) {
+    const value = normalized[field];
+    if (typeof value === 'string' || Array.isArray(value)) {
+      normalized[field] = normalizeMultiValue(value).sort().join(',') || null;
+    }
+  }
+  return stableJson(normalized);
+}
 
 export interface AdvertExportRow {
   id: string;
@@ -191,9 +262,12 @@ export interface AdvertExportRow {
   status: string;
   address: string | null;
   location: string | null;
-  radius_km: number | null;
+  radius_m: number | null;
   start_date: Date;
   end_date: Date;
+  time_slot_start: string | null;
+  time_slot_end: string | null;
+  time_range: string | null;
   city: string | null;
   zone: string | null;
 }
@@ -210,32 +284,127 @@ function dayEnd(value: string): Date {
   return d;
 }
 
+function hasValue(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value.trim() !== '';
+}
+
+/**
+ * Combines a date value with an HH:mm time in UTC. The end boundary covers
+ * the whole minute so a `17:00` end includes events at 17:00:30.
+ */
+function combineDateAndTime(value: string, time: string, endOfMinute = false): Date {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
+  const [hours, minutes] = time.split(':').map(Number);
+  const combined = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hours, minutes, 0, 0),
+  );
+  if (endOfMinute) combined.setUTCSeconds(59, 999);
+  return combined;
+}
+
+interface AdvertTimeBounds {
+  start?: Date;
+  end?: Date;
+  exact?: { from: Date; to: Date };
+}
+
+/**
+ * Resolves schedule-time filters. Exact time ranges require both dates;
+ * date-only filters keep the existing inclusive-day overlap behaviour.
+ */
+function resolveAdvertTimeBounds(filters: AdvertListFilters): AdvertTimeBounds {
+  const hasStartTime = hasValue(filters.start_time);
+  const hasEndTime = hasValue(filters.end_time);
+  if (hasStartTime || hasEndTime) {
+    if (!hasStartTime || !hasEndTime) {
+      throw new BadRequestException('start_time and end_time must be provided together');
+    }
+    if (!hasValue(filters.start_date) || !hasValue(filters.end_date)) {
+      throw new BadRequestException('start_time and end_time require both start_date and end_date');
+    }
+    const startTime = assertTimeOfDay(filters.start_time as string, 'start_time');
+    const endTime = assertTimeOfDay(filters.end_time as string, 'end_time');
+    const from = combineDateAndTime(filters.start_date as string, startTime);
+    const to = combineDateAndTime(filters.end_date as string, endTime, true);
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException('start_date/start_time must be before end_date/end_time');
+    }
+    return { exact: { from, to } };
+  }
+
+  let start = filters.start;
+  let end = filters.end;
+  if (hasValue(filters.start_date)) {
+    start = dayStart(filters.start_date as string);
+    if (Number.isNaN(start.getTime())) throw new BadRequestException('Invalid start_date');
+  }
+  if (hasValue(filters.end_date)) {
+    end = dayEnd(filters.end_date as string);
+    if (Number.isNaN(end.getTime())) throw new BadRequestException('Invalid end_date');
+  }
+  if (start && end && start.getTime() > end.getTime()) {
+    throw new BadRequestException('start_date must be on or before end_date');
+  }
+  return { start, end };
+}
+
+/** Prisma predicate for a stored daily window overlapping the requested one. */
+function dailyWindowWhere(window: { start?: string; end?: string }): Prisma.AdvertWhereInput {
+  if (window.start !== undefined && window.end !== undefined) {
+    return {
+      OR: [
+        { timeSlotStart: null },
+        {
+          AND: [{ timeSlotStart: { lte: window.end } }, { timeSlotEnd: { gte: window.start } }],
+        },
+      ],
+    };
+  }
+  if (window.start !== undefined) {
+    return { OR: [{ timeSlotStart: null }, { timeSlotEnd: { gte: window.start } }] };
+  }
+  return { OR: [{ timeSlotStart: null }, { timeSlotStart: { lte: window.end } }] };
+}
+
 /**
  * Shared list/export predicate. Schedule-window filters overlap
  * [startDate, endDate]: start_date keeps rows ending on/after it, end_date
- * keeps rows starting on/before it.
+ * keeps rows starting on/before it. Exact start_time/end_time refine that
+ * window when all four values are supplied; the daily window is matched
+ * independently because it is a recurring display annotation.
  */
 export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhereInput {
-  const brandId = filters.brandId ?? filters.brand_id;
+  if (filters.status !== undefined && !isAdvertStatus(filters.status)) {
+    throw new BadRequestException(`status must be one of: ${ADVERT_STATUSES.join(', ')}`);
+  }
+  const brandIds = normalizeMultiValue([
+    ...normalizeMultiValue(filters.brandId),
+    ...normalizeMultiValue(filters.brand_id),
+  ]);
+  const industries = normalizeMultiValue(filters.industry);
   const search = filters.search?.trim();
-  let start: Date | undefined;
-  let end: Date | undefined;
-  if (filters.start_date) {
-    start = dayStart(filters.start_date);
-    if (Number.isNaN(start.getTime())) throw new BadRequestException('Invalid start_date');
+  const bounds = resolveAdvertTimeBounds(filters);
+  const dailyWindow = normalizeDailyWindowFilter(filters.time_slot_start, filters.time_slot_end);
+  const scheduleFilters: Prisma.AdvertWhereInput[] = [];
+  if (bounds.exact) {
+    scheduleFilters.push(
+      { endDate: { gte: bounds.exact.from } },
+      { startDate: { lte: bounds.exact.to } },
+    );
+  } else {
+    if (bounds.start) scheduleFilters.push({ endDate: { gte: bounds.start } });
+    if (bounds.end) scheduleFilters.push({ startDate: { lte: bounds.end } });
   }
-  if (filters.end_date) {
-    end = dayEnd(filters.end_date);
-    if (Number.isNaN(end.getTime())) throw new BadRequestException('Invalid end_date');
-  }
+  if (dailyWindow) scheduleFilters.push(dailyWindowWhere(dailyWindow));
   const creative: Prisma.CreativeWhereInput = {
-    ...(brandId ? { brandId } : {}),
-    ...(filters.industry || filters.brand_status
+    ...(brandIds.length ? { brandId: { in: brandIds } } : {}),
+    ...(industries.length || filters.brand_status
       ? {
           brand: {
             is: {
-              ...(filters.industry
-                ? { industryCategory: { equals: filters.industry, mode: 'insensitive' as const } }
+              ...(industries.length
+                ? { industryCategory: { in: industries, mode: 'insensitive' as const } }
                 : {}),
               ...(filters.brand_status ? { isFlagged: filters.brand_status === 'flagged' } : {}),
             },
@@ -282,14 +451,7 @@ export function buildAdvertWhere(filters: AdvertListFilters): Prisma.AdvertWhere
       : {}),
     ...(filters.city ? { cityName: { contains: filters.city, mode: 'insensitive' } } : {}),
     ...(filters.zone ? { zoneName: { contains: filters.zone, mode: 'insensitive' } } : {}),
-    ...(start || end
-      ? {
-          AND: [
-            ...(start ? [{ endDate: { gte: start } }] : []),
-            ...(end ? [{ startDate: { lte: end } }] : []),
-          ],
-        }
-      : {}),
+    ...(scheduleFilters.length ? { AND: scheduleFilters } : {}),
   };
 }
 
@@ -358,8 +520,12 @@ export class AdvertService {
       address_text: string;
       start_date: Date;
       end_date: Date;
+      /** Recurring daily display window (HH:mm); both or neither. */
+      time_slot_start?: string | null;
+      time_slot_end?: string | null;
       city_name?: string | null;
       zone_name?: string | null;
+      /** Coverage radius in metres. */
       radius?: number | null;
       image_hash?: string | null;
     },
@@ -367,6 +533,7 @@ export class AdvertService {
   ): Promise<AdvertResponseDto> {
     assertCoordinates(dto.lat, dto.lng);
     assertDateRange(dto.start_date, dto.end_date);
+    const dailyWindow = normalizeDailyTimeWindow(dto.time_slot_start, dto.time_slot_end);
     if (dto.image_hash !== undefined && dto.image_hash !== null) {
       assertImageHash(dto.image_hash);
     }
@@ -394,8 +561,8 @@ export class AdvertService {
     const wkt = `POINT(${dto.lng} ${dto.lat})`;
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "created_at")
-        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${dto.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${dto.start_date}, ${dto.end_date}, ${dto.city_name ?? null}, ${dto.zone_name ?? null}, ${dto.radius ?? null}, ${dto.image_hash ?? null}, CURRENT_TIMESTAMP)
+        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "time_slot_start", "time_slot_end", "city_name", "zone_name", "radius_m", "image_hash", "created_at")
+        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${dto.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${dto.start_date}, ${dto.end_date}, ${dailyWindow?.start ?? null}, ${dailyWindow?.end ?? null}, ${dto.city_name ?? null}, ${dto.zone_name ?? null}, ${dto.radius ?? null}, ${dto.image_hash ?? null}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.advertScheduled,
@@ -413,9 +580,11 @@ export class AdvertService {
           address_text: dto.address_text,
           start_date: dto.start_date.toISOString(),
           end_date: dto.end_date.toISOString(),
+          time_slot_start: dailyWindow?.start ?? null,
+          time_slot_end: dailyWindow?.end ?? null,
           city_name: dto.city_name ?? null,
           zone_name: dto.zone_name ?? null,
-          radius_km: dto.radius ?? null,
+          radius_m: dto.radius ?? null,
           image_hash: dto.image_hash ?? null,
         },
       });
@@ -424,15 +593,28 @@ export class AdvertService {
     return this.readEnriched(advertId);
   }
 
-  /** Radius search via PostGIS ST_DWithin; falls back to a plain filter query without coordinates. */
+  /** Radius search via PostGIS ST_DWithin; search can resolve the anchor location from DB data. */
   async searchByRadius(filters: {
     lat?: number;
     lng?: number;
+    /** Search radius in metres. */
     radius?: number;
-    radiusKm?: number;
-    industry?: string;
+    /** Canonical metres alias for radius. */
+    radius_m?: number;
+    industry?: string | string[];
     search?: string;
-    brand_id?: string;
+    brand_id?: string | string[];
+    status?: string;
+    brand_status?: 'flagged' | 'notflagged';
+    city?: string;
+    zone?: string;
+    start_date?: string;
+    end_date?: string;
+    start_time?: string;
+    end_time?: string;
+    time_slot_start?: string;
+    time_slot_end?: string;
+    ids?: string[];
     start?: Date;
     end?: Date;
     sort?: AdvertSearchSort;
@@ -448,9 +630,36 @@ export class AdvertService {
     if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
       throw new BadRequestException('lat and lng must be searched together');
     }
-    if (filters.radius !== undefined && (!hasLat || !hasLng)) {
-      throw new BadRequestException('radius needs lat and lng and cannot be searched alone');
+    const hasRadius = filters.radius !== undefined || filters.radius_m !== undefined;
+    if (
+      hasRadius &&
+      filters.radius !== undefined &&
+      filters.radius_m !== undefined &&
+      filters.radius !== filters.radius_m
+    ) {
+      throw new BadRequestException('radius and radius_m must be the same metre value');
     }
+    const radiusM = filters.radius_m ?? filters.radius ?? 5000;
+    const search = filters.search?.trim() || undefined;
+    // Validate/normalize the shared filter set before choosing geo vs plain.
+    buildAdvertWhere(filters);
+
+    // Search + radius is a location search: resolve the searched place from
+    // existing city/zone/address data rather than requiring hardcoded lat/lng.
+    let resolvedLat = filters.lat;
+    let resolvedLng = filters.lng;
+    if (!hasLat && !hasLng && search && hasRadius) {
+      const anchor = await this.resolveSearchAnchor(search);
+      if (!anchor) {
+        throw new BadRequestException(`could not resolve a location from search "${search}"`);
+      }
+      resolvedLat = anchor.lat;
+      resolvedLng = anchor.lng;
+    }
+    if (hasRadius && resolvedLat === undefined && resolvedLng === undefined && !search) {
+      throw new BadRequestException('radius needs lat+lng or a location search');
+    }
+
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 50;
     const sort = filters.sort ?? 'distance_asc';
@@ -461,30 +670,34 @@ export class AdvertService {
       IMAGE_SEARCH_MAX_DISTANCE,
     );
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
+    const isGeo = resolvedLat !== undefined && resolvedLng !== undefined;
     const echo: AdvertSearchEcho = {
-      lat: filters.lat ?? null,
-      lng: filters.lng ?? null,
-      radius_km: hasLat && hasLng ? (filters.radiusKm ?? filters.radius ?? 5) : null,
-      industry: filters.industry ?? null,
-      search: filters.search?.trim() || null,
-      brand_id: filters.brand_id ?? null,
-      start: filters.start?.toISOString() ?? null,
-      end: filters.end?.toISOString() ?? null,
+      lat: resolvedLat ?? null,
+      lng: resolvedLng ?? null,
+      radius_m: isGeo ? radiusM : null,
+      industry: echoMultiValue(filters.industry),
+      search: search ?? null,
+      brand_id: echoMultiValue(filters.brand_id),
+      start: filters.start?.toISOString() ?? filters.start_date ?? null,
+      end: filters.end?.toISOString() ?? filters.end_date ?? null,
+      start_date: filters.start_date ?? null,
+      end_date: filters.end_date ?? null,
+      start_time: filters.start_time ?? null,
+      end_time: filters.end_time ?? null,
+      time_slot_start: filters.time_slot_start ?? null,
+      time_slot_end: filters.time_slot_end ?? null,
       sort,
       query_hash: filters.image_hash ?? null,
       max_distance: imageMode ? maxDistance : null,
     };
     let rows: AdvertResponseDto[];
     let total: number;
-    if (hasLat && hasLng) {
-      ({ rows, total } = await this.geoSearch(
-        filters,
-        echo.radius_km as number,
-        sort,
-        skip,
-        take,
-        imageMode,
-      ));
+    if (isGeo) {
+      // When search located the anchor, radius alone is the row filter; when
+      // the caller supplied explicit coordinates, search remains a row filter.
+      const geoFilters = { ...filters, lat: resolvedLat, lng: resolvedLng };
+      if (!hasLat && !hasLng) geoFilters.search = undefined;
+      ({ rows, total } = await this.geoSearch(geoFilters, radiusM, sort, skip, take, imageMode));
     } else {
       ({ rows, total } = await this.plainSearch(filters, skip, take, imageMode));
     }
@@ -514,6 +727,45 @@ export class AdvertService {
   }
 
   /**
+   * Resolve a text location to coordinates from the advert inventory itself.
+   * Exact city/zone/address matches win over fuzzy matches; the latest exact
+   * row is used so the anchor is always a real mapped site.
+   */
+  private async resolveSearchAnchor(search: string): Promise<{ lat: number; lng: number } | null> {
+    const term = search.trim();
+    if (!term) return null;
+    const pattern = `%${term}%`;
+    const rows = await this.prisma.client.$queryRaw<Array<{ lat: unknown; lng: unknown }>>(
+      Prisma.sql`
+        SELECT ST_Y(a."location") AS "lat", ST_X(a."location") AS "lng"
+        FROM "Advert" a
+        WHERE (
+          a."city_name" ILIKE ${term}
+          OR a."zone_name" ILIKE ${term}
+          OR a."address_text" ILIKE ${term}
+          OR a."city_name" ILIKE ${pattern}
+          OR a."zone_name" ILIKE ${pattern}
+          OR a."address_text" ILIKE ${pattern}
+        )
+        ORDER BY CASE
+          WHEN a."city_name" ILIKE ${term} THEN 0
+          WHEN a."zone_name" ILIKE ${term} THEN 1
+          WHEN a."address_text" ILIKE ${term} THEN 2
+          WHEN a."city_name" ILIKE ${pattern} THEN 3
+          WHEN a."zone_name" ILIKE ${pattern} THEN 4
+          ELSE 5
+        END, a."created_at" DESC, a."id" ASC
+        LIMIT 1
+      `,
+    );
+    const anchor = rows[0];
+    if (!anchor) return null;
+    const lat = Number(anchor.lat);
+    const lng = Number(anchor.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  /**
    * Reverse-image search (single endpoint): rank adverts by Hamming distance
    * (nearest first) from a query hash that comes either from an uploaded
    * PNG/JPEG file or from explicit image_hash/advert_id params. A present file
@@ -527,7 +779,18 @@ export class AdvertService {
       advert_id?: string;
       max_distance?: number;
       status?: string;
-      brand_id?: string;
+      brand_id?: string | string[];
+      industry?: string | string[];
+      brand_status?: 'flagged' | 'notflagged';
+      city?: string;
+      zone?: string;
+      start_date?: string;
+      end_date?: string;
+      start_time?: string;
+      end_time?: string;
+      time_slot_start?: string;
+      time_slot_end?: string;
+      ids?: string[];
       page?: number;
       limit?: number;
       actor_id?: string;
@@ -576,10 +839,7 @@ export class AdvertService {
     const { skip, take } = toSkipTake({ page, limit, sortOrder: 'desc' });
 
     const candidates = await this.prisma.client.advert.findMany({
-      where: {
-        ...(opts.status ? { status: opts.status as AdvertStatus } : {}),
-        ...(opts.brand_id ? { version: { creative: { brandId: opts.brand_id } } } : {}),
-      },
+      where: buildAdvertWhere(opts),
       take: IMAGE_SEARCH_CANDIDATE_LIMIT,
       orderBy: { createdAt: 'desc' },
       include: { version: { include: { creative: { include: { brand: true } } } } },
@@ -608,11 +868,17 @@ export class AdvertService {
     const echo: AdvertSearchEcho = {
       lat: null,
       lng: null,
-      radius_km: null,
-      industry: null,
-      brand_id: opts.brand_id ?? null,
-      start: null,
-      end: null,
+      radius_m: null,
+      industry: echoMultiValue(opts.industry),
+      brand_id: echoMultiValue(opts.brand_id),
+      start: opts.start_date ?? null,
+      end: opts.end_date ?? null,
+      start_date: opts.start_date ?? null,
+      end_date: opts.end_date ?? null,
+      start_time: opts.start_time ?? null,
+      end_time: opts.end_time ?? null,
+      time_slot_start: opts.time_slot_start ?? null,
+      time_slot_end: opts.time_slot_end ?? null,
       sort: 'distance_asc',
       query_hash: queryHash,
       max_distance: maxDistance,
@@ -625,13 +891,24 @@ export class AdvertService {
     filters: {
       lat?: number;
       lng?: number;
-      industry?: string;
+      industry?: string | string[];
       search?: string;
-      brand_id?: string;
+      brand_id?: string | string[];
+      status?: string;
+      brand_status?: 'flagged' | 'notflagged';
+      city?: string;
+      zone?: string;
       start?: Date;
       end?: Date;
+      start_date?: string;
+      end_date?: string;
+      start_time?: string;
+      end_time?: string;
+      time_slot_start?: string;
+      time_slot_end?: string;
+      ids?: string[];
     },
-    radiusKm: number,
+    radiusM: number,
     sort: AdvertSearchSort,
     skip: number,
     take: number,
@@ -639,19 +916,56 @@ export class AdvertService {
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
     // Caller guarantees lat+lng on the geo path.
     assertCoordinates(filters.lat as number, filters.lng as number);
+    const timeBounds = resolveAdvertTimeBounds(filters);
+    const dailyWindow = normalizeDailyWindowFilter(filters.time_slot_start, filters.time_slot_end);
     // Image ranking happens in memory: pull the candidate pool, rank below.
-    const industryClause =
-      filters.industry !== undefined
-        ? Prisma.sql`AND LOWER(b."industryCategory") = LOWER(${filters.industry})`
+    const industries = normalizeMultiValue(filters.industry);
+    const brandIds = normalizeMultiValue(filters.brand_id);
+    const industryClause = industries.length
+      ? Prisma.sql`AND LOWER(b."industry_category") IN (${Prisma.join(
+          industries.map((value) => value.toLowerCase()),
+        )})`
+      : Prisma.empty;
+    const brandClause = brandIds.length
+      ? Prisma.sql`AND c."brand_id" IN (${Prisma.join(brandIds)})`
+      : Prisma.empty;
+    const statusClause =
+      filters.status !== undefined
+        ? Prisma.sql`AND a."status" = ${filters.status}::"AdvertStatus"`
         : Prisma.empty;
-    const brandClause =
-      filters.brand_id !== undefined
-        ? Prisma.sql`AND c."brandId" = ${filters.brand_id}`
+    const brandStatusClause =
+      filters.brand_status !== undefined
+        ? Prisma.sql`AND b."isFlagged" = ${filters.brand_status === 'flagged'}`
         : Prisma.empty;
-    const startClause =
-      filters.start !== undefined ? Prisma.sql`AND a."endDate" >= ${filters.start}` : Prisma.empty;
-    const endClause =
-      filters.end !== undefined ? Prisma.sql`AND a."startDate" <= ${filters.end}` : Prisma.empty;
+    const cityClause = filters.city
+      ? Prisma.sql`AND a."city_name" ILIKE ${`%${filters.city}%`}`
+      : Prisma.empty;
+    const zoneClause = filters.zone
+      ? Prisma.sql`AND a."zone_name" ILIKE ${`%${filters.zone}%`}`
+      : Prisma.empty;
+    const idsClause = filters.ids?.length
+      ? Prisma.sql`AND a."id" IN (${Prisma.join(filters.ids)})`
+      : Prisma.empty;
+    let dateClause: Prisma.Sql;
+    if (timeBounds.exact) {
+      dateClause = Prisma.sql`AND a."end_date" >= ${timeBounds.exact.from} AND a."start_date" <= ${timeBounds.exact.to}`;
+    } else {
+      const startPart = timeBounds.start
+        ? Prisma.sql`AND a."end_date" >= ${timeBounds.start}`
+        : Prisma.empty;
+      const endPart = timeBounds.end
+        ? Prisma.sql`AND a."start_date" <= ${timeBounds.end}`
+        : Prisma.empty;
+      dateClause = Prisma.sql`${startPart} ${endPart}`;
+    }
+    let dailyClause = Prisma.empty;
+    if (dailyWindow?.start !== undefined && dailyWindow?.end !== undefined) {
+      dailyClause = Prisma.sql`AND (a."time_slot_start" IS NULL OR (a."time_slot_start" <= ${dailyWindow.end} AND a."time_slot_end" >= ${dailyWindow.start}))`;
+    } else if (dailyWindow?.start !== undefined) {
+      dailyClause = Prisma.sql`AND (a."time_slot_start" IS NULL OR a."time_slot_end" >= ${dailyWindow.start})`;
+    } else if (dailyWindow?.end !== undefined) {
+      dailyClause = Prisma.sql`AND (a."time_slot_start" IS NULL OR a."time_slot_start" <= ${dailyWindow.end})`;
+    }
     const search = filters.search?.trim();
     const searchClause = search
       ? Prisma.sql`AND (
@@ -666,12 +980,12 @@ export class AdvertService {
       : Prisma.empty;
     const orderClause =
       sort === 'distance_desc'
-        ? Prisma.sql`ORDER BY "distanceKm" DESC, a."id" ASC`
+        ? Prisma.sql`ORDER BY "distanceM" DESC, a."id" ASC`
         : sort === 'id_asc'
           ? Prisma.sql`ORDER BY a."id" ASC`
           : sort === 'id_desc'
             ? Prisma.sql`ORDER BY a."id" DESC`
-            : Prisma.sql`ORDER BY "distanceKm" ASC, a."id" ASC`;
+            : Prisma.sql`ORDER BY "distanceM" ASC, a."id" ASC`;
 
     const rows = await this.prisma.client.$queryRaw<
       Array<{
@@ -681,6 +995,8 @@ export class AdvertService {
         status: AdvertStatus;
         startDate: Date;
         endDate: Date;
+        timeSlotStart: string | null;
+        timeSlotEnd: string | null;
         cityName: string | null;
         zoneName: string | null;
         imageHash: string | null;
@@ -698,106 +1014,50 @@ export class AdvertService {
         mediaUrl: string;
         mediaType: string;
         location: string | null;
-        distanceKm: number;
-        radiusKm: number | null;
+        distanceM: number;
+        radiusM: number | null;
         total: number;
       }>
     >(Prisma.sql`
       SELECT a."id", a."version_id" AS "versionId", a."address_text" AS "addressText",
              a."status", a."start_date" AS "startDate", a."end_date" AS "endDate",
+             a."time_slot_start" AS "timeSlotStart", a."time_slot_end" AS "timeSlotEnd",
              a."city_name" AS "cityName", a."zone_name" AS "zoneName",
              a."image_hash" AS "imageHash", a."upstream_advert_id" AS "upstreamAdvertId",
              a."created_at" AS "createdAt",
-             a."radius_km" AS "radiusKm",
+             a."radius_m" AS "radiusM",
              v."id" AS "versionId2", v."version_number" AS "versionNumber", v."status" AS "versionStatus",
              v."media_url" AS "mediaUrl", v."media_type" AS "mediaType",
              c."id" AS "creativeId", c."creative_name" AS "creativeName",
              b."id" AS "brandId", b."brand_name" AS "brandName", b."isFlagged" AS "isFlagged",
              b."industry_category" AS "industryCategory",
              ST_AsText(a."location") AS "location",
-             ST_Distance(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography) / 1000 AS "distanceKm",
+             ST_Distance(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography) AS "distanceM",
              COUNT(*) OVER() AS "total"
       FROM "Advert" a
       JOIN "CreativeVersion" v ON v."id" = a."version_id"
       JOIN "Creative" c ON c."id" = v."creative_id"
       JOIN "Brand" b ON b."id" = c."brand_id"
-      WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusKm * 1000})
-        ${industryClause} ${brandClause} ${startClause} ${endClause} ${searchClause}
+      WHERE ST_DWithin(a."location"::geography, ST_MakePoint(${filters.lng}, ${filters.lat})::geography, ${radiusM})
+        ${industryClause} ${brandClause} ${statusClause} ${brandStatusClause}
+        ${cityClause} ${zoneClause} ${idsClause} ${dateClause} ${dailyClause} ${searchClause}
       ${orderClause}
       LIMIT ${imageMode ? IMAGE_SEARCH_CANDIDATE_LIMIT : take} OFFSET ${imageMode ? 0 : skip}
     `);
     return {
-      rows: rows.map((row) => this.toResponse(row, { ...row, distanceKm: Number(row.distanceKm) })),
+      rows: rows.map((row) => this.toResponse(row, { ...row, distanceM: Number(row.distanceM) })),
       total: rows.length > 0 ? Number(rows[0].total) : 0,
     };
   }
 
   private async plainSearch(
-    filters: {
-      industry?: string;
-      search?: string;
-      brand_id?: string;
-      start?: Date;
-      end?: Date;
-    },
+    filters: AdvertListFilters,
     skip: number,
     take: number,
     imageMode = false,
   ): Promise<{ rows: AdvertResponseDto[]; total: number }> {
     // No coordinates: the same filters through Prisma (sort applies to geo mode only).
-    const search = filters.search?.trim();
-    const creative: Prisma.CreativeWhereInput = {
-      ...(filters.brand_id ? { brandId: filters.brand_id } : {}),
-      ...(filters.industry
-        ? { brand: { is: { industryCategory: { equals: filters.industry, mode: 'insensitive' } } } }
-        : {}),
-    };
-    const where: Prisma.AdvertWhereInput = {
-      ...(Object.keys(creative).length ? { version: { creative } } : {}),
-      ...(search
-        ? {
-            OR: [
-              { id: { contains: search } },
-              { addressText: { contains: search, mode: 'insensitive' } },
-              { cityName: { contains: search, mode: 'insensitive' } },
-              { zoneName: { contains: search, mode: 'insensitive' } },
-              {
-                version: {
-                  creative: {
-                    creativeName: { contains: search, mode: 'insensitive' },
-                  },
-                },
-              },
-              {
-                version: {
-                  creative: {
-                    brand: {
-                      is: { brandName: { contains: search, mode: 'insensitive' } },
-                    },
-                  },
-                },
-              },
-              {
-                version: {
-                  creative: {
-                    brand: {
-                      is: { industryCategory: { contains: search, mode: 'insensitive' } },
-                    },
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
-      ...(filters.start || filters.end
-        ? {
-            AND: [
-              ...(filters.start ? [{ endDate: { gte: filters.start } }] : []),
-              ...(filters.end ? [{ startDate: { lte: filters.end } }] : []),
-            ],
-          }
-        : {}),
-    };
+    const where = buildAdvertWhere(filters);
     const [adverts, total] = await Promise.all([
       this.prisma.client.advert.findMany({
         where,
@@ -831,12 +1091,41 @@ export class AdvertService {
   ): Promise<void> {
     if (!actorId) return;
     try {
+      const paramsJson = params as unknown as Prisma.InputJsonValue;
+      const preview = buildSearchPreview(rows) as unknown as Prisma.InputJsonValue;
+      const key = searchHistoryKey(params);
+      const since = new Date(Date.now() - RECENT_SEARCH_DAYS * 24 * 60 * 60 * 1000);
+      const existing = await this.prisma.client.advertSearchHistory.findMany({
+        where: { userId: actorId, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, params: true },
+      });
+      const duplicates = existing.filter((row) => searchHistoryKey(row.params) === key);
+      if (duplicates.length > 0) {
+        // One logical search gets one history row even if the client retries
+        // or fires duplicate requests. Keep the newest snapshot and refresh it.
+        await this.prisma.client.advertSearchHistory.update({
+          where: { id: duplicates[0].id },
+          data: {
+            params: paramsJson,
+            resultCount,
+            preview,
+            createdAt: new Date(),
+          },
+        });
+        if (duplicates.length > 1) {
+          await this.prisma.client.advertSearchHistory.deleteMany({
+            where: { id: { in: duplicates.slice(1).map((row) => row.id) } },
+          });
+        }
+        return;
+      }
       await this.prisma.client.advertSearchHistory.create({
         data: {
           userId: actorId,
-          params: params as unknown as Prisma.InputJsonValue,
+          params: paramsJson,
           resultCount,
-          preview: buildSearchPreview(rows) as unknown as Prisma.InputJsonValue,
+          preview,
         },
       });
     } catch {
@@ -859,8 +1148,17 @@ export class AdvertService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    // Existing rows may predate write-time coalescing. Collapse identical
+    // searches per user here as well, keeping the newest row (already first).
+    const seen = new Set<string>();
+    const uniqueRows = rows.filter((row) => {
+      const key = `${row.userId}\u0000${searchHistoryKey(row.params)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     const now = Date.now();
-    return rows.map((row) => ({
+    return uniqueRows.map((row) => ({
       id: row.id,
       params: row.params,
       adverts_matched: row.resultCount,
@@ -1019,6 +1317,7 @@ export class AdvertService {
   ): Promise<{ advert: AdvertResponseDto; created: boolean }> {
     assertCoordinates(input.lat, input.lng);
     assertDateRange(input.start_date, input.end_date);
+    const dailyWindow = normalizeDailyTimeWindow(input.time_slot_start, input.time_slot_end);
     if (input.image_hash !== undefined && input.image_hash !== null) {
       assertImageHash(input.image_hash);
     }
@@ -1068,9 +1367,11 @@ export class AdvertService {
               "address_text" = ${input.address_text},
               "start_date" = ${input.start_date},
               "end_date" = ${input.end_date},
+              "time_slot_start" = ${dailyWindow?.start ?? null},
+              "time_slot_end" = ${dailyWindow?.end ?? null},
               "city_name" = ${input.city_name ?? null},
               "zone_name" = ${input.zone_name ?? null},
-              "radius_km" = ${input.radius_km ?? null},
+              "radius_m" = ${input.radius_m ?? null},
               "image_hash" = ${input.image_hash ?? null}
           WHERE "id" = ${existing.id}
         `;
@@ -1090,9 +1391,11 @@ export class AdvertService {
             address_text: input.address_text,
             start_date: input.start_date.toISOString(),
             end_date: input.end_date.toISOString(),
+            time_slot_start: dailyWindow?.start ?? null,
+            time_slot_end: dailyWindow?.end ?? null,
             city_name: input.city_name ?? null,
             zone_name: input.zone_name ?? null,
-            radius_km: input.radius_km ?? null,
+            radius_m: input.radius_m ?? null,
             image_hash: input.image_hash ?? null,
             updated: true,
             origin: 'upstream',
@@ -1105,8 +1408,8 @@ export class AdvertService {
     const advertId = randomUUID();
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "city_name", "zone_name", "radius_km", "image_hash", "upstream_advert_id", "created_at")
-        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${input.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${input.start_date}, ${input.end_date}, ${input.city_name ?? null}, ${input.zone_name ?? null}, ${input.radius_km ?? null}, ${input.image_hash ?? null}, ${input.upstream_advert_id}, CURRENT_TIMESTAMP)
+        INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status", "start_date", "end_date", "time_slot_start", "time_slot_end", "city_name", "zone_name", "radius_m", "image_hash", "upstream_advert_id", "created_at")
+        VALUES (${advertId}, ${version.id}, ST_GeomFromText(${wkt}, 4326), ${input.address_text}, ${AdvertStatus.SCHEDULED}::"AdvertStatus", ${input.start_date}, ${input.end_date}, ${dailyWindow?.start ?? null}, ${dailyWindow?.end ?? null}, ${input.city_name ?? null}, ${input.zone_name ?? null}, ${input.radius_m ?? null}, ${input.image_hash ?? null}, ${input.upstream_advert_id}, CURRENT_TIMESTAMP)
       `;
       await this.outbox.emitInTx(tx, {
         eventType: EventTypes.advertScheduled,
@@ -1125,9 +1428,11 @@ export class AdvertService {
           address_text: input.address_text,
           start_date: input.start_date.toISOString(),
           end_date: input.end_date.toISOString(),
+          time_slot_start: dailyWindow?.start ?? null,
+          time_slot_end: dailyWindow?.end ?? null,
           city_name: input.city_name ?? null,
           zone_name: input.zone_name ?? null,
-          radius_km: input.radius_km ?? null,
+          radius_m: input.radius_m ?? null,
           image_hash: input.image_hash ?? null,
           origin: 'upstream',
         },
@@ -1234,11 +1539,20 @@ export class AdvertService {
         {
           lat: null,
           lng: null,
-          radius_km: null,
-          industry: query.industry ?? null,
-          brand_id: query.brand_id ?? query.brandId ?? null,
+          radius_m: null,
+          industry: echoMultiValue(query.industry),
+          brand_id: echoMultiValue([
+            ...normalizeMultiValue(query.brand_id),
+            ...normalizeMultiValue(query.brandId),
+          ]),
           start: query.start_date ?? null,
           end: query.end_date ?? null,
+          start_date: query.start_date ?? null,
+          end_date: query.end_date ?? null,
+          start_time: query.start_time ?? null,
+          end_time: query.end_time ?? null,
+          time_slot_start: query.time_slot_start ?? null,
+          time_slot_end: query.time_slot_end ?? null,
           sort: 'distance_asc',
           query_hash: null,
           max_distance: null,
@@ -1277,9 +1591,12 @@ export class AdvertService {
         status: advert.status,
         address: advert.addressText,
         location: locations.get(advert.id) ?? null,
-        radius_km: advert.radiusKm ?? null,
+        radius_m: advert.radiusM ?? null,
         start_date: advert.startDate,
         end_date: advert.endDate,
+        time_slot_start: advert.timeSlotStart ?? null,
+        time_slot_end: advert.timeSlotEnd ?? null,
+        time_range: formatTimeRange(advert.timeSlotStart, advert.timeSlotEnd),
         city: advert.cityName,
         zone: advert.zoneName,
       };
@@ -1427,13 +1744,28 @@ export class AdvertService {
       mediaUrl: string;
       mediaType: string;
       location: string | null;
-      distanceKm: number | null;
+      distanceM: number | null;
     },
-    extra?: { location?: string | null; distanceKm?: number | null; hashDistance?: number | null },
+    extra?: { location?: string | null; distanceM?: number | null; hashDistance?: number | null },
   ): AdvertResponseDto {
+    const distanceM =
+      geo?.distanceM !== undefined && geo?.distanceM !== null
+        ? Number(geo.distanceM)
+        : (extra?.distanceM ?? null);
     const withVersion = advert as Prisma.AdvertGetPayload<{
       include: { version: { include: { creative: { include: { brand: true } } } } };
     }>;
+    const brand = geo
+      ? { id: geo.brandId, brand_name: geo.brandName, is_flagged: geo.isFlagged }
+      : withVersion.version?.creative.brand
+        ? {
+            id: withVersion.version.creative.brand.id,
+            brand_name: withVersion.version.creative.brand.brandName,
+            is_flagged: withVersion.version.creative.brand.isFlagged,
+          }
+        : null;
+    const industryCategory =
+      geo?.industryCategory ?? withVersion.version?.creative.brand.industryCategory ?? null;
     const version = geo
       ? {
           id: geo.versionId2,
@@ -1441,7 +1773,7 @@ export class AdvertService {
           status: geo.versionStatus,
           creative_id: geo.creativeId,
           creative_name: geo.creativeName,
-          brand: { id: geo.brandId, brand_name: geo.brandName, is_flagged: geo.isFlagged },
+          brand: brand!,
         }
       : withVersion.version
         ? {
@@ -1450,11 +1782,7 @@ export class AdvertService {
             status: withVersion.version.status,
             creative_id: withVersion.version.creative.id,
             creative_name: withVersion.version.creative.creativeName,
-            brand: {
-              id: withVersion.version.creative.brand.id,
-              brand_name: withVersion.version.creative.brand.brandName,
-              is_flagged: withVersion.version.creative.brand.isFlagged,
-            },
+            brand: brand!,
           }
         : null;
     return plainToInstance(
@@ -1466,6 +1794,9 @@ export class AdvertService {
         address_text: advert.addressText,
         start_date: advert.startDate,
         end_date: advert.endDate,
+        time_slot_start: advert.timeSlotStart ?? null,
+        time_slot_end: advert.timeSlotEnd ?? null,
+        time_range: formatTimeRange(advert.timeSlotStart, advert.timeSlotEnd),
         city_name: advert.cityName,
         zone_name: advert.zoneName,
         image_hash: advert.imageHash,
@@ -1473,17 +1804,18 @@ export class AdvertService {
         created_at: advert.createdAt,
         version,
         location: geo?.location ?? extra?.location ?? null,
-        radius_km: advert.radiusKm ?? null,
+        radius_m: advert.radiusM ?? null,
         media_url: geo?.mediaUrl ?? withVersion.version?.mediaUrl ?? null,
         media_type: geo?.mediaType ?? withVersion.version?.mediaType ?? null,
         creative_name: version?.creative_name ?? null,
         creative_id: version?.creative_id ?? null,
-        industry:
-          geo?.industryCategory ?? withVersion.version?.creative.brand.industryCategory ?? null,
-        distance_km:
-          geo?.distanceKm !== undefined && geo?.distanceKm !== null
-            ? Math.round(geo.distanceKm * 1000) / 1000
-            : (extra?.distanceKm ?? null),
+        brand_id: brand?.id ?? null,
+        brand_name: brand?.brand_name ?? null,
+        brand_is_flagged: brand?.is_flagged ?? null,
+        industry: industryCategory,
+        industry_category: industryCategory,
+        distance_m: distanceM != null ? Math.round(distanceM) : null,
+        distance_km: distanceM != null ? Math.round((distanceM / 1000) * 1000) / 1000 : null,
         hash_distance: extra?.hashDistance ?? null,
         available_actions: availableGovtActions(advert.status),
       },

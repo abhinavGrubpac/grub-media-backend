@@ -466,10 +466,12 @@ interface AdvertSeed {
   address: string;
   city: string;
   zone: string;
-  radiusKm: number;
+  radiusM: number;
   status: AdvertStatus;
   startDate: string;
   endDate: string;
+  timeSlotStart: string;
+  timeSlotEnd: string;
   createdAt: string;
   imageHash: string;
 }
@@ -484,10 +486,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Marine Drive Promenade, Churchgate',
     city: 'Mumbai',
     zone: 'South Mumbai',
-    radiusKm: 5,
+    radiusM: 5000,
     status: AdvertStatus.LIVE,
     startDate: '2026-10-01',
     endDate: '2026-12-31',
+    timeSlotStart: '06:00',
+    timeSlotEnd: '23:00',
     createdAt: '2026-09-22',
     imageHash: '5e2d9f8a7b6c5d4e',
   },
@@ -500,10 +504,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Western Express Highway, Andheri East',
     city: 'Mumbai',
     zone: 'Western Suburbs',
-    radiusKm: 8,
+    radiusM: 8000,
     status: AdvertStatus.LIVE,
     startDate: '2026-09-15',
     endDate: '2026-12-15',
+    timeSlotStart: '08:00',
+    timeSlotEnd: '22:00',
     createdAt: '2026-09-01',
     imageHash: '8b1c4d7e0f2a3b5c',
   },
@@ -516,10 +522,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Fergusson College Road, Shivajinagar',
     city: 'Pune',
     zone: 'Central Pune',
-    radiusKm: 6,
+    radiusM: 6000,
     status: AdvertStatus.LIVE,
     startDate: '2026-10-05',
     endDate: '2027-01-05',
+    timeSlotStart: '09:00',
+    timeSlotEnd: '21:00',
     createdAt: '2026-09-24',
     imageHash: '3f7a2b9c1d4e5f60',
   },
@@ -532,10 +540,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'College Road, Nashik',
     city: 'Nashik',
     zone: 'Nashik Central',
-    radiusKm: 4,
+    radiusM: 4000,
     status: AdvertStatus.SCHEDULED,
     startDate: '2026-11-01',
     endDate: '2027-02-28',
+    timeSlotStart: '10:00',
+    timeSlotEnd: '20:00',
     createdAt: '2026-10-10',
     imageHash: '3f7a2b9c1d4e5f60',
   },
@@ -548,10 +558,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Sitabuldi Main Road, Nagpur',
     city: 'Nagpur',
     zone: 'Sitabuldi',
-    radiusKm: 5,
+    radiusM: 5000,
     status: AdvertStatus.EXPIRED,
     startDate: '2026-07-01',
     endDate: '2026-09-30',
+    timeSlotStart: '08:00',
+    timeSlotEnd: '23:00',
     createdAt: '2026-06-15',
     imageHash: 'c1d2e3f4a5b6c7d8',
   },
@@ -564,10 +576,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Kranti Chowk, Chhatrapati Sambhajinagar',
     city: 'Chhatrapati Sambhajinagar',
     zone: 'Kranti Chowk',
-    radiusKm: 4,
+    radiusM: 4000,
     status: AdvertStatus.PAUSED,
     startDate: '2026-09-01',
     endDate: '2026-11-30',
+    timeSlotStart: '17:00',
+    timeSlotEnd: '23:59',
     createdAt: '2026-08-18',
     imageHash: 'c1d2e3f4a5b6c7d8',
   },
@@ -580,10 +594,12 @@ const ADVERTS: AdvertSeed[] = [
     address: 'Gateway of India Precinct, Colaba',
     city: 'Mumbai',
     zone: 'South Mumbai',
-    radiusKm: 3,
+    radiusM: 3000,
     status: AdvertStatus.EXPIRED,
     startDate: '2026-05-01',
     endDate: '2026-07-31',
+    timeSlotStart: '07:00',
+    timeSlotEnd: '22:00',
     createdAt: '2026-04-12',
     imageHash: '9a8b7c6d5e4f3a2b',
   },
@@ -791,11 +807,12 @@ async function main(): Promise<void> {
     if (!versionId) throw new Error(`Version target missing for advert ${a.upstreamAdvertId}`);
     const inserted = await prisma.$executeRawUnsafe(
       `INSERT INTO "Advert" ("id", "version_id", "location", "address_text", "status",
-                             "start_date", "end_date", "city_name", "zone_name",
-                             "radius_km", "image_hash", "upstream_advert_id", "created_at")
+                             "start_date", "end_date", "time_slot_start", "time_slot_end",
+                             "city_name", "zone_name",
+                             "radius_m", "image_hash", "upstream_advert_id", "created_at")
        SELECT $1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6::"AdvertStatus",
-              $7, $8, $9, $10, $11, $12, $13, $14
-       WHERE NOT EXISTS (SELECT 1 FROM "Advert" WHERE "upstream_advert_id" = $13)`,
+              $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+       WHERE NOT EXISTS (SELECT 1 FROM "Advert" WHERE "upstream_advert_id" = $15)`,
       randomUUID(),
       versionId,
       a.lng,
@@ -804,9 +821,11 @@ async function main(): Promise<void> {
       a.status,
       ts(a.startDate),
       ts(a.endDate),
+      a.timeSlotStart,
+      a.timeSlotEnd,
       a.city,
       a.zone,
-      a.radiusKm,
+      a.radiusM,
       a.imageHash,
       a.upstreamAdvertId,
       ts(a.createdAt),

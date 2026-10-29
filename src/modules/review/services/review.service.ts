@@ -13,6 +13,7 @@ import { ActivityLogService } from '../../../common/activity-log/activity-log.se
 import { isS3NotFound, StorageService } from '../../../common/storage/storage.service';
 import { assertBrandActive } from '../../../common/utils/brand';
 import { AdvertService } from '../../advert/services/advert.service';
+import { formatTimeRange } from '../../advert/validators';
 import { EventOutboxService } from '../../events/event.outbox';
 import { EventTypes } from '../../events/events.constants';
 import { CreativeQueryDto } from '../dto/creative-query.dto';
@@ -406,6 +407,8 @@ export class CreativeService {
           address_text: dto.schedule.address_text ?? '',
           start_date: dto.schedule.start_date,
           end_date: dto.schedule.end_date,
+          time_slot_start: dto.schedule.time_slot_start ?? null,
+          time_slot_end: dto.schedule.time_slot_end ?? null,
           city_name: dto.schedule.city_name ?? null,
           zone_name: dto.schedule.zone_name ?? null,
           radius: dto.schedule.radius ?? null,
@@ -419,10 +422,13 @@ export class CreativeService {
           status: booked.status,
           start_date: booked.start_date,
           end_date: booked.end_date,
+          time_slot_start: booked.time_slot_start ?? null,
+          time_slot_end: booked.time_slot_end ?? null,
+          time_range: booked.time_range ?? null,
           address_text: booked.address_text,
           city_name: booked.city_name,
           zone_name: booked.zone_name,
-          radius_km: booked.radius_km ?? null,
+          radius_m: booked.radius_m ?? null,
           location: booked.location ?? null,
         },
       ];
@@ -637,10 +643,13 @@ export class CreativeService {
             status: advert.status,
             start_date: advert.startDate,
             end_date: advert.endDate,
+            time_slot_start: advert.timeSlotStart ?? null,
+            time_slot_end: advert.timeSlotEnd ?? null,
+            time_range: formatTimeRange(advert.timeSlotStart, advert.timeSlotEnd),
             address_text: advert.addressText,
             city_name: advert.cityName,
             zone_name: advert.zoneName,
-            radius_km: advert.radiusKm ?? null,
+            radius_m: advert.radiusM ?? null,
             location: locations.get(advert.id) ?? null,
           })),
         ),

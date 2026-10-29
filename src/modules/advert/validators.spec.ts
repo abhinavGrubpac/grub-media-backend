@@ -5,8 +5,13 @@ import {
   assertCoordinates,
   assertDateRange,
   assertSchedulableVersionStatus,
+  assertTimeOfDay,
   availableGovtActions,
+  formatTimeRange,
   isSchedulableVersionStatus,
+  normalizeDailyTimeWindow,
+  normalizeDailyWindowFilter,
+  normalizeMultiValue,
   normalizeUpstreamAdvertStatus,
   validateAdvertTransition,
 } from './validators';
@@ -149,5 +154,58 @@ describe('assertDateRange', () => {
     expect(() => assertDateRange(new Date('nope'), new Date('2026-01-01'))).toThrow(
       BadRequestException,
     );
+  });
+});
+
+describe('daily time windows', () => {
+  it('parses fixed-width HH:mm values', () => {
+    expect(assertTimeOfDay('09:05')).toBe('09:05');
+    expect(assertTimeOfDay(' 23:59 ')).toBe('23:59');
+    expect(() => assertTimeOfDay('24:00')).toThrow(BadRequestException);
+    expect(() => assertTimeOfDay('9:05')).toThrow(BadRequestException);
+  });
+
+  it('normalizes the all-day 00:00-00:00 spelling', () => {
+    expect(normalizeDailyTimeWindow('00:00', '00:00')).toEqual({
+      start: '00:00',
+      end: '23:59',
+    });
+    expect(normalizeDailyTimeWindow(undefined, undefined)).toBeNull();
+  });
+
+  it('rejects partial, equal, or overnight stored windows', () => {
+    expect(() => normalizeDailyTimeWindow('09:00', undefined)).toThrow(BadRequestException);
+    expect(() => normalizeDailyTimeWindow('09:00', '09:00')).toThrow(BadRequestException);
+    expect(() => normalizeDailyTimeWindow('22:00', '06:00')).toThrow(BadRequestException);
+  });
+
+  it('allows one-sided query boundaries and overlap windows', () => {
+    expect(normalizeDailyWindowFilter('18:00', undefined)).toEqual({
+      start: '18:00',
+      end: undefined,
+    });
+    expect(normalizeDailyWindowFilter(undefined, '22:00')).toEqual({
+      start: undefined,
+      end: '22:00',
+    });
+    expect(normalizeDailyWindowFilter('18:00', '22:00')).toEqual({
+      start: '18:00',
+      end: '22:00',
+    });
+    expect(() => normalizeDailyWindowFilter('22:00', '18:00')).toThrow(BadRequestException);
+  });
+
+  it('formats a display range only when both bounds exist', () => {
+    expect(formatTimeRange('06:00', '23:00')).toBe('06:00 - 23:00');
+    expect(formatTimeRange(null, '23:00')).toBeNull();
+  });
+});
+
+describe('multi-select query values', () => {
+  it('accepts comma-separated and repeated values, trims, and de-duplicates', () => {
+    expect(normalizeMultiValue('Food, Retail')).toEqual(['Food', 'Retail']);
+    expect(normalizeMultiValue(['Food', 'Retail,Energy'])).toEqual(['Food', 'Retail', 'Energy']);
+    expect(normalizeMultiValue(' Food , ,Food ')).toEqual(['Food']);
+    expect(normalizeMultiValue(undefined)).toEqual([]);
   });
 });

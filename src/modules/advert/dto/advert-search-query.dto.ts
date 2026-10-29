@@ -1,19 +1,33 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDate,
+  IsDateString,
   IsIn,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
-import { ADVERT_SEARCH_SORTS } from '../validators';
+import {
+  ADVERT_SEARCH_SORTS,
+  ADVERT_STATUSES,
+  TIME_OF_DAY_PATTERN,
+  normalizeMultiValue,
+} from '../validators';
 
 export class AdvertSearchQueryDto {
+  @ApiPropertyOptional({ enum: [...ADVERT_STATUSES] })
+  @IsOptional()
+  @IsIn([...ADVERT_STATUSES])
+  status?: (typeof ADVERT_STATUSES)[number];
+
   @ApiPropertyOptional({ description: 'Latitude to search around', minimum: -90, maximum: 90 })
   @IsOptional()
   @Type(() => Number)
@@ -31,22 +45,43 @@ export class AdvertSearchQueryDto {
   lng?: number;
 
   @ApiPropertyOptional({
-    description: 'Radius in kilometres (needs lat+lng, cannot be searched alone)',
-    minimum: 0.01,
-    maximum: 500,
+    description:
+      'Search radius in metres. With search, coordinates are resolved from matching location data; ' +
+      'without search, radius needs lat+lng.',
+    minimum: 1,
+    maximum: 500000,
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
-  @Max(500)
+  @Min(1)
+  @Max(500000)
   radius?: number;
 
-  @ApiPropertyOptional({ description: 'Brand industry (case-sensitive exact match)' })
+  @ApiPropertyOptional({
+    description: 'Canonical metres alias for radius. Must match radius when both are supplied.',
+    minimum: 1,
+    maximum: 500000,
+  })
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  industry?: string;
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(500000)
+  radius_m?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Brand industry (case-insensitive exact match). Accepts comma-separated or repeated values; matches any selected industry.',
+    type: [String],
+  })
+  @IsOptional()
+  @Transform(({ value }) => normalizeMultiValue(value))
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  industry?: string[];
 
   @ApiPropertyOptional({
     description:
@@ -58,13 +93,103 @@ export class AdvertSearchQueryDto {
   @MaxLength(500)
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by brand' })
+  @ApiPropertyOptional({
+    description:
+      'Filter by brand. Accepts comma-separated or repeated brand ids; matches any selected brand.',
+    type: [String],
+  })
+  @IsOptional()
+  @Transform(({ value }) => normalizeMultiValue(value))
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  brand_id?: string[];
+
+  @ApiPropertyOptional({ enum: ['flagged', 'notflagged'], description: 'Filter by brand flag' })
+  @IsOptional()
+  @IsIn(['flagged', 'notflagged'])
+  brand_status?: 'flagged' | 'notflagged';
+
+  @ApiPropertyOptional({ description: 'Case-insensitive match on city name' })
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  brand_id?: string;
+  city?: string;
 
-  @ApiPropertyOptional({ description: 'Schedules overlapping on/after this date (ISO)' })
+  @ApiPropertyOptional({ description: 'Case-insensitive match on zone name' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  zone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Schedules overlapping on/after this date (ISO, inclusive day)',
+  })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string;
+
+  @ApiPropertyOptional({
+    description: 'Schedules overlapping on/before this date (ISO, inclusive day)',
+  })
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Exact campaign start time (HH:mm, UTC). Requires end_time plus both ' +
+      'start_date and end_date; the four values form one exact interval filter.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'start_time must be HH:mm (00:00-23:59)' })
+  start_time?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Exact campaign end time (HH:mm, UTC). Requires start_time plus both ' +
+      'start_date and end_date.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'end_time must be HH:mm (00:00-23:59)' })
+  end_time?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Recurring daily display window start (HH:mm). With time_slot_end, ' +
+      'matches adverts whose daily window overlaps the requested window.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_start must be HH:mm (00:00-23:59)' })
+  time_slot_start?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Recurring daily display window end (HH:mm). With time_slot_start, ' +
+      'matches adverts whose daily window overlaps the requested window.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_end must be HH:mm (00:00-23:59)' })
+  time_slot_end?: string;
+
+  @ApiPropertyOptional({
+    description: 'Restrict to exactly these advert ids (comma-separated or repeated).',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    Array.isArray(value)
+      ? value
+      : String(value ?? '')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean),
+  )
+  @IsArray()
+  @IsUUID('4', { each: true })
+  ids?: string[];
+
+  @ApiPropertyOptional({ description: 'Schedules overlapping on/after this instant (ISO)' })
   @IsOptional()
   @Type(() => Date)
   @IsDate()

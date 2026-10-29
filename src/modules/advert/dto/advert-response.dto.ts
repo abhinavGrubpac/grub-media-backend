@@ -69,6 +69,27 @@ export class AdvertResponseDto {
   end_date!: Date;
 
   @ApiPropertyOptional({
+    description: 'Recurring daily display window start (HH:mm)',
+    nullable: true,
+  })
+  @Expose()
+  time_slot_start!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Recurring daily display window end (HH:mm)',
+    nullable: true,
+  })
+  @Expose()
+  time_slot_end!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Derived daily display window, e.g. "06:00 - 23:00"',
+    nullable: true,
+  })
+  @Expose()
+  time_range!: string | null;
+
+  @ApiPropertyOptional({
     description: 'Display annotation of the city from upstream',
     nullable: true,
   })
@@ -109,11 +130,11 @@ export class AdvertResponseDto {
   location?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Coverage radius in kilometres for map display (null until a radius is set)',
+    description: 'Coverage radius in metres for map display',
     nullable: true,
   })
   @Expose()
-  radius_km?: number | null;
+  radius_m?: number | null;
 
   @ApiPropertyOptional({ description: 'Creative media bucket key', nullable: true })
   @Expose()
@@ -136,8 +157,43 @@ export class AdvertResponseDto {
   industry?: string | null;
 
   @ApiPropertyOptional({
+    description: 'Owning brand id (flat alias for list/search clients)',
+    nullable: true,
+  })
+  @Expose()
+  brand_id?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Owning brand name (flat alias for list/search clients)',
+    nullable: true,
+  })
+  @Expose()
+  brand_name?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Whether the owning brand is flagged (flat alias)',
+    nullable: true,
+  })
+  @Expose()
+  brand_is_flagged?: boolean | null;
+
+  @ApiPropertyOptional({
+    description: 'Brand industry category (flat alias)',
+    nullable: true,
+  })
+  @Expose()
+  industry_category?: string | null;
+
+  @ApiPropertyOptional({
     description:
-      'Distance in kilometres from the searched lat/lng to the advert site (radius/geo search only)',
+      'Distance in metres from the searched location to the advert site (radius/geo search only)',
+    nullable: true,
+  })
+  @Expose()
+  distance_m?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Legacy distance in km; retained while clients migrate',
     nullable: true,
   })
   @Expose()

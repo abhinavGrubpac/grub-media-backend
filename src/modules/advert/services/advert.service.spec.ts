@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { ActivityLogService } from '../../../common/activity-log/activity-log.service';
-import { AdvertService } from './advert.service';
+import { AdvertService, buildAdvertWhere } from './advert.service';
 
 const brandRow = {
   id: 'brand1',
@@ -50,6 +50,8 @@ const advertRow = {
   status: 'SCHEDULED',
   startDate: new Date(),
   endDate: new Date(),
+  timeSlotStart: '06:00',
+  timeSlotEnd: '23:00',
   cityName: 'Bengaluru',
   zoneName: null,
   imageHash: null,
@@ -75,6 +77,8 @@ function makeDeps() {
   const advertSearchHistory = {
     create: jest.fn().mockResolvedValue({ id: 's1' }),
     findMany: jest.fn().mockResolvedValue([]),
+    update: jest.fn().mockResolvedValue({ id: 's1' }),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
   };
   const activityLog = { create: jest.fn().mockResolvedValue({ id: 'log1' }) };
   const client = {
@@ -130,7 +134,7 @@ describe('AdvertService.scheduleVersion', () => {
     });
     advert.findUnique.mockResolvedValue({ ...advertRow, status: 'SCHEDULED' });
 
-    const response = await service.scheduleVersion({ ...dto, radius: 2.5 }, 'manager1');
+    const response = await service.scheduleVersion({ ...dto, radius: 2500 }, 'manager1');
 
     expect(response.status).toBe('SCHEDULED');
     expect(outbox.emit).not.toHaveBeenCalledWith(
@@ -199,6 +203,61 @@ describe('AdvertService.scheduleVersion', () => {
     creativeVersion.findUnique.mockResolvedValue(null);
 
     await expect(service.scheduleVersion(dto, 'manager1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('stores and echoes a recurring daily window', async () => {
+    const { service, creativeVersion, advert, outbox } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue({
+      ...approvedVersion,
+      creative: { ...creativeRow, brand: brandRow },
+    });
+    advert.findUnique.mockResolvedValue({
+      ...advertRow,
+      timeSlotStart: '09:00',
+      timeSlotEnd: '18:00',
+    });
+
+    const response = await service.scheduleVersion(
+      { ...dto, time_slot_start: '09:00', time_slot_end: '18:00' },
+      'manager1',
+    );
+
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          time_slot_start: '09:00',
+          time_slot_end: '18:00',
+        }),
+      }),
+    );
+    expect(response.time_slot_start).toBe('09:00');
+    expect(response.time_slot_end).toBe('18:00');
+    expect(response.time_range).toBe('09:00 - 18:00');
+  });
+
+  it('normalizes the all-day 00:00-00:00 window', async () => {
+    const { service, creativeVersion, advert, outbox } = makeDeps();
+    creativeVersion.findUnique.mockResolvedValue({
+      ...approvedVersion,
+      creative: { ...creativeRow, brand: brandRow },
+    });
+    advert.findUnique.mockResolvedValue(advertRow);
+
+    await service.scheduleVersion(
+      { ...dto, time_slot_start: '00:00', time_slot_end: '00:00' },
+      'manager1',
+    );
+
+    expect(outbox.emitInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          time_slot_start: '00:00',
+          time_slot_end: '23:59',
+        }),
+      }),
+    );
   });
 });
 
@@ -423,13 +482,13 @@ describe('AdvertService.findAll', () => {
     const result = await service.findAll({
       page: 2,
       limit: 10,
-      brandId: 'brand1',
+      brandId: ['brand1'],
       sortOrder: 'desc',
     });
 
     expect(advert.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { version: { creative: { brandId: 'brand1' } } },
+        where: { version: { creative: { brandId: { in: ['brand1'] } } } },
         skip: 10,
         take: 10,
       }),
@@ -451,7 +510,7 @@ describe('AdvertService.findAll', () => {
     await service.findAll({
       page: 1,
       limit: 20,
-      industry: 'Food',
+      industry: ['Food'],
       start_date: '2026-10-01',
       end_date: '2026-10-31',
       ids: ['a1', 'a2'],
@@ -462,7 +521,7 @@ describe('AdvertService.findAll', () => {
     const where = advert.findMany.mock.calls[0][0].where;
     expect(where.id).toEqual({ in: ['a1', 'a2'] });
     expect(where.version.creative.brand).toEqual({
-      is: { industryCategory: { equals: 'Food', mode: 'insensitive' } },
+      is: { industryCategory: { in: ['Food'], mode: 'insensitive' } },
     });
     expect(where.AND).toEqual([
       { endDate: { gte: new Date('2026-10-01T00:00:00.000Z') } },
@@ -471,11 +530,117 @@ describe('AdvertService.findAll', () => {
     expect(advert.findMany.mock.calls[0][0].orderBy).toEqual({ startDate: 'asc' });
   });
 
+  it('matches any selected brand and industry in one predicate', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({
+      page: 1,
+      limit: 20,
+      sortOrder: 'desc',
+      brand_id: ['brand1', 'brand2'],
+      industry: ['Food', 'Retail'],
+    });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.version.creative.brandId).toEqual({ in: ['brand1', 'brand2'] });
+    expect(where.version.creative.brand).toEqual({
+      is: { industryCategory: { in: ['Food', 'Retail'], mode: 'insensitive' } },
+    });
+  });
+
+  it('normalizes comma-separated brand and industry filters before querying', () => {
+    const where = buildAdvertWhere({
+      brand_id: 'brand1, brand2,brand1',
+      industry: 'Food, Food ,Retail',
+    });
+
+    expect(where.version?.creative).toEqual({
+      brandId: { in: ['brand1', 'brand2'] },
+      brand: {
+        is: { industryCategory: { in: ['Food', 'Retail'], mode: 'insensitive' } },
+      },
+    });
+  });
+
   it('rejects unknown sort keys', async () => {
     const { service } = makeDeps();
 
     await expect(
       service.findAll({ page: 1, limit: 20, sortOrder: 'desc', sortBy: 'bogus' }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('applies an exact campaign time range with both dates', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({
+      page: 1,
+      limit: 20,
+      sortOrder: 'desc',
+      start_date: '2026-10-01',
+      end_date: '2026-10-31',
+      start_time: '09:00',
+      end_time: '18:00',
+    });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([
+      { endDate: { gte: new Date('2026-10-01T09:00:00.000Z') } },
+      { startDate: { lte: new Date('2026-10-31T18:00:59.999Z') } },
+    ]);
+  });
+
+  it('applies a recurring daily-window overlap filter independently of dates', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([]);
+    advert.count.mockResolvedValue(0);
+
+    await service.findAll({
+      page: 1,
+      limit: 20,
+      sortOrder: 'desc',
+      time_slot_start: '18:00',
+      time_slot_end: '22:00',
+    });
+
+    const where = advert.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { timeSlotStart: null },
+          {
+            AND: [{ timeSlotStart: { lte: '22:00' } }, { timeSlotEnd: { gte: '18:00' } }],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('requires both dates for an exact time range and validates daily windows', async () => {
+    const { service } = makeDeps();
+
+    await expect(
+      service.findAll({
+        page: 1,
+        limit: 20,
+        sortOrder: 'desc',
+        start_time: '09:00',
+        end_time: '18:00',
+      }),
+    ).rejects.toThrow(/require both start_date and end_date/);
+
+    await expect(
+      service.findAll({
+        page: 1,
+        limit: 20,
+        sortOrder: 'desc',
+        time_slot_start: '22:00',
+        time_slot_end: '18:00',
+      }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -495,6 +660,31 @@ describe('AdvertService.findAll', () => {
         userId: 'manager1',
         resultCount: 1,
         params: expect.objectContaining({ search: 'Mumbai' }),
+      }),
+    });
+  });
+
+  it('coalesces repeated identical searches into one history row', async () => {
+    const { service, advert, advertSearchHistory } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+
+    await service.findAll({ page: 1, limit: 20, sortOrder: 'desc', search: 'Mumbai' }, 'manager1');
+    const createdParams = advertSearchHistory.create.mock.calls[0][0].data.params;
+    advertSearchHistory.create.mockClear();
+    advertSearchHistory.findMany.mockResolvedValue([
+      { id: 's0', params: createdParams, createdAt: new Date() },
+    ]);
+
+    await service.findAll({ page: 1, limit: 20, sortOrder: 'desc', search: 'Mumbai' }, 'manager1');
+
+    expect(advertSearchHistory.create).not.toHaveBeenCalled();
+    expect(advertSearchHistory.update).toHaveBeenCalledWith({
+      where: { id: 's0' },
+      data: expect.objectContaining({
+        resultCount: 1,
+        preview: expect.any(Array),
+        createdAt: expect.any(Date),
       }),
     });
   });
@@ -532,7 +722,7 @@ describe('AdvertService.exportAdverts', () => {
     advert.findMany.mockResolvedValue([
       {
         ...advertRow,
-        radiusKm: 2.5,
+        radiusM: 2500,
         version: {
           creative: { creativeName: 'Festive Ad', brand: { brandName: 'Acme' } },
         },
@@ -550,7 +740,7 @@ describe('AdvertService.exportAdverts', () => {
         creative: 'Festive Ad',
         brand: 'Acme',
         status: 'SCHEDULED',
-        radius_km: 2.5,
+        radius_m: 2500,
       }),
     ]);
   });
@@ -619,7 +809,7 @@ describe('AdvertService.searchByRadius', () => {
         mediaUrl: 's3://bucket/a.png',
         mediaType: 'Image',
         location: 'POINT(77.5946 12.9716)',
-        distanceKm: 1.23456,
+        distanceM: 1234.56,
         total: 2,
       },
     ]);
@@ -627,7 +817,7 @@ describe('AdvertService.searchByRadius', () => {
     const result = await service.searchByRadius({
       lat: 12.9716,
       lng: 77.5946,
-      radius: 5,
+      radius: 5000,
       page: 1,
       limit: 50,
       actor_id: 'manager1',
@@ -641,12 +831,31 @@ describe('AdvertService.searchByRadius', () => {
       currentPage: 1,
     });
     expect(result.search).toEqual(
-      expect.objectContaining({ lat: 12.9716, lng: 77.5946, radius_km: 5, sort: 'distance_asc' }),
+      expect.objectContaining({
+        lat: 12.9716,
+        lng: 77.5946,
+        radius_m: 5000,
+        sort: 'distance_asc',
+      }),
     );
-    const row = result.items[0] as { distance_km: number; location: string; industry: string };
+    const row = result.items[0] as {
+      distance_m: number;
+      distance_km: number;
+      location: string;
+      industry: string;
+      industry_category: string;
+      brand_id: string;
+      brand_name: string;
+      brand_is_flagged: boolean;
+    };
+    expect(row.distance_m).toBe(1235);
     expect(row.distance_km).toBe(1.235);
     expect(row.location).toBe('POINT(77.5946 12.9716)');
     expect(row.industry).toBe('Food');
+    expect(row.industry_category).toBe('Food');
+    expect(row.brand_id).toBe('brand1');
+    expect(row.brand_name).toBe('Acme');
+    expect(row.brand_is_flagged).toBe(false);
     expect(advertSearchHistory.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ userId: 'manager1', resultCount: 2 }),
@@ -663,9 +872,32 @@ describe('AdvertService.searchByRadius', () => {
 
     expect(result.meta.totalItems).toBe(1);
     expect(result.search).toEqual(
-      expect.objectContaining({ lat: null, lng: null, radius_km: null }),
+      expect.objectContaining({ lat: null, lng: null, radius_m: null }),
     );
     expect(advertSearchHistory.create).toHaveBeenCalled();
+  });
+
+  it('echoes date and daily-window filters and returns the advert time range', async () => {
+    const { service, advert } = makeDeps();
+    advert.findMany.mockResolvedValue([advertRow]);
+    advert.count.mockResolvedValue(1);
+
+    const result = await service.searchByRadius({
+      start_date: '2026-10-01',
+      end_date: '2026-10-31',
+      time_slot_start: '18:00',
+      time_slot_end: '22:00',
+    });
+
+    expect(result.search).toEqual(
+      expect.objectContaining({
+        start_date: '2026-10-01',
+        end_date: '2026-10-31',
+        time_slot_start: '18:00',
+        time_slot_end: '22:00',
+      }),
+    );
+    expect((result.items[0] as { time_range: string }).time_range).toBe('06:00 - 23:00');
   });
 
   it('accepts text search on the plain-search fallback', async () => {
@@ -690,6 +922,54 @@ describe('AdvertService.searchByRadius', () => {
           params: expect.objectContaining({ search: 'Nashik' }),
         }),
       }),
+    );
+  });
+
+  it('resolves search+radius from a mapped location and measures in metres', async () => {
+    const { service, queryRaw } = makeDeps();
+    queryRaw.mockResolvedValueOnce([{ lat: 20.011, lng: 73.79 }]).mockResolvedValueOnce([
+      {
+        ...advertRow,
+        versionId2: 'v1',
+        versionNumber: 1,
+        versionStatus: 'APPROVED',
+        creativeId: 'c1',
+        creativeName: 'Festive Ad',
+        brandId: 'brand1',
+        brandName: 'Acme',
+        isFlagged: false,
+        industryCategory: 'Food',
+        mediaUrl: 's3://bucket/a.png',
+        mediaType: 'Image',
+        location: 'POINT(73.79 20.011)',
+        distanceM: 18.4,
+        total: 1,
+      },
+    ]);
+
+    const result = await service.searchByRadius({ search: 'Nashik', radius: 20 });
+
+    expect(result.search).toEqual(
+      expect.objectContaining({
+        lat: 20.011,
+        lng: 73.79,
+        radius_m: 20,
+        search: 'Nashik',
+      }),
+    );
+    const row = result.items[0] as { distance_m: number; distance_km: number };
+    expect(row.distance_m).toBe(18);
+    expect(row.distance_km).toBe(0.018);
+  });
+
+  it('rejects radius alone and an unresolvable location search', async () => {
+    const { service, queryRaw } = makeDeps();
+
+    await expect(service.searchByRadius({ radius: 20 })).rejects.toThrow(BadRequestException);
+
+    queryRaw.mockResolvedValueOnce([]);
+    await expect(service.searchByRadius({ search: 'Nowhere', radius: 20 })).rejects.toThrow(
+      BadRequestException,
     );
   });
 
@@ -897,6 +1177,35 @@ describe('AdvertService.listRecentSearches', () => {
     ]);
   });
 
+  it('collapses duplicate rows for the same user and search', async () => {
+    const { service, advertSearchHistory } = makeDeps();
+    const newer = new Date();
+    const older = new Date(newer.getTime() - 5000);
+    advertSearchHistory.findMany.mockResolvedValue([
+      {
+        id: 's2',
+        userId: 'manager1',
+        params: { search: 'Mumbai', industry: 'Food,Retail', brand_id: 'b1,b2' },
+        resultCount: 5,
+        preview: null,
+        createdAt: newer,
+      },
+      {
+        id: 's1',
+        userId: 'manager1',
+        params: { brand_id: 'b2,b1', industry: 'Retail,Food', search: 'Mumbai' },
+        resultCount: 4,
+        preview: null,
+        createdAt: older,
+      },
+    ]);
+
+    const rows = await service.listRecentSearches('manager1');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('s2');
+  });
+
   it('returns team-wide history for admins and own history for employees', async () => {
     const { service, advertSearchHistory } = makeDeps();
     advertSearchHistory.findMany.mockResolvedValue([]);
@@ -951,7 +1260,7 @@ describe('AdvertService.listRecentSearches', () => {
       mediaUrl: `s3://bucket/${id}.png`,
       mediaType: 'Image',
       location: 'POINT(77.5946 12.9716)',
-      distanceKm: 1.2,
+      distanceM: 1200,
       total: 5,
     });
     queryRaw.mockResolvedValue([row('a1'), row('a2'), row('a3'), row('a4'), row('a5')]);
@@ -959,7 +1268,7 @@ describe('AdvertService.listRecentSearches', () => {
     await service.searchByRadius({
       lat: 12.9716,
       lng: 77.5946,
-      radius: 5,
+      radius: 5000,
       page: 1,
       limit: 50,
       actor_id: 'manager1',

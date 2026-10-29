@@ -379,10 +379,12 @@ model Advert {
   version          CreativeVersion                      @relation(fields: [versionId], references: [id], onDelete: Cascade)
   location         Unsupported("geometry(Point, 4326)")
   addressText      String?                              @map("address_text")
-  radiusKm         Float?                               @map("radius_km")
+  radiusM          Float?                               @map("radius_m")
   status           AdvertStatus                         @default(SCHEDULED)
   startDate        DateTime                             @map("start_date")
   endDate          DateTime                             @map("end_date")
+  timeSlotStart    String?                              @map("time_slot_start")
+  timeSlotEnd      String?                              @map("time_slot_end")
   imageHash        String?                              @map("image_hash")
   upstreamAdvertId String?                              @unique @map("upstream_advert_id")
   cityName         String?                              @map("city_name")
@@ -391,6 +393,7 @@ model Advert {
 
   @@index([versionId])
   @@index([status])
+  @@index([timeSlotStart, timeSlotEnd])
 }
 
 // ---------------------------------------------------------------------------

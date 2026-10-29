@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsDate,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import { TIME_OF_DAY_PATTERN } from '../../advert/validators';
 
 export class CreativeScheduleInputDto {
   @ApiProperty({ description: 'Latitude of the site', minimum: -90, maximum: 90 })
@@ -33,6 +43,22 @@ export class CreativeScheduleInputDto {
   @IsDate()
   end_date!: Date;
 
+  @ApiPropertyOptional({
+    description:
+      'Recurring daily display window start (HH:mm). Supply together with time_slot_end.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_start must be HH:mm (00:00-23:59)' })
+  time_slot_start?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Recurring daily display window end (HH:mm). Supply together with time_slot_start.',
+  })
+  @IsOptional()
+  @Matches(TIME_OF_DAY_PATTERN, { message: 'time_slot_end must be HH:mm (00:00-23:59)' })
+  time_slot_end?: string;
+
   @ApiPropertyOptional({ description: 'Display city from upstream', maxLength: 200 })
   @IsOptional()
   @IsString()
@@ -46,14 +72,14 @@ export class CreativeScheduleInputDto {
   zone_name?: string;
 
   @ApiPropertyOptional({
-    description: 'Coverage radius in km for map display',
-    minimum: 0.01,
-    maximum: 500,
+    description: 'Coverage radius in metres for map display',
+    minimum: 1,
+    maximum: 500000,
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
-  @Max(500)
+  @Min(1)
+  @Max(500000)
   radius?: number;
 }

@@ -71,6 +71,24 @@ export class CreativeScheduleSummaryDto {
   @Expose()
   end_date!: Date;
 
+  @ApiPropertyOptional({
+    description: 'Recurring daily display window start (HH:mm)',
+    nullable: true,
+  })
+  @Expose()
+  time_slot_start!: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Recurring daily display window end (HH:mm)',
+    nullable: true,
+  })
+  @Expose()
+  time_slot_end!: string | null;
+
+  @ApiPropertyOptional({ description: 'Derived daily display window', nullable: true })
+  @Expose()
+  time_range!: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   @Expose()
   address_text!: string | null;
@@ -83,9 +101,9 @@ export class CreativeScheduleSummaryDto {
   @Expose()
   zone_name!: string | null;
 
-  @ApiPropertyOptional({ description: 'Coverage radius in km for map display', nullable: true })
+  @ApiPropertyOptional({ description: 'Coverage radius in metres for map display', nullable: true })
   @Expose()
-  radius_km!: number | null;
+  radius_m!: number | null;
 
   @ApiPropertyOptional({ description: 'WKT site location (where the ad will run)', nullable: true })
   @Expose()

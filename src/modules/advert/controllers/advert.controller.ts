@@ -122,9 +122,12 @@ export class AdvertController {
         row.status,
         row.address,
         row.location,
-        row.radius_km,
+        row.radius_m,
         row.start_date.toISOString(),
         row.end_date.toISOString(),
+        row.time_slot_start,
+        row.time_slot_end,
+        row.time_range,
         row.city,
         row.zone,
       ]
@@ -139,7 +142,7 @@ export class AdvertController {
       })
       .send(
         [
-          'id,version_id,creative,brand,status,address,location,radius_km,start_date,end_date,city,zone',
+          'id,version_id,creative,brand,status,address,location,radius_m,start_date,end_date,time_slot_start,time_slot_end,time_range,city,zone',
           ...lines,
         ].join('\n'),
       );

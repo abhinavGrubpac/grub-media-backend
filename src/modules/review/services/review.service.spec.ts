@@ -346,7 +346,7 @@ describe('CreativeService.createCreative', () => {
       address_text: 'MG Road',
       city_name: null,
       zone_name: null,
-      radius_km: 2.5,
+      radius_m: 2500,
       location: null,
     });
 
@@ -360,18 +360,18 @@ describe('CreativeService.createCreative', () => {
           lng: 77.5946,
           start_date: new Date('2026-11-01T00:00:00Z'),
           end_date: new Date('2026-11-30T00:00:00Z'),
-          radius: 2.5,
+          radius: 2500,
         },
       },
       'u1',
     );
 
     expect(adverts.scheduleVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ lat: 12.9716, radius: 2.5 }),
+      expect.objectContaining({ lat: 12.9716, radius: 2500 }),
       'u1',
     );
     expect(result.schedules).toHaveLength(1);
-    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_km: 2.5 });
+    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_m: 2500 });
   });
 
   it('rejects a schedule without initial_version', async () => {
@@ -832,7 +832,7 @@ describe('CreativeService.getCreative', () => {
               endDate: new Date('2026-11-30T00:00:00Z'),
               cityName: 'Bengaluru',
               zoneName: 'Central',
-              radiusKm: 2.5,
+              radiusM: 2500,
             },
           ],
         },
@@ -859,7 +859,7 @@ describe('CreativeService.getCreative', () => {
     expect(result.versions).toHaveLength(1);
     expect(result.agency).toMatchObject({ agency_name: 'Test Agency', city: 'Bengaluru' });
     expect(result.schedules).toHaveLength(1);
-    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_km: 2.5 });
+    expect(result.schedules?.[0]).toMatchObject({ advert_id: 'a1', radius_m: 2500 });
     expect(result.brand.flagged_by).toBe('Riya Sharma');
     expect(result.last_viewed_by).toBe('Aarav Mehta');
     expect(result.viewed_minutes_ago).toBe(0);
@@ -882,7 +882,7 @@ describe('CreativeService.getCreative', () => {
       endDate: new Date('2026-11-30T00:00:00Z'),
       cityName: city,
       zoneName: null,
-      radiusKm: null,
+      radiusM: null,
     });
     creative.findUnique.mockResolvedValue({
       ...creativeRow,

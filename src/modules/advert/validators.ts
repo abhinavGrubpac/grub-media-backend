@@ -49,6 +49,25 @@ export function isAdvertStatus(value: string): value is AdvertStatusType {
 }
 
 /**
+ * Normalizes a multi-select query value. Query strings can arrive as either a
+ * comma-separated string (`brand_id=a,b`) or repeated parameters (`brand_id=a&
+ * brand_id=b`). Empty values are removed and duplicates are collapsed while
+ * preserving order.
+ */
+export function normalizeMultiValue(value: string | string[] | null | undefined): string[] {
+  if (value === undefined || value === null) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return [
+    ...new Set(
+      values
+        .flatMap((entry) => String(entry).split(','))
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+/**
  * Upstream (agency portal) status aliases. The upstream enum uses
  * COMPLETED/CANCELLED where the government portal uses EXPIRED:
  * a finished flight maps to EXPIRED (neutral end-of-window), never to
@@ -166,4 +185,75 @@ export function assertDateRange(start: Date, end: Date): void {
   if (start.getTime() >= end.getTime()) {
     throw new BadRequestException('start_date must be before end_date');
   }
+}
+
+/**
+ * Daily display windows are fixed-width 24-hour strings. Fixed width keeps
+ * PostgreSQL text comparisons chronological (lexical order == time order).
+ */
+export const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export function isTimeOfDay(value: string): boolean {
+  return TIME_OF_DAY_PATTERN.test(value);
+}
+
+export function assertTimeOfDay(value: string, field = 'time'): string {
+  const normalized = value.trim();
+  if (!TIME_OF_DAY_PATTERN.test(normalized)) {
+    throw new BadRequestException(`${field} must be HH:mm (00:00-23:59)`);
+  }
+  return normalized;
+}
+
+/**
+ * Normalizes a stored recurring daily window. Both bounds are required when
+ * either is supplied; `00:00`–`00:00` is the legacy all-day spelling and is
+ * normalized to `00:00`–`23:59`. Same-day windows only (no overnight wrap).
+ */
+export function normalizeDailyTimeWindow(
+  start?: string | null,
+  end?: string | null,
+): { start: string; end: string } | null {
+  const hasStart = start !== undefined && start !== null && start.trim() !== '';
+  const hasEnd = end !== undefined && end !== null && end.trim() !== '';
+  if (!hasStart && !hasEnd) return null;
+  if (!hasStart || !hasEnd) {
+    throw new BadRequestException('time_slot_start and time_slot_end must be provided together');
+  }
+  const from = assertTimeOfDay(start as string, 'time_slot_start');
+  const to = assertTimeOfDay(end as string, 'time_slot_end');
+  if (from === '00:00' && to === '00:00') return { start: '00:00', end: '23:59' };
+  if (from >= to) {
+    throw new BadRequestException('time_slot_start must be before time_slot_end');
+  }
+  return { start: from, end: to };
+}
+
+/**
+ * Query-side daily-window filter. Unlike stored windows, either boundary may
+ * be supplied alone: start-only keeps windows ending at/after it; end-only
+ * keeps windows starting at/before it. Both bounds form an overlap test.
+ */
+export function normalizeDailyWindowFilter(
+  start?: string | null,
+  end?: string | null,
+): { start?: string; end?: string } | null {
+  const hasStart = start !== undefined && start !== null && start.trim() !== '';
+  const hasEnd = end !== undefined && end !== null && end.trim() !== '';
+  if (!hasStart && !hasEnd) return null;
+  const from = hasStart ? assertTimeOfDay(start as string, 'time_slot_start') : undefined;
+  const to = hasEnd ? assertTimeOfDay(end as string, 'time_slot_end') : undefined;
+  if (from !== undefined && to !== undefined) {
+    if (from === '00:00' && to === '00:00') return { start: '00:00', end: '23:59' };
+    if (from >= to) {
+      throw new BadRequestException('time_slot_start must be before time_slot_end');
+    }
+  }
+  return { start: from, end: to };
+}
+
+/** Display annotation for an advert's recurring daily window. */
+export function formatTimeRange(start?: string | null, end?: string | null): string | null {
+  if (!start || !end) return null;
+  return `${start} - ${end}`;
 }
