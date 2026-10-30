@@ -1,0 +1,358 @@
+{
+  "info": {
+    "name": "grub-media-backend — Employee Management",
+    "_postman_id": "grubpac-employee-management-v1",
+    "description": "Admin endpoints for creating, listing, updating, and managing employee status.\n\n**Setup:**\n1. Import `GrubPac Media - Local.postman_environment.json`\n2. Run Login from the Auth collection to populate `accessToken`\n3. Create an employee — the test script auto-saves its id as `{{userId}}`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "userId",  "value": "", "type": "string",
+      "description": "Auto-set by the Create Employee test script" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "List & Search",
+      "item": [
+        {
+          "name": "List All",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20&sortBy=createdAt&sortOrder=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "page",      "value": "1" },
+                { "key": "limit",     "value": "20" },
+                { "key": "sortBy",    "value": "createdAt",
+                  "description": "createdAt | updatedAt | email | firstName | lastName" },
+                { "key": "sortOrder", "value": "desc" },
+                { "key": "role",      "value": "", "disabled": true,
+                  "description": "SUPER_ADMIN | ADMIN | EMPLOYEE" },
+                { "key": "search",    "value": "", "disabled": true }
+              ]
+            },
+            "description": "✅ 200  { data: [...], meta: { page, limit, total, totalPages } }"
+          }
+        },
+        {
+          "name": "List Active",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=ACTIVE&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "ACTIVE" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Suspended",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=SUSPENDED&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "SUSPENDED" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" }
+              ]
+            },
+            "description": "SUSPENDED = login blocked, account recoverable via Activate."
+          }
+        },
+        {
+          "name": "List Dismissed",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?status=INACTIVE&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "status", "value": "INACTIVE" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" }
+              ]
+            },
+            "description": "INACTIVE = dismissed. Account still exists, login blocked.\nReactivate with PATCH /:id/activate."
+          }
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?search=john&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"],
+              "query": [
+                { "key": "search", "value": "john",
+                  "description": "Matches: email, firstName, lastName, employeeId, phoneNumber, organizationName" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "role",   "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "CRUD",
+      "item": [
+        {
+          "name": "Create Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.id) {",
+                  "  pm.collectionVariables.set('userId', json.data.id);",
+                  "  pm.environment.set('userId', json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"email\": \"jane.smith@grubpac.com\",\n  \"phoneNumber\": \"+919876543210\",\n  \"employeeId\": \"EMP001\",\n  \"jurisdiction\": \"North India\",\n  \"joiningDate\": \"2026-01-15\",\n  \"role\": \"EMPLOYEE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"]
+            },
+            "description": "password is optional — omit to auto-generate a secure temp password.\nEmployee must use Forgot Password to set their own before first login.\n\n✅ 201  { data: UserResponseDto }  → id saved as {{userId}}\n❌ 409  Email already exists\n❌ 403  ADMIN trying to create SUPER_ADMIN\n❌ 400  Validation error (email format, password strength, phone E.164)"
+          }
+        },
+        {
+          "name": "Create Employee (with password)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Bob\",\n  \"lastName\": \"Jones\",\n  \"email\": \"bob.jones@grubpac.com\",\n  \"password\": \"Temp@Pass123\",\n  \"employeeId\": \"EMP002\",\n  \"role\": \"EMPLOYEE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users"]
+            }
+          }
+        },
+        {
+          "name": "Get Employee by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}"]
+            },
+            "description": "✅ 200  { data: UserResponseDto }\n❌ 404  User not found"
+          }
+        },
+        {
+          "name": "Update Employee",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"phoneNumber\": \"+919876543210\",\n  \"employeeId\": \"EMP001-A\",\n  \"jurisdiction\": \"South India\",\n  \"joiningDate\": \"2026-02-01\",\n  \"role\": \"EMPLOYEE\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}"]
+            },
+            "description": "All fields optional. Status changes go through dedicated endpoints only.\npassword cannot be changed here — use POST /profile/password.\n\n✅ 200  { data: UserResponseDto }\n❌ 403  ADMIN trying to edit SUPER_ADMIN\n❌ 403  ADMIN trying to promote to SUPER_ADMIN\n❌ 404  User not found"
+          }
+        },
+        {
+          "name": "Delete Employee (soft)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}"]
+            },
+            "description": "Sets deletedAt — user disappears from all listings permanently.\n\n✅ 200  { data: null }\n❌ 403  Cannot delete your own account\n❌ 403  ADMIN cannot delete SUPER_ADMIN\n❌ 404  User not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Status Transitions",
+      "item": [
+        {
+          "name": "Suspend",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/suspend",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}","suspend"]
+            },
+            "description": "Sets status → SUSPENDED. Login blocked immediately. Reversible via Activate.\n\n✅ 200  { data: UserResponseDto (status: SUSPENDED) }\n❌ 400  User is already suspended\n❌ 403  Cannot suspend your own account\n❌ 403  ADMIN cannot suspend SUPER_ADMIN\n❌ 404  User not found"
+          }
+        },
+        {
+          "name": "Activate",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}","activate"]
+            },
+            "description": "Sets status → ACTIVE. Works on both SUSPENDED and INACTIVE (dismissed) users.\n\n✅ 200  { data: UserResponseDto (status: ACTIVE) }\n❌ 400  User is already active\n❌ 403  ADMIN cannot activate SUPER_ADMIN\n❌ 404  User not found"
+          }
+        },
+        {
+          "name": "Dismiss",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}/dismiss",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","{{userId}}","dismiss"]
+            },
+            "description": "Sets status → INACTIVE. Account persists in DB but login blocked.\nDifferent from Delete — account can be reactivated later.\n\n✅ 200  { data: UserResponseDto (status: INACTIVE) }\n❌ 400  User is already inactive\n❌ 403  Cannot dismiss your own account\n❌ 403  ADMIN cannot dismiss SUPER_ADMIN\n❌ 404  User not found"
+          }
+        },
+        {
+          "name": "Bulk Activate",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"user-id-1\",\n    \"user-id-2\",\n    \"user-id-3\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/bulk-activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","bulk-activate"]
+            },
+            "description": "Lifts both SUSPENDED and INACTIVE users to ACTIVE in one call.\nIDs already ACTIVE are silently skipped — no error.\n\n✅ 200  { data: { activated: 3 } }\n❌ 400  ids array must not be empty"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Export",
+      "item": [
+        {
+          "name": "Export All",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"all\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            },
+            "description": "Downloads a CSV file.\nColumns: id, email, firstName, lastName, phoneNumber, employeeId, jurisdiction, role, status, joiningDate, createdAt"
+          }
+        },
+        {
+          "name": "Export Active",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"active\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            }
+          }
+        },
+        {
+          "name": "Export Suspended",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"suspended\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            }
+          }
+        },
+        {
+          "name": "Export Dismissed",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"dismissed\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            }
+          }
+        },
+        {
+          "name": "Export Selected IDs",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"selected\",\n  \"ids\": [\"user-id-1\", \"user-id-2\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            },
+            "description": "ids array is required when type is \"selected\".\n\n❌ 400  ids required for type=selected"
+          }
+        },
+        {
+          "name": "Export with Search + Role Filter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"all\",\n  \"role\": \"EMPLOYEE\",\n  \"search\": \"john\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/export/csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","users","export","csv"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

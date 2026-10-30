@@ -1,0 +1,15 @@
+CREATE TABLE "Permission" ("id" TEXT NOT NULL, "module" TEXT NOT NULL, "page" TEXT NOT NULL, "action" TEXT NOT NULL, "custom" BOOLEAN NOT NULL DEFAULT false, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "Permission_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "Permission_module_page_action_key" ON "Permission"("module","page","action");
+CREATE TABLE "PermissionBundle" ("id" TEXT NOT NULL, "name" TEXT NOT NULL, "description" TEXT, "createdBy" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PermissionBundle_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "PermissionBundle_createdBy_name_key" ON "PermissionBundle"("createdBy","name");
+CREATE TABLE "BundlePermission" ("bundleId" TEXT NOT NULL, "permissionId" TEXT NOT NULL, CONSTRAINT "BundlePermission_pkey" PRIMARY KEY ("bundleId","permissionId"));
+CREATE TABLE "UserBundle" ("userId" TEXT NOT NULL, "bundleId" TEXT NOT NULL, "assignedBy" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "UserBundle_pkey" PRIMARY KEY ("userId","bundleId"));
+CREATE TABLE "AdminEmployeeAssignment" ("employeeId" TEXT NOT NULL, "adminId" TEXT NOT NULL, "assignedBy" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "AdminEmployeeAssignment_pkey" PRIMARY KEY ("employeeId"));
+CREATE UNIQUE INDEX "AdminEmployeeAssignment_employeeId_key" ON "AdminEmployeeAssignment"("employeeId");
+CREATE INDEX "AdminEmployeeAssignment_adminId_idx" ON "AdminEmployeeAssignment"("adminId");
+ALTER TABLE "BundlePermission" ADD CONSTRAINT "BundlePermission_bundleId_fkey" FOREIGN KEY ("bundleId") REFERENCES "PermissionBundle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "BundlePermission" ADD CONSTRAINT "BundlePermission_permissionId_fkey" FOREIGN KEY ("permissionId") REFERENCES "Permission"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserBundle" ADD CONSTRAINT "UserBundle_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserBundle" ADD CONSTRAINT "UserBundle_bundleId_fkey" FOREIGN KEY ("bundleId") REFERENCES "PermissionBundle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AdminEmployeeAssignment" ADD CONSTRAINT "AdminEmployeeAssignment_adminId_fkey" FOREIGN KEY ("adminId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AdminEmployeeAssignment" ADD CONSTRAINT "AdminEmployeeAssignment_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

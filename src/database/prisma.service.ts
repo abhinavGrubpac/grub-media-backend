@@ -10,6 +10,12 @@ export function applyNotDeleted(where: Prisma.UserWhereInput | undefined): Prism
   return { deletedAt: null, ...(where ?? {}) };
 }
 
+export function applyOrgNotDeleted(
+  where: Prisma.OrganizationWhereInput | undefined,
+): Prisma.OrganizationWhereInput {
+  return { deletedAt: null, ...(where ?? {}) };
+}
+
 /**
  * PrismaService extends PrismaClient and exposes `client` — an extended client
  * that transparently filters out soft-deleted User rows for the default read
@@ -46,6 +52,24 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         },
         count({ args, query }) {
           args.where = applyNotDeleted(args.where);
+          return query(args);
+        },
+      },
+      organization: {
+        findMany({ args, query }) {
+          args.where = applyOrgNotDeleted(args.where);
+          return query(args);
+        },
+        findFirst({ args, query }) {
+          args.where = applyOrgNotDeleted(args.where);
+          return query(args);
+        },
+        findFirstOrThrow({ args, query }) {
+          args.where = applyOrgNotDeleted(args.where);
+          return query(args);
+        },
+        count({ args, query }) {
+          args.where = applyOrgNotDeleted(args.where);
           return query(args);
         },
       },

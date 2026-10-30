@@ -1,0 +1,248 @@
+{
+  "info": {
+    "name": "grub-media-backend — Organization Management",
+    "_postman_id": "grubpac-organization-management-v1",
+    "description": "Admin endpoints for creating, listing, updating, uploading logos, and managing organisation status.\n\n**Setup:**\n1. Import `GrubPac Media - Local.postman_environment.json`\n2. Run Login from the Auth collection to populate `accessToken`\n3. Create an organisation — the test script auto-saves its id as `{{orgId}}`\n\n**Role rules:**\n- `SUPER_ADMIN` — full access (create, suspend, activate, delete)\n- `ADMIN` — list, read, update, upload logo (cannot create/suspend/delete)\n- `EMPLOYEE` — no access (403 on all endpoints)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "orgId",   "value": "", "type": "string",
+      "description": "Auto-set by the Create Organisation test script" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "List & Search",
+      "item": [
+        {
+          "name": "List All",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"],
+              "query": [
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" },
+                { "key": "status", "value": "", "disabled": true,
+                  "description": "ACTIVE | SUSPENDED" },
+                { "key": "search", "value": "", "disabled": true,
+                  "description": "Matches name, regNumber, jurisdiction" }
+              ]
+            },
+            "description": "✅ 200  { data: [...], meta: { page, limit, total, totalPages } }\n❌ 403  EMPLOYEE role has no access"
+          }
+        },
+        {
+          "name": "List Active",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?status=ACTIVE&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"],
+              "query": [
+                { "key": "status", "value": "ACTIVE" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Suspended",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?status=SUSPENDED&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"],
+              "query": [
+                { "key": "status", "value": "SUSPENDED" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" }
+              ]
+            },
+            "description": "SUSPENDED orgs cannot be edited by ADMIN — only SUPER_ADMIN."
+          }
+        },
+        {
+          "name": "Search by Name / RegNumber / Jurisdiction",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?search=grubpac&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"],
+              "query": [
+                { "key": "search", "value": "grubpac",
+                  "description": "Case-insensitive. Matches: name, regNumber, jurisdiction" },
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "CRUD",
+      "item": [
+        {
+          "name": "Create Organisation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.id) {",
+                  "  pm.collectionVariables.set('orgId', json.data.id);",
+                  "  pm.environment.set('orgId', json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"GrubPac Foods Pvt Ltd\",\n  \"regNumber\": \"DP1234\",\n  \"jurisdiction\": \"Maharashtra\",\n  \"logoUrl\": \"https://cdn.example.com/logos/grubpac.png\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"]
+            },
+            "description": "SUPER_ADMIN only. All fields except `name` are optional.\n\n✅ 201  { data: OrganizationResponseDto }  → id saved as {{orgId}}\n❌ 409  regNumber already in use\n❌ 403  ADMIN or EMPLOYEE role\n❌ 400  Validation error (name empty, logoUrl not HTTPS, regNumber too long)"
+          }
+        },
+        {
+          "name": "Create Organisation (minimal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Quick Corp\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations"]
+            },
+            "description": "Only `name` is required."
+          }
+        },
+        {
+          "name": "Get Organisation by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}"]
+            },
+            "description": "✅ 200  { data: OrganizationResponseDto }  includes userCount\n❌ 404  Organisation not found"
+          }
+        },
+        {
+          "name": "Update Organisation",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"GrubPac Foods (Updated) Pvt Ltd\",\n  \"regNumber\": \"DP1234-B\",\n  \"jurisdiction\": \"Karnataka\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}"]
+            },
+            "description": "All fields optional — only supplied fields are updated.\nADMIN cannot edit a SUSPENDED organisation (403).\n\n✅ 200  { data: OrganizationResponseDto }\n❌ 403  ADMIN trying to edit a SUSPENDED org\n❌ 409  regNumber already in use by another org\n❌ 404  Organisation not found"
+          }
+        },
+        {
+          "name": "Delete Organisation (soft)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}"]
+            },
+            "description": "SUPER_ADMIN only. Sets deletedAt — org disappears from all listings.\nUsers with this orgId retain their organizationId FK but the org is hidden.\n\n✅ 200  { data: null }\n❌ 403  ADMIN or EMPLOYEE role\n❌ 404  Organisation not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logo Upload",
+      "item": [
+        {
+          "name": "Upload Logo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "JPEG, PNG, or WebP — max 5 MB"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/logo",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}","logo"]
+            },
+            "description": "ADMIN+ can upload/replace the logo. Uploads to S3 and updates logoUrl on the org.\nOld logo is deleted from S3 automatically.\n\nS3 key: `{env}/org-logos/{orgId}/{yyyy}/{mm}/{dd}/{uuid}.{ext}`\n\n✅ 200  { data: OrganizationResponseDto }  with updated logoUrl\n❌ 400  No file supplied\n❌ 415  Unsupported file type (only JPEG/PNG/WebP)\n❌ 413  File exceeds 5 MB\n❌ 404  Organisation not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Status Transitions",
+      "item": [
+        {
+          "name": "Suspend",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/suspend",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}","suspend"]
+            },
+            "description": "SUPER_ADMIN only. Sets status → SUSPENDED.\nADMINs can still read the org but cannot edit it.\n\n✅ 200  { data: OrganizationResponseDto (status: SUSPENDED) }\n❌ 400  Organisation is already suspended\n❌ 403  ADMIN or EMPLOYEE role\n❌ 404  Organisation not found"
+          }
+        },
+        {
+          "name": "Activate",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/{{orgId}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","v1","organizations","{{orgId}}","activate"]
+            },
+            "description": "SUPER_ADMIN only. Sets status → ACTIVE.\n\n✅ 200  { data: OrganizationResponseDto (status: ACTIVE) }\n❌ 400  Organisation is already active\n❌ 403  ADMIN or EMPLOYEE role\n❌ 404  Organisation not found"
+          }
+        }
+      ]
+    }
+  ]
+}

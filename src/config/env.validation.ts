@@ -72,6 +72,48 @@ export class EnvironmentVariables {
   @IsInt()
   THROTTLE_LOGIN_LOCK_MAX?: number;
 
+  // KAFKA (Redpanda-compatible broker). Set KAFKA_ENABLED=false (or omit
+  // REDPANDA_BROKERS) to run without Kafka — producer, relay, and consumers
+  // all become no-ops. Set KAFKA_ENABLED=true or provide REDPANDA_BROKERS
+  // to enable. Safe local defaults live in src/config/kafka.config.ts.
+  @IsOptional()
+  @IsString()
+  KAFKA_ENABLED?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_BROKERS?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_USERNAME?: string;
+
+  @IsOptional()
+  @IsString()
+  REDPANDA_SASL_PASSWORD?: string;
+
+  // STORAGE (S3 media bucket). All optional: absent credentials switch the
+  // storage layer to local mock mode (see src/config/storage.config.ts).
+  @IsOptional()
+  @IsString()
+  AWS_S3_BUCKET?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_ACCESS_KEY_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_SECRET_ACCESS_KEY?: string;
+
   // SMTP_* are optional; the app starts without them (emails will fail at send time).
   @IsOptional()
   @IsString()
@@ -100,6 +142,21 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   SMTP_SECURE?: string;
+
+  // ── S3 / Object Storage ───────────────────────────────────
+  // All optional — app starts without them; uploads return 500 if missing.
+  // storage.config.ts reads AWS_REGION; s3.config.ts reads AWS_S3_REGION.
+  @IsOptional()
+  @IsString()
+  AWS_S3_REGION?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_S3_ENDPOINT?: string;
+
+  @IsOptional()
+  @IsString()
+  AWS_CLOUDFRONT_URL?: string;
 }
 
 export function validate(config: Record<string, unknown>): EnvironmentVariables {

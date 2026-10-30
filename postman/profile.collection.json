@@ -1,0 +1,78 @@
+{
+  "info": {
+    "name": "grub-media-backend — Profile",
+    "description": "Self-service profile endpoints. All requests require a valid access token from the active Postman environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [{ "key": "baseUrl", "value": "http://localhost:3000" }],
+  "item": [
+    {
+      "name": "My Profile",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "profile"] }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "profile"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Alex\",\n  \"lastName\": \"Morgan\",\n  \"logoUrl\": \"https://example.com/profile.jpg\",\n  \"jurisdiction\": \"California\"\n}"
+            },
+            "description": "All fields are optional. logoUrl must be an HTTPS URL."
+          }
+        },
+        {
+          "name": "Request Email or Phone Change OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/otp-request", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "profile", "otp-request"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\"\n}"
+            },
+            "description": "Set type to email or phone and value to the new contact detail."
+          }
+        },
+        {
+          "name": "Verify Email or Phone Change OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/otp-verify", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "profile", "otp-verify"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"value\": \"new-address@grubpac.com\",\n  \"code\": \"1234\"\n}"
+            },
+            "description": "Use the same type and value submitted to the OTP request endpoint, plus the 4-digit code received."
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/profile/password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "profile", "password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Str0ngPass1\",\n  \"newPassword\": \"NewStr0ngPass1\"\n}"
+            },
+            "description": "New password must be 8–72 characters and include lowercase, uppercase, and numeric characters."
+          }
+        }
+      ]
+    }
+  ]
+}

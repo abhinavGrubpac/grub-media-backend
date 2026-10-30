@@ -12,11 +12,22 @@ import { validate } from './config/env.validation';
 import { PrismaModule } from './database/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { REDIS_CLIENT } from './redis/redis.service';
+import { FaultTolerantThrottlerStorage } from './redis/fault-tolerant-throttler.storage';
 import { AuthModule } from './modules/auth/auth.module';
 import { MailerModule } from './modules/mailer/mailer.module';
+import { StorageModule } from './modules/storage/storage.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
+import { EventsModule } from './modules/events/events.module';
+import { ReviewModule } from './modules/review/review.module';
 import { HelpModule } from './modules/help/help.module';
+// Advert control + test intake (three-portal monorepo intake pending).
+import { AdvertModule } from './modules/advert/advert.module';
+import { IntakeModule } from './modules/intake/intake.module';
+import { BrandModule } from './modules/brand/brand.module';
+import { ReferenceModule } from './modules/reference/reference.module';
+import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -30,6 +41,11 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
       isGlobal: true,
       load: configLoaders,
       validate,
+      // NOTE: @nestjs/config v4 merges files so the FIRST listed file wins
+      // (verified against node_modules/@nestjs/config v4.0.4 loadEnvFile).
+      // .env.local therefore overrides .env for local runs. Where .env.local
+      // is absent (CI/prod — it is gitignored and never deployed) behavior is
+      // identical to a single .env.
       envFilePath: ['.env.local', '.env'],
     }),
     LoggerModule.forRootAsync({
@@ -66,8 +82,8 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     ThrottlerModule.forRootAsync({
       inject: [ConfigService, REDIS_CLIENT],
       useFactory: (config: ConfigService, redis: Redis | null) => {
-        // Use Redis storage if available, otherwise use in-memory fallback
-        const storage = redis ? new ThrottlerStorageRedisService(redis) : undefined;
+        const redisStorage = redis ? new ThrottlerStorageRedisService(redis) : undefined;
+        const storage = new FaultTolerantThrottlerStorage(redisStorage);
 
         return {
           throttlers: [
@@ -83,10 +99,19 @@ import { REQUEST_ID_HEADER } from './common/constants/request.constants';
     PrismaModule,
     RedisModule,
     MailerModule,
+    StorageModule,
     AuthModule,
     UsersModule,
+    UploadModule,
+    OrganizationsModule,
     HealthModule,
+    EventsModule,
+    ReviewModule,
     HelpModule,
+    AdvertModule,
+    IntakeModule,
+    BrandModule,
+    ReferenceModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize.
