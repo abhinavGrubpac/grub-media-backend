@@ -298,6 +298,57 @@ describe('CreativeService.createCreative', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
+  it('replays the existing creative for a repeated external ref', async () => {
+    const { service, brand, creative, creativeVersion } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.findUnique.mockResolvedValue({
+      ...creativeRow,
+      externalRefId: 'EXT-1',
+      brand: brandRow,
+      versions: [{ ...versionRow, status: 'ON_HOLD', actions: [], adverts: [] }],
+    });
+
+    const result = await service.createCreative(
+      { brand_id: 'brand1', creative_name: 'Festive Ad', external_ref_id: ' EXT-1 ' },
+      'u1',
+    );
+
+    expect(creative.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { brandId_externalRefId: { brandId: 'brand1', externalRefId: 'EXT-1' } },
+      }),
+    );
+    expect(creative.create).not.toHaveBeenCalled();
+    expect(creativeVersion.create).not.toHaveBeenCalled();
+    expect(result.id).toBe('c1');
+    expect(result.latest_version?.status).toBe('ON_HOLD');
+  });
+
+  it('replays the winning row when a concurrent create hits the unique ref', async () => {
+    const { service, brand, creative } = makeDeps();
+    brand.findUnique.mockResolvedValue(brandRow);
+    creative.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      ...creativeRow,
+      externalRefId: 'EXT-1',
+      brand: brandRow,
+      versions: [],
+    });
+    creative.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.19.3',
+      }),
+    );
+
+    const result = await service.createCreative(
+      { brand_id: 'brand1', creative_name: 'Festive Ad', external_ref_id: 'EXT-1' },
+      'u1',
+    );
+
+    expect(creative.create).toHaveBeenCalledTimes(1);
+    expect(result.id).toBe('c1');
+  });
+
   it('creates the thread alone without initial_version', async () => {
     const { service, brand, creative, creativeVersion } = makeDeps();
     brand.findUnique.mockResolvedValue(brandRow);
@@ -320,10 +371,14 @@ describe('CreativeService.createCreative', () => {
       {
         brand_id: 'brand1',
         creative_name: 'Festive Ad',
+        external_ref_id: ' EXT-2 ',
         initial_version: { media_url: 's3://b/a.png', media_type: 'Image' },
       },
       'u1',
     );
+    expect(creative.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ externalRefId: 'EXT-2' }),
+    });
     expect(creativeVersion.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ versionNumber: 1, status: 'PENDING', createdBy: 'u1' }),

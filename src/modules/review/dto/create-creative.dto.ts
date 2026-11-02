@@ -49,7 +49,8 @@ export class CreateCreativeDto {
   creative_name!: string;
 
   @ApiPropertyOptional({
-    description: 'Optional external reference for reconciliation',
+    description:
+      'Optional external reference for reconciliation. Unique per brand: repeating a create with the same ref returns the existing creative instead of creating a duplicate.',
     maxLength: 100,
   })
   @IsOptional()

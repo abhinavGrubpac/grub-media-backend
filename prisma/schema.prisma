@@ -284,6 +284,9 @@ model Creative {
   lastViewedAt       DateTime?
   versions           CreativeVersion[]
 
+  // A brand's external ref is the creative's stable identity across retries
+  // and reconciliation. NULLs stay unconstrained (creatives without a ref).
+  @@unique([brandId, externalRefId], map: "Creative_brandId_externalRefId_key")
   @@index([brandId])
 }
 
@@ -542,7 +545,7 @@ model Log {
 }
 
 model LogCategory {
-  id       Int         @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
   typeEnum LogType
   name     String
   /// S3 object key/path — never the binary.

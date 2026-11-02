@@ -167,6 +167,13 @@ type CreativeWithBrandAndVersions = Prisma.CreativeGetPayload<{
   include: { brand: true; versions: { include: { actions: true } } };
 }>;
 
+type CreativeWithBrandVersionsAndAdverts = Prisma.CreativeGetPayload<{
+  include: {
+    brand: true;
+    versions: { include: { actions: true; adverts: true } };
+  };
+}>;
+
 /**
  * Creative review lifecycle (REQUIREMENTS.md §3.1, WORKFLOWS.md §1).
  *
@@ -307,89 +314,117 @@ export class CreativeService {
     if (dto.schedule && !dto.initial_version) {
       throw new BadRequestException('schedule needs initial_version: nothing to book yet');
     }
-    const { creative, version } = await this.prisma.$transaction(async (tx) => {
-      let created;
-      try {
-        created = await tx.creative.create({
-          data: {
-            brandId: dto.brand_id,
-            creativeName: dto.creative_name,
-            externalRefId: dto.external_ref_id ?? null,
+    // external_ref_id is the creative's reconciliation identity: retries and
+    // double-submits must resolve to the same thread instead of creating a
+    // second row that the review UI renders as a duplicate.
+    const externalRefId = dto.external_ref_id?.trim() || null;
+    if (externalRefId) {
+      const existing = await this.findCreativeByExternalRef(dto.brand_id, externalRefId);
+      if (existing) return this.toCreativeReplayResponse(existing);
+    }
+
+    let createdThread: {
+      creative: Prisma.CreativeGetPayload<object>;
+      version: Prisma.CreativeVersionGetPayload<object> | null;
+    };
+    try {
+      createdThread = await this.prisma.$transaction(async (tx) => {
+        let created;
+        try {
+          created = await tx.creative.create({
+            data: {
+              brandId: dto.brand_id,
+              creativeName: dto.creative_name,
+              externalRefId,
+            },
+          });
+        } catch (err) {
+          // Brand deleted between the existence check and the write (or a
+          // caller-supplied id that resolved differently) surfaces as P2003 —
+          // translate it to 404 instead of leaking a 500.
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+            throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
+          }
+          throw err;
+        }
+        await this.outbox.emitInTx(tx, {
+          eventType: EventTypes.creativeCreated,
+          entityType: 'Creative',
+          entityId: created.id,
+          actorId,
+          key: created.id,
+          payload: {
+            creative_id: created.id,
+            brand_id: created.brandId,
+            creative_name: created.creativeName,
           },
         });
-      } catch (err) {
-        // Brand deleted between the existence check and the write (or a
-        // caller-supplied id that resolved differently) surfaces as P2003 —
-        // translate it to 404 instead of leaking a 500.
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
-          throw new NotFoundException(`Brand with ID ${dto.brand_id} not found`);
-        }
-        throw err;
-      }
-      await this.outbox.emitInTx(tx, {
-        eventType: EventTypes.creativeCreated,
-        entityType: 'Creative',
-        entityId: created.id,
-        actorId,
-        key: created.id,
-        payload: {
-          creative_id: created.id,
-          brand_id: created.brandId,
-          creative_name: created.creativeName,
-        },
-      });
 
-      if (!dto.initial_version) return { creative: created, version: null };
+        if (!dto.initial_version) return { creative: created, version: null };
 
-      const createdVersion = await tx.creativeVersion.create({
-        data: {
-          creativeId: created.id,
-          versionNumber: 1,
-          mediaUrl: dto.initial_version.media_url,
-          mediaType: dto.initial_version.media_type,
-          mediaName: dto.initial_version.media_name ?? null,
-          fileSizeBytes: dto.initial_version.file_size_bytes ?? null,
-          status: initialStatus,
-          createdBy: actorId,
-        },
-      });
-      await tx.creative.update({
-        where: { id: created.id },
-        data: { currentVersionId: createdVersion.id },
-      });
-      await this.outbox.emitInTx(tx, {
-        eventType: EventTypes.versionUploaded,
-        entityType: 'CreativeVersion',
-        entityId: createdVersion.id,
-        actorId,
-        key: created.id,
-        payload: {
-          creative_id: created.id,
-          version_id: createdVersion.id,
-          version_number: 1,
-          media_url: createdVersion.mediaUrl,
-          media_type: createdVersion.mediaType,
-          media_name: createdVersion.mediaName ?? null,
-          auto_approved: autoApprove,
-          notes: dto.initial_version.notes ?? null,
-        },
-      });
-      if (autoApprove) {
+        const createdVersion = await tx.creativeVersion.create({
+          data: {
+            creativeId: created.id,
+            versionNumber: 1,
+            mediaUrl: dto.initial_version.media_url,
+            mediaType: dto.initial_version.media_type,
+            mediaName: dto.initial_version.media_name ?? null,
+            fileSizeBytes: dto.initial_version.file_size_bytes ?? null,
+            status: initialStatus,
+            createdBy: actorId,
+          },
+        });
+        await tx.creative.update({
+          where: { id: created.id },
+          data: { currentVersionId: createdVersion.id },
+        });
         await this.outbox.emitInTx(tx, {
-          eventType: EventTypes.reviewAutoApproved,
+          eventType: EventTypes.versionUploaded,
           entityType: 'CreativeVersion',
           entityId: createdVersion.id,
           actorId,
           key: created.id,
           payload: {
-            version_id: createdVersion.id,
             creative_id: created.id,
-            reason: 'brand.auto_approve',
+            version_id: createdVersion.id,
+            version_number: 1,
+            media_url: createdVersion.mediaUrl,
+            media_type: createdVersion.mediaType,
+            media_name: createdVersion.mediaName ?? null,
+            auto_approved: autoApprove,
+            notes: dto.initial_version.notes ?? null,
           },
         });
+        if (autoApprove) {
+          await this.outbox.emitInTx(tx, {
+            eventType: EventTypes.reviewAutoApproved,
+            entityType: 'CreativeVersion',
+            entityId: createdVersion.id,
+            actorId,
+            key: created.id,
+            payload: {
+              version_id: createdVersion.id,
+              creative_id: created.id,
+              reason: 'brand.auto_approve',
+            },
+          });
+        }
+        return { creative: created, version: createdVersion };
+      });
+    } catch (err) {
+      // Two concurrent creates with the same external ref: the unique index
+      // lets one win; the loser replays the winner instead of surfacing 500.
+      if (
+        externalRefId &&
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        const existing = await this.findCreativeByExternalRef(dto.brand_id, externalRefId);
+        if (existing) return this.toCreativeReplayResponse(existing);
       }
-      return { creative: created, version: createdVersion };
-    });
+      throw err;
+    }
+    const { creative, version } = createdThread;
     const agency = brand.upstreamAgencyId
       ? await this.prisma.client.agencyRef.findUnique({
           where: { upstreamAgencyId: brand.upstreamAgencyId },
@@ -1154,6 +1189,67 @@ export class CreativeService {
       creative: this.toCreativeResponse({ ...creative, brand, versions: [] }, new Map()),
       created: false,
     };
+  }
+
+  /**
+   * Idempotency lookup for operator-created creatives. Scoped to the brand so
+   * the same external ref may be reused by a different brand.
+   */
+  private async findCreativeByExternalRef(
+    brandId: string,
+    externalRefId: string,
+  ): Promise<CreativeWithBrandVersionsAndAdverts | null> {
+    return this.prisma.client.creative.findUnique({
+      where: { brandId_externalRefId: { brandId, externalRefId } },
+      include: {
+        brand: true,
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+          include: { actions: { orderBy: { createdAt: 'asc' } }, adverts: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Response for a replayed create. Mirrors createCreative's shape (latest
+   * version, full thread, schedules) rather than returning a partial row.
+   */
+  private async toCreativeReplayResponse(
+    creative: CreativeWithBrandVersionsAndAdverts,
+  ): Promise<CreativeResponseDto> {
+    const agencyId = creative.upstreamAgencyId ?? creative.brand.upstreamAgencyId;
+    const agencies = await this.fetchAgencies([agencyId]);
+    const advertIds = creative.versions.flatMap((version) =>
+      version.adverts.map((advert) => advert.id),
+    );
+    const locations = await this.fetchAdvertLocations(advertIds);
+    const base = this.toCreativeResponse(creative, new Map(), agencies);
+    return plainToInstance(
+      CreativeResponseDto,
+      {
+        ...base,
+        versions: creative.versions.map((version) => this.toVersionResponse(version, new Map())),
+        schedules: creative.versions.flatMap((version) =>
+          version.adverts.map((advert) => ({
+            advert_id: advert.id,
+            version_id: version.id,
+            status: advert.status,
+            start_date: advert.startDate,
+            end_date: advert.endDate,
+            time_slot_start: advert.timeSlotStart ?? null,
+            time_slot_end: advert.timeSlotEnd ?? null,
+            time_range: formatTimeRange(advert.timeSlotStart, advert.timeSlotEnd),
+            address_text: advert.addressText,
+            city_name: advert.cityName,
+            zone_name: advert.zoneName,
+            radius_m: advert.radiusM ?? null,
+            location: locations.get(advert.id) ?? null,
+          })),
+        ),
+      },
+      { excludeExtraneousValues: true },
+    );
   }
 
   private collectActorIds(
